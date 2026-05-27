@@ -1,0 +1,19 @@
+curl ^"https://10.220.50.9:31943/rest/oss/access/fars/v1/traceresult/query/filter-by-cols?nocache=1779892943000^" ^
+  -H ^"Accept: application/json, text/plain, */*^" ^
+  -H ^"Accept-Language: en-US,en;q=0.9^" ^
+  -H ^"Connection: keep-alive^" ^
+  -H ^"Content-Type: application/json^" ^
+  -b ^"locale=en-us; user_time_a_lang=; user_digital_format=^%^2C^%^23^%^230.00; delimiter=-; format=yyyy-MM-dd^%^20HH^%^3Amm^%^3Ass; timezoneoffset=-180; user_time_show_dst=1; timezone=America^%^2FSao_Paulo; timemode=client; multiLanguage=false; bspsession=x-irdfryamcb1ic6qnqorxdh5hs59iel6lup1gnupc1j1gjss9c4innxk72lin9drv856pg749juk6fwryk8illinzkb2p5iilnzqptd2n3t1iqkhe9hc8ljc4ddrw2k45^" ^
+  -H ^"Origin: https://10.220.50.9:31943^" ^
+  -H ^"Referer: https://10.220.50.9:31943/omc/farswebsite/index.html?noCache1725^&refr-flags=e^&noAutoLoadPIU^&loadTopPIU=refr,message-transform^" ^
+  -H ^"Sec-Fetch-Dest: empty^" ^
+  -H ^"Sec-Fetch-Mode: cors^" ^
+  -H ^"Sec-Fetch-Site: same-origin^" ^
+  -H ^"Sec-GPC: 1^" ^
+  -H ^"User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36^" ^
+  -H ^"roarand: cd8867dd74de0bc0816c90e5089957e4573a3eaac77c6f66^" ^
+  -H ^"sec-ch-ua: ^\^"Chromium^\^";v=^\^"148^\^", ^\^"Brave^\^";v=^\^"148^\^", ^\^"Not/A)Brand^\^";v=^\^"99^\^"^" ^
+  -H ^"sec-ch-ua-mobile: ?0^" ^
+  -H ^"sec-ch-ua-platform: ^\^"Windows^\^"^" ^
+  --data-raw ^"^{^\^"colFilterDto^\^":^{^\^"colFltExpSeq^\^":^[^{^\^"fieldId^\^":^\^"Message Type^\^",^\^"value^\^":^\^"RRC_MEAS_RPRT^\^",^\^"operator^\^":^{^\^"op^\^":0^}^}^],^\^"signalList^\^":^[^],^\^"hasStartTime^\^":false,^\^"startTime^\^":^\^"2026-04-01 12:53:08^\^",^\^"hasEndTime^\^":false,^\^"endTime^\^":^\^"2026-05-27 11:41:19^\^",^\^"isReverse^\^":false^},^\^"pageDto^\^":^{^\^"sqlColumnName^\^":^\^"Time^\^",^\^"isAscend^\^":false,^\^"taskId^\^":1925,^\^"msgId^\^":4201005,^\^"comparisonMsgId^\^":-1,^\^"startRow^\^":0,^\^"pageSize^\^":1000,^\^"templateName^\^":^[^],^\^"isSetBenchMarkTime^\^":false,^\^"benchMarkTimeRowNo^\^":-1^}^}^" ^
+  --insecure

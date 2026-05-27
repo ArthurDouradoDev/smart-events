@@ -1,0 +1,5 @@
+pywebview>=4.4.1
+requests>=2.31.0
+schedule>=1.2.1
+watchdog>=3.0.0
+playwright>=1.40.0

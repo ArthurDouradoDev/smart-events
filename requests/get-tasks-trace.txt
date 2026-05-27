@@ -1,0 +1,20 @@
+curl ^"https://10.220.50.9:31943/rest/oss/access/fars/v1/tracetask/query/all-tasks?nocache=1779728955569^" ^
+  -H ^"Accept: application/json, text/plain, */*^" ^
+  -H ^"Accept-Language: en-US,en;q=0.9^" ^
+  -H ^"Connection: keep-alive^" ^
+  -H ^"Content-Type: application/json^" ^
+  -b ^"locale=en-us; user_time_a_lang=; user_digital_format=^%^2C^%^23^%^230.00; delimiter=-; format=yyyy-MM-dd^%^20HH^%^3Amm^%^3Ass; timezoneoffset=-180; user_time_show_dst=1; timezone=America^%^2FSao_Paulo; timemode=client; multiLanguage=false; bspsession=x-uq5f7u469ivu8aukfx6nqmte8bc7uq1j9j5geq9d2nlio6s55jvtmomqvt8bs7rspd9hpdunsb1c4a6l2rs7g9qovxnxrwnwaqan1cs7k405o9fuumsbqrftbvsb3zo4^" ^
+  -H ^"Origin: https://10.220.50.9:31943^" ^
+  -H ^"Referer: https://10.220.50.9:31943/omc/farswebsite/index.html?noCache8113^&refr-flags=e^&noAutoLoadPIU^&loadTopPIU=refr,message-transform^" ^
+  -H ^"Sec-Fetch-Dest: empty^" ^
+  -H ^"Sec-Fetch-Mode: cors^" ^
+  -H ^"Sec-Fetch-Site: same-origin^" ^
+  -H ^"Sec-GPC: 1^" ^
+  -H ^"User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36^" ^
+  -H ^"roarand: 48e3b764c2b4686371422dbd9122f4b750832da0e56c49c2^" ^
+  -H ^"sec-ch-ua: ^\^"Chromium^\^";v=^\^"148^\^", ^\^"Brave^\^";v=^\^"148^\^", ^\^"Not/A)Brand^\^";v=^\^"99^\^"^" ^
+  -H ^"sec-ch-ua-mobile: ?0^" ^
+  -H ^"sec-ch-ua-platform: ^\^"Windows^\^"^" ^
+  -H ^"x-non-renewal-session: true^" ^
+  --data-raw ^"^{^\^"isCache^\^":true,^\^"pageVo^\^":^{^\^"pageSize^\^":100,^\^"currentPage^\^":1^}^}^" ^
+  --insecure

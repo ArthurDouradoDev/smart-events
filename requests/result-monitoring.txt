@@ -1,0 +1,21 @@
+curl ^"https://10.220.50.9:31943/rest/oss/access/pm/v1/monitor/task/result^" ^
+  -H ^"Accept: application/json, text/plain, */*^" ^
+  -H ^"Accept-Language: en-US,en;q=0.9^" ^
+  -H ^"Connection: keep-alive^" ^
+  -H ^"Content-Type: application/json^" ^
+  -b ^"locale=en-us; bspsession=x-jtmq2lmp06jz6lgac55i0a7tqms96ren9fnuqr04lhjyg4c9piermr7so6er1dc87wc648sao4qluq8ajsg63s2obxbws748jsg78ajzfz466nmkbxo5rt3s1j7xg6qk; user_time_a_lang=; user_digital_format=^%^2C^%^23^%^230.00; delimiter=-; format=yyyy-MM-dd^%^20HH^%^3Amm^%^3Ass; timezoneoffset=-180; user_time_show_dst=1; timezone=America^%^2FSao_Paulo; timemode=client; multiLanguage=false^" ^
+  -H ^"Origin: https://10.220.50.9:31943^" ^
+  -H ^"Referer: https://10.220.50.9:31943/oss/access/pm/index.html?noCache8366^&refr-flags=e^&noAutoLoadPIU^&loadTopPIU=refr,message-transform^" ^
+  -H ^"Sec-Fetch-Dest: empty^" ^
+  -H ^"Sec-Fetch-Mode: cors^" ^
+  -H ^"Sec-Fetch-Site: same-origin^" ^
+  -H ^"Sec-GPC: 1^" ^
+  -H ^"User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36^" ^
+  -H ^"X-Requested-With: XMLHttpRequest^" ^
+  -H ^"roarand: 4316d79b0e7831853ebff3790460f897683d750a84d801ca^" ^
+  -H ^"sec-ch-ua: ^\^"Chromium^\^";v=^\^"148^\^", ^\^"Brave^\^";v=^\^"148^\^", ^\^"Not/A)Brand^\^";v=^\^"99^\^"^" ^
+  -H ^"sec-ch-ua-mobile: ?0^" ^
+  -H ^"sec-ch-ua-platform: ^\^"Windows^\^"^" ^
+  -H ^"x-non-renewal-session: true^" ^
+  --data-raw ^"^[^{^\^"taskId^\^":-2982,^\^"preExecTime^\^":1779303180000,^\^"objNoExecTimes^\^":^[^{^\^"preExecTime^\^":1779303180000,^\^"objNo^\^":61696^},^{^\^"preExecTime^\^":1779303180000,^\^"objNo^\^":52288^},^{^\^"preExecTime^\^":1779303180000,^\^"objNo^\^":52289^},^{^\^"preExecTime^\^":1779303180000,^\^"objNo^\^":52163^},^{^\^"preExecTime^\^":1779303180000,^\^"objNo^\^":21652^},^{^\^"preExecTime^\^":1779303180000,^\^"objNo^\^":21653^},^{^\^"preExecTime^\^":1779303180000,^\^"objNo^\^":21654^},^{^\^"preExecTime^\^":1779303180000,^\^"objNo^\^":21655^},^{^\^"preExecTime^\^":1779303180000,^\^"objNo^\^":21656^},^{^\^"preExecTime^\^":1779303180000,^\^"objNo^\^":21657^},^{^\^"preExecTime^\^":1779303180000,^\^"objNo^\^":21658^},^{^\^"preExecTime^\^":1779303180000,^\^"objNo^\^":21659^},^{^\^"preExecTime^\^":1779303180000,^\^"objNo^\^":21660^},^{^\^"preExecTime^\^":1779303180000,^\^"objNo^\^":21661^},^{^\^"preExecTime^\^":1779303180000,^\^"objNo^\^":21662^},^{^\^"preExecTime^\^":1779303180000,^\^"objNo^\^":21663^},^{^\^"preExecTime^\^":1779303180000,^\^"objNo^\^":66341^},^{^\^"preExecTime^\^":1779303180000,^\^"objNo^\^":66340^},^{^\^"preExecTime^\^":1779303180000,^\^"objNo^\^":66343^},^{^\^"preExecTime^\^":1779303180000,^\^"objNo^\^":66342^},^{^\^"preExecTime^\^":1779303180000,^\^"objNo^\^":66345^},^{^\^"preExecTime^\^":1779303180000,^\^"objNo^\^":66344^},^{^\^"preExecTime^\^":1779303180000,^\^"objNo^\^":66347^},^{^\^"preExecTime^\^":1779303180000,^\^"objNo^\^":66346^},^{^\^"preExecTime^\^":1779303180000,^\^"objNo^\^":66349^},^{^\^"preExecTime^\^":1779303180000,^\^"objNo^\^":66348^},^{^\^"preExecTime^\^":1779303180000,^\^"objNo^\^":66351^},^{^\^"preExecTime^\^":1779303180000,^\^"objNo^\^":66350^},^{^\^"preExecTime^\^":1779303180000,^\^"objNo^\^":66353^},^{^\^"preExecTime^\^":1779303180000,^\^"objNo^\^":66352^},^{^\^"preExecTime^\^":1779303180000,^\^"objNo^\^":61682^},^{^\^"preExecTime^\^":1779303180000,^\^"objNo^\^":66354^},^{^\^"preExecTime^\^":1779303180000,^\^"objNo^\^":61683^},^{^\^"preExecTime^\^":1779303180000,^\^"objNo^\^":61684^},^{^\^"preExecTime^\^":1779303180000,^\^"objNo^\^":61685^},^{^\^"preExecTime^\^":1779303180000,^\^"objNo^\^":61686^},^{^\^"preExecTime^\^":1779303180000,^\^"objNo^\^":61687^},^{^\^"preExecTime^\^":1779303180000,^\^"objNo^\^":61688^},^{^\^"preExecTime^\^":1779303180000,^\^"objNo^\^":61689^},^{^\^"preExecTime^\^":1779303180000,^\^"objNo^\^":61690^},^{^\^"preExecTime^\^":1779303180000,^\^"objNo^\^":61691^},^{^\^"preExecTime^\^":1779303180000,^\^"objNo^\^":61692^},^{^\^"preExecTime^\^":1779303180000,^\^"objNo^\^":61693^},^{^\^"preExecTime^\^":1779303180000,^\^"objNo^\^":61694^},^{^\^"preExecTime^\^":1779303180000,^\^"objNo^\^":61695^},^{^\^"preExecTime^\^":1779303180000,^\^"objNo^\^":52287^}^]^}^]^" ^
+  --insecure

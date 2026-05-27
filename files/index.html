@@ -1,0 +1,190 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Smart Events</title>
+
+  <!-- Leaflet (mapa) -->
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+
+  <!-- Chart.js (gráficos) -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-annotation@3.0.1/dist/chartjs-plugin-annotation.min.js"></script>
+
+  <link rel="stylesheet" href="css/main.css">
+</head>
+<body>
+
+  <!-- ── HEADER ─────────────────────────────────────────────────── -->
+  <header id="app-header">
+    <div class="hdr-left">
+      <span class="brand">Smart Events</span>
+    </div>
+
+    <div class="hdr-center">
+      <span id="event-badge" class="badge badge-active hidden">&#9679; Ativo</span>
+      <span id="historical-badge" class="badge badge-historical hidden">HISTÓRICO</span>
+      <span id="event-name" class="event-name">Nenhum evento ativo</span>
+      <span id="event-timer" class="mono hidden">00:00:00</span>
+    </div>
+
+    <div class="hdr-right">
+      <div id="rec-indicator" class="rec hidden">
+        <span class="rec-dot"></span>
+        <span id="rec-size">REC 0 MB</span>
+      </div>
+      <button id="alert-btn" class="icon-btn" title="Alertas">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/>
+          <path d="M13.73 21a2 2 0 0 1-3.46 0"/>
+        </svg>
+        <span id="alert-count" class="badge badge-danger hidden">0</span>
+      </button>
+      <span id="clock" class="mono">--:--</span>
+    </div>
+  </header>
+
+  <!-- ── STANDBY ────────────────────────────────────────────────── -->
+  <div id="standby-screen" class="screen active">
+    <div class="standby-content">
+      <div class="standby-ring"></div>
+      <h2 class="standby-title">Nenhum evento ativo</h2>
+      <p id="next-event-label" class="standby-sub">Verificando eventos agendados...</p>
+      <div class="standby-actions">
+        <button id="load-event-btn" class="btn btn-primary">Carregar evento</button>
+        <button id="open-history-btn" class="btn btn-ghost hidden">Ver histórico</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── DASHBOARD ──────────────────────────────────────────────── -->
+  <div id="dashboard-screen" class="screen hidden">
+
+    <!-- Zona central: mapa + VIPs -->
+    <div id="main-zone">
+
+      <!-- Mapa -->
+      <div id="map-wrapper">
+        <div id="map"></div>
+        <div id="map-controls">
+          <button class="map-btn" id="btn-polygon" title="Polígono do evento">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <polygon points="12 2 22 20 2 20"/>
+            </svg>
+          </button>
+          <button class="map-btn" id="btn-event-only" title="Apenas sites do evento">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="4"/>
+            </svg>
+          </button>
+        </div>
+        <div id="map-legend">
+          <div class="legend-item"><span class="dot dot-healthy"></span>Saudável</div>
+          <div class="legend-item"><span class="dot dot-warning"></span>Atenção</div>
+          <div class="legend-item"><span class="dot dot-critical"></span>Crítico</div>
+        </div>
+      </div>
+
+      <!-- Painel VIP -->
+      <aside id="vip-panel">
+        <div class="panel-header">
+          <span class="panel-label">VIPs</span>
+          <span id="vip-summary" class="panel-meta"></span>
+        </div>
+        <div id="vip-list">
+          <!-- Renderizado por vip.js -->
+        </div>
+      </aside>
+    </div>
+
+    <!-- Banner histórico (sobrepõe zona principal) -->
+    <div id="historical-banner" class="hidden">
+      <span class="hist-label">MODO HISTÓRICO</span>
+      <span id="hist-event-name"></span>
+      <div class="hist-controls">
+        <button id="hist-prev" class="icon-btn">&#9664;</button>
+        <input type="range" id="hist-slider" min="0" max="100" value="100">
+        <button id="hist-next" class="icon-btn">&#9654;</button>
+        <span id="hist-timestamp" class="mono"></span>
+      </div>
+      <button id="hist-exit" class="btn btn-ghost btn-sm">Sair do histórico</button>
+    </div>
+  </div>
+
+  <!-- ── KPI ZONE ───────────────────────────────────────────────── -->
+  <div id="kpi-zone">
+
+    <!-- Lista de sites -->
+    <div id="site-panel">
+      <div class="panel-header">
+        <span class="panel-label">Sites</span>
+        <span id="site-summary" class="panel-meta"></span>
+      </div>
+      <div class="site-search-container">
+        <input type="text" id="site-search-input" class="site-search-input" placeholder="Pesquisar sites...">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" class="search-icon">
+          <circle cx="11" cy="11" r="8"></circle>
+          <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+        </svg>
+      </div>
+      <div id="site-list">
+        <!-- Renderizado por kpi.js -->
+      </div>
+    </div>
+
+    <!-- Gráfico -->
+    <div id="chart-panel">
+      <div id="chart-controls">
+        <span id="chart-site-label" class="chart-site-name">—</span>
+        <select id="metric-selector">
+          <option value="utilization">Utilização</option>
+          <option value="availability">Availability</option>
+          <option value="throughput_dl">Throughput DL</option>
+          <option value="throughput_ul">Throughput UL</option>
+          <option value="rsrp">RSRP Médio</option>
+          <option value="rsrq">RSRQ Médio</option>
+        </select>
+        <div id="time-tabs">
+          <button class="time-tab" data-window="15">15 min</button>
+          <button class="time-tab" data-window="30">30 min</button>
+          <button class="time-tab active" data-window="60">60 min</button>
+          <button class="time-tab" data-window="0">Evento</button>
+        </div>
+      </div>
+      <div id="chart-container">
+        <canvas id="kpi-chart"></canvas>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── ALERTAS (toasts) ───────────────────────────────────────── -->
+  <div id="toast-container"></div>
+
+  <!-- ── PAINEL DE ALERTAS (drawer) ────────────────────────────── -->
+  <div id="alert-drawer" class="drawer hidden">
+    <div class="drawer-header">
+      <span class="panel-label">Alertas ativos</span>
+      <button id="alert-drawer-close" class="icon-btn">&#10005;</button>
+    </div>
+    <div id="alert-list">
+      <!-- Renderizado por alerts.js -->
+    </div>
+  </div>
+
+  <!-- ── SELETOR DE EVENTO (2+ eventos ativos) ─────────────────── -->
+  <div id="event-selector-modal" class="modal hidden">
+    <div class="modal-box">
+      <h3 class="modal-title">Selecione o evento</h3>
+      <div id="event-selector-list"></div>
+      <div class="modal-footer">
+        <button id="btn-consolidated-view" class="btn btn-ghost">Visão consolidada</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Scripts (ES Modules) -->
+  <script type="module" src="js/app.js"></script>
+</body>
+</html>

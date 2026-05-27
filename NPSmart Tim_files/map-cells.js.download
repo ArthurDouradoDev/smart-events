@@ -1,0 +1,1236 @@
+class MapCells {
+
+    constructor(props) {
+        this.id = props.id;
+        this.zoomInitial;
+        if (props.zoomInitial != undefined) {
+            this.zoomInitial = props.zoomInitial;
+
+        } else {
+            this.zoomInitial = {
+                "latitude": -15.76498,
+                "longitude": -47.89016,
+                "zoom": 5,
+            }
+        }
+        if (props.techs != undefined) {
+            this.techs = props.techs;
+        } else {
+            this.techs = ["3G", "4G", "5G"];
+        }
+        if (props.menus != undefined) {
+            this.menus = props.menus;
+
+        } else {
+            this.menus = {
+                "left": ['control_panel', 'cell_propagation', 'ookla', 'tools'],
+                'right': ['control_panel', 'cell_propagation', 'ookla']
+            }
+        }
+        this.frequencies;
+        if (props.views != undefined) {
+            this.views = props.views;
+        }else{
+            this.views = ['street', 'satellite']
+        }
+
+        if (props.frequencies != undefined) { //verifica se está setado as frequencias pelo usuário
+            this.frequencies = props.frequencies
+        } else {
+            this.frequencies = {
+                "3G": {
+                    '850': {
+                        color: '#ca4216',
+                        font: '#FFF',
+                        radius: 110
+                    },
+                    '2100': {
+                        color: '#5496c6',
+                        font: '#FFF',
+                        radius: 100
+                    },
+
+                },
+                "4G": {
+                    '700': {
+                        color: '#00ff9a',
+                        font: '#000',
+                        radius: 210
+                    }
+                    ,
+                    '850': {
+                        color: '#ADFF2F',
+                        font: '#000',
+                        radius: 200,
+                    },
+                    '1800': {
+                        color: '#cb009a',
+                        font: '#FFF',
+                        radius: 190,
+                    },
+                    '2100': {
+                        color: '#191A42',
+                        font: '#FFF',
+                        radius: 180,
+                    },
+                    '2300': {
+                        color: '#FFAA00',
+                        font: '#000',
+                        radius: 170,
+                    },
+                    '2600': {
+                        color: '#ffff00',
+                        font: '#000',
+                        radius: 160,
+                    },
+                },
+                "5G": {
+                    '700': {
+                        color: '#460c0a',
+                        font: '#FFF',
+                        radius: 290,
+                    },
+                    '2100': {
+                        color: '#e347bf',
+                        font: '#FFF',
+                        radius: 280,
+                    },
+                    '2300': {
+                        color: '#09f008',
+                        font: '#000',
+                        radius: 270,
+                    },
+                    '3500': {
+                        color: '#1714dd',
+                        font: '#FFF',
+                        radius: 260,
+                    },
+
+                }
+            }
+        }
+        
+        this.cells = [];
+        this.propagationDelay = []
+        this.propagationMarkers = []
+        this.ooklaDots = []
+        this.ooklaDotsLayers = []
+        this.tools;
+        this.layerFiles = [];
+        this.files = []
+
+        if(props.propagationDates != undefined){
+            this.propagationDates = props.propagationDates
+        }else{
+            this.propagationDates = {}
+        }
+
+        if (props.tools != undefined) {
+            this.tools = props.tools
+        } else {
+            this.tools = ['ruler', 'compass']
+        }
+
+        this.ooklaVelocity = {
+            '4G': ['5', '15', '30', '45'],
+            '5G': ['100', '200', '300', '400']
+        }
+
+        const virtualSelectValues = []
+        sessionStorage.clear();
+
+        this.propagationDelayConsts = {
+            'colors': {
+                green: '#00FF00',
+                yellow: '#FFFF00',
+                orange: '#FFA500',
+                dark_orange: '#C65102',
+                red: '#FF0000',
+            },
+            '3G': {
+                'grid': [156, 390, 624, 858, 1092, 1326, 2262, 3666, 6006, 8346, 13026, 30000],
+                'grid_markers': [78, 273, 507, 741, 975, 1209, 1794, 2964, 4836, 7176, 10686, 21513]
+
+            },
+            '4G': {
+                'grid': [156, 234, 546, 1014, 1950, 3510, 6630, 14430, 30030, 53430, 76830, 100000],
+                'grid_markers': [78, 195, 390, 780, 1482, 2730, 5070, 9750, 22230, 41730, 65130, 88415]
+
+            },
+            '5G': {
+                'grid': [156, 312, 624, 1092, 2028, 3588, 6708, 14508, 30108, 61308, 115908, 201708, 1000000000],
+                'grid_markers': [78, 238, 468, 858, 1560, 2808, 5148, 10608, 22308, 45708, 88608, 158808, 500100854]
+            }
+        }
+        var changeAccess = true;
+
+
+        this.techs.forEach(element => { //inicialização de variáveis de vetor
+            this.propagationDelay[element] = []
+            this.propagationMarkers[element] = []
+            if (element != '3G') {
+                this.ooklaDots[element]
+
+            }
+        })
+
+        for (const [tech, frequencies] of Object.entries(this.frequencies)) {
+            this.cells[tech] = []
+            for (const [frequency, values] of Object.entries(frequencies)) {
+                this.cells[tech][frequency] = []
+            }
+        }
+
+        this.map;
+
+        const mapCellsInstancy = this
+
+
+
+        const initMap = () => {
+            map = L.map(`map-cells-${this.id}`).setView([this.zoomInitial.latitude, this.zoomInitial.longitude], this.zoomInitial.zoom);
+            var imageryLayer = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
+                attribution: 'Imagery © Esri',
+                maxZoom: 19
+            })
+            var imageryLayerStreet = L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
+                attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
+                opacity: 0.55
+            })
+            var OpenStreetMap_CH = L.tileLayer('https://tile.osm.ch/switzerland/{z}/{x}/{y}.png', {
+                maxZoom: 18,
+                attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
+
+            });
+
+            var streetsLabelsLayer = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}', {
+                attribution: 'Streets © Esri',
+                maxZoom: 18
+            })
+
+
+
+            map.on('layeradd', function (event) {
+                if (event.layer === streetsLabelsLayer) {
+                    event.layer.bringToFront();
+                }
+            });
+
+            // Adicione um controle de camadas para permitir alternar entre as camadas de fundo
+            var baseMaps = {
+                "Street View": imageryLayerStreet,
+                "Satellite View": imageryLayer,
+                // "Terrain View": OpenStreetMap_CH,
+            };
+
+
+            
+            var overlayMaps = {
+                "Streets with Labels": streetsLabelsLayer
+            };
+            
+            if(this.views.includes('street')){
+                imageryLayerStreet.addTo(map)
+            }
+
+            if(this.views.includes('satellite')){
+                imageryLayer.addTo(map)
+                streetsLabelsLayer.addTo(map)
+            }
+
+            
+            L.control.layers(baseMaps, overlayMaps).addTo(map);
+            map.scrollWheelZoom.disable();
+            map.options.wheelPxPerZoomLevel = 150;
+            map.options.zoomDelta = 0.25;  
+            map.options.zoomSnap = 0.25; 
+            map.scrollWheelZoom.enable();
+            map.on('zoomend', function () {
+                getStationNames();
+                if (map.getZoom() > 13) {
+                    $('.station-name').css('display', 'block')
+                    $('.map-cell-propagation-label ').css('display', 'block')
+
+                } else {
+                    $('.map-cell-propagation-label ').css('display', 'none')
+                    $('.station-name').css('display', 'none')
+                }
+
+            })
+
+        }
+
+        const addEventListenerLocationTo = () => {
+
+            let location_elements = document.querySelectorAll('.location_to');
+
+            // Itera sobre cada elemento da NodeList
+            location_elements.forEach(function (element) {
+                // Adiciona um event listener para o evento 'click'
+                element.addEventListener('click', function (e) {
+                    location_to(this.getAttribute('latitude'), this.getAttribute('longitude'))
+                    e.stopPropagation();
+                });
+            });
+
+        }
+
+
+
+
+
+        const callCellPropagationData = (data) => {
+            $.ajax({
+                url: "/npsmart/map/propagation_cell",
+                method: 'POST',
+                data: {
+                    tec: data.tec,
+                    cells: data.value
+                },
+                success: function (result) {
+
+                    result = JSON.parse(result)
+
+                    for (let i = 0; i < result.length; i++) {
+                        result[i].tec = data.tec
+                        createPolygonLayer(result[i], i, 'mapCellsPropagationDelay', mapCellsInstancy)
+                    }
+                    addLayerOnLayerControl({
+                        tec: data.tec,
+                        layer: 'mapCellsPropagationDelay',
+                    }, mapCellsInstancy)
+                },
+
+                error: function (error) {
+                    // Swal.fire({
+                    //     title: 'Error!',
+                    //     text: 'Error when getting data',
+                    //     icon: 'error',
+                    //     confirmButtonText: 'Ok'
+                    // })
+                }
+            });
+
+        }
+
+        const callCellData = (data) => {
+            let totalRequests = 0;
+            let successfulResponses = 0;
+
+
+            blockUi(true)
+            document.querySelectorAll('.map-cells-subtitle-frequency').forEach(element => {
+                if (element.getAttribute('tech') == data.tec) {
+                    element.setAttribute('selected', 'true');
+                    element.style.boxShadow = 'rgba(0, 0, 0, 0.3) 0px 4px 4px 0px inset'
+
+                }
+            })
+
+            removeLayerMap('petalMapCell', {
+                tec: data.tec
+            },
+                mapCellsInstancy)
+
+            for (const [tech, frequencies] of Object.entries(this.frequencies)) {
+
+
+                for (const [freq, colors] of Object.entries(frequencies)) {
+                    if (data.tec == tech) {
+                        totalRequests++;
+                        data.frequency = freq;
+                        data.state = data.state.toString();
+                        data.city = data.city.toString();
+                        data.station = data.station.toString();
+                        data.cell = data.cell.toString();
+
+                        $.ajax({
+                            url: "/npsmart/map/show_petals",
+                            method: 'POST',
+                            data: data,
+                            success: function (result) {
+
+                                result = JSON.parse(result)
+                                for (let i = 0; i < result.length; i++) {
+
+                                    result[i].tec = data.tec
+
+
+                                    createPolygonLayer(result[i], i, 'petalMapCell', mapCellsInstancy)
+
+                                }
+
+                                orderLayer({
+                                    layer: 'petalMapCell',
+                                    tec: data.tec
+                                }, mapCellsInstancy)
+                                successfulResponses++;
+                                if (successfulResponses === totalRequests) {
+                                    blockUi(false); // Chama blockUi apenas quando todas as solicitações forem concluídas
+                                    addLayerOnLayerControl({
+                                        tec: data.tec,
+                                        layer: 'petalMapCell',
+                                    }, mapCellsInstancy)
+                                }
+
+                            },
+
+                            error: function (error) {
+								console.log("AAAAAAAAAA")
+                                Swal.fire({
+                                    title: 'Error!',
+                                    text: 'Error when getting data',
+                                    icon: 'error',
+                                    confirmButtonText: 'Ok'
+                                })
+
+                            }
+                        });
+                    }
+
+
+
+                }
+            }
+
+        }
+        let virtual_select_option_ookla = ''
+
+
+
+        const callVirtualSelectOption = (data, origin) => {
+
+            origin.forEach(element => {
+                $.ajax({
+                    url: `/npsmart/map/${element}_earth_petal`,
+                    method: 'POST',
+                    data: data,
+                    success: function (result) {
+                        let string_virtal_select = [];
+                        result = JSON.parse(result)
+                        for (let i = 0; i < result.length; i++) {
+                            if (element != 'cities') {
+                                string_virtal_select[i] = result[i][element] + `<img  class = 'location_to' src='/npsmart/images/map.png'  latitude ='${result[i]['latitude']}'  longitude = '${result[i]['longitude']}'>`
+                            } else {
+                                string_virtal_select[i] = result[i]['cities']
+                            }
+
+                        }
+                        let virtual_select_div = document.querySelector(`#map-cells-control-panel-select-${element}${data.tec}`)
+                        virtual_select_div.setOptions(string_virtal_select, true);
+                        virtual_select_div.setValue(string_virtal_select, true);
+                        virtualSelectValues[`map-cells-control-panel-select-${element}${data.tec}`] = string_virtal_select
+
+                        addEventListenerLocationTo()
+
+
+
+                        const comp_virtual_select = document.querySelectorAll('.vscomp-options-container');
+
+                        // Itera sobre cada elemento da NodeList
+                        comp_virtual_select.forEach(function (element) {
+                            // Adiciona um event listener para o evento 'click'
+                            element.addEventListener('scroll', function () {
+                                addEventListenerLocationTo()
+
+                            });
+                        });
+
+
+
+                    },
+
+                    error: function (error) {
+                 
+                    }
+                });
+            })
+
+        }
+
+
+        const inicializateVirtualSelect = () => {
+            const virtual_select_map_cells_control_panel = document.querySelectorAll('div[id^="map-cells-control-panel-select-"]')
+            virtual_select_map_cells_control_panel.forEach(element => {
+                let virtual_select_init = {
+                    ele: `#${element.id}`,
+                    placeholder: `Select ${element.getAttribute('select')}`,
+                    maxWidth: "80%",
+                    multiple: true,
+                    search: true,
+                    options: [],
+                }
+                document.querySelector(`#${element.id}`).addEventListener('change', function (event) {
+                    if (changeAccess) {
+                        if (this.value.length != 0) {
+
+                            let data;
+                            let origin;
+                            switch (this.getAttribute('select')) {
+                                case 'uf':
+                                    data = {
+                                        state: this.value,
+                                        city: '',
+                                        station: '',
+                                        cell: ''
+                                    };
+                                    origin = ['cities', 'station', 'cell'];
+
+                                    break;
+                                case 'cities':
+                                    data = {
+                                        state: document.querySelector(`#map-cells-control-panel-select-uf${element.getAttribute('tech')}`).value,
+                                        city: this.value,
+                                        station: '',
+                                        cell: ''
+                                    };
+                                    origin = ['station', 'cell'];
+                                    break;
+                                case 'station':
+                                    data = {
+                                        state: document.querySelector(`#map-cells-control-panel-select-uf${element.getAttribute('tech')}`).value,
+                                        city: document.querySelector(`#map-cells-control-panel-select-cities${element.getAttribute('tech')}`).value,
+                                        station: this.value,
+                                        cell: '',
+                                    };
+                                    origin = ['cell'];
+                                    break;
+                                case 'cell':
+                                    data = {
+                                        state: document.querySelector(`#map-cells-control-panel-select-uf${element.getAttribute('tech')}`).value,
+                                        city: document.querySelector(`#map-cells-control-panel-select-cities${element.getAttribute('tech')}`).value,
+                                        station: document.querySelector(`#map-cells-control-panel-select-cities${element.getAttribute('tech')}`).value,
+                                        cell: this.value,
+                                    };
+                                    break;
+                            }
+
+
+                            // if (this.value != sessionStorage.getItem(element.id)) { 
+
+                                data.tec = element.getAttribute('tech')
+                                // if (this.getAttribute('select') != 'cell') {
+                                    callVirtualSelectOption(data, origin)
+
+                                // }
+          
+                                callCellData(data)
+                                sessionStorage.setItem(`${element.id}`, this.value);
+                                let valueAtual = this.value
+                                virtualSelectValues[element.id] = valueAtual
+
+
+                            // } else {
+                            //     this.value = virtualSelectValues[element.id]
+                            // }
+
+                        } else {
+
+                            removeLayerMap('petalMapCell', {
+                                tec: element.getAttribute('tech')
+                            },
+                                mapCellsInstancy)
+                        }
+
+                    }
+                    changeAccess = true
+
+
+
+                });
+
+                if (element.getAttribute('select') == 'uf') {
+                    virtual_select_init.maxValues = 3;
+                    $.ajax({
+                        url: "/npsmart/map/uf_earth_petal",
+                        method: 'POST',
+                        data: {
+                            tech: element.getAttribute('tech'),
+                        },
+                        success: function (result) {
+                            let string_virtal_select = [];
+                            result = JSON.parse(result)
+                            for (let i = 0; i < result.length; i++) {
+
+                                string_virtal_select[i] = result[i]['uf'];
+
+                            }
+                            document.querySelector(`#map-cells-control-panel-select-uf${element.getAttribute('tech')}`).setOptions(string_virtal_select, true);
+                        },
+
+                        error: function (error) {
+
+                        }
+                    });
+                }
+
+                VirtualSelect.init(virtual_select_init);
+                virtualSelectValues[`${element.id}`] = element.value
+
+                document.querySelectorAll('.vscomp-search-clear').forEach(element => {
+                    element.addEventListener('click', function () {
+                        addEventListenerLocationTo()
+                    })
+                })
+
+                document.querySelectorAll('.vscomp-search-input').forEach(element => {
+                    element.addEventListener('input', function () {
+                        addEventListenerLocationTo()
+                        changeAccess = false
+                    })
+                })
+
+            })
+            const virtual_select_map_cells_cell_propagation = document.querySelectorAll('div[id^="map-cells-cell-propagation-select-"]')
+            virtual_select_map_cells_cell_propagation.forEach(element => {
+                let virtual_select_init = {
+                    ele: `#${element.id}`,
+                    placeholder: `Select ${element.getAttribute('select')}`,
+                    maxWidth: "80%",
+                    disableSelectAll: true,
+                    multiple: true,
+                    search: true,
+                    options: [],
+                }
+                document.querySelector(`#${element.id}`).addEventListener('change', function () {
+                    if (this.value.length != 0) {
+                        if (this.value != virtualSelectValues[element.id]) {
+                            removeLayerMap('mapCellsPropagationDelay', {
+                                tec: element.getAttribute('tech')
+                            }, mapCellsInstancy)
+                            let data = {}
+                            data.tec = element.getAttribute('tech')
+                            data.value = this.value
+                            callCellPropagationData(data)
+                            virtualSelectValues[element.id] = this.value
+                        }
+
+
+                    } else {
+
+                        removeLayerMap('mapCellsPropagationDelay', {
+                            tec: element.getAttribute('tech')
+                        },
+                            mapCellsInstancy)
+                    }
+
+
+                });
+                VirtualSelect.init(virtual_select_init);
+                $.ajax({
+                    url: "/npsmart/map/call_all_cells",
+                    method: 'POST',
+                    data: {
+                        tec: element.getAttribute('tech'),
+                    },
+                    success: function (result) {
+                        let string_virtal_select = [];
+                        result = JSON.parse(result)
+
+                        for (let i = 0; i < result.length; i++) {
+
+                            string_virtal_select[i] = result[i]['cell'] + `<img  class = 'location_to' src='/npsmart/images/map.png'  latitude ='${result[i]['latitude']}'  longitude = '${result[i]['longitude']}'>`
+
+                        }
+                        let virtual_select_div = document.querySelector(`#map-cells-cell-propagation-select-cell${element.getAttribute('tech')}`)
+                        virtual_select_div.setOptions(string_virtal_select, true);
+
+                        addEventListenerLocationTo()
+
+
+                        const comp_virtual_select = document.querySelectorAll('.vscomp-options-container');
+
+                        // Itera sobre cada elemento da NodeList
+                        comp_virtual_select.forEach(function (element) {
+                            // Adiciona um event listener para o evento 'click'
+                            element.addEventListener('scroll', function () {
+                                addEventListenerLocationTo()
+
+                            });
+                        });
+
+                        document.querySelectorAll('.vscomp-search-input').forEach(element => {
+                            element.addEventListener('input', function () {
+                                addEventListenerLocationTo()
+
+                            })
+                        })
+
+                        document.querySelectorAll('.vscomp-search-clear').forEach(element => {
+                            element.addEventListener('click', function () {
+                                addEventListenerLocationTo()
+                            })
+                        })
+
+                    },
+
+                    error: function (error) {
+						console.log("BAAAAAAAAA")
+                        Swal.fire({
+                            title: 'Error!',
+                            text: 'Error when getting data',
+                            icon: 'error',
+                            confirmButtonText: 'Ok'
+                        })
+                    }
+                });
+            })
+            const virtual_select_map_cells_ookla = document.querySelectorAll('div[id^="map-cells-ookla-select-"]')
+            virtual_select_map_cells_ookla.forEach(element => {
+                let virtual_select_init = {
+                    ele: `#${element.id}`,
+                    placeholder: `Select ${element.getAttribute('select')}`,
+                    maxWidth: "80%",
+                    disableSelectAll: true,
+                    multiple: true,
+                    search: true,
+                    options: [],
+                }
+                document.querySelector(`#${element.id}`).addEventListener('change', function () {
+                    if (this.value.length != 0) {
+                        removeLayerMap('mapCellsOoklaDots', {
+                            tec: element.getAttribute('tech')
+                        },
+                            mapCellsInstancy)
+                        let data = {}
+                        data.tec = element.getAttribute('tech')
+                        callOoklaData(data, mapCellsInstancy)
+
+                    } else {
+
+                        removeLayerMap('mapCellsOoklaDots', {
+                            tec: element.getAttribute('tech')
+                        },
+                            mapCellsInstancy)
+                    }
+
+
+                });
+                VirtualSelect.init(virtual_select_init);
+                $.ajax({
+                    url: "/npsmart/map/call_uf_ookla",
+                    method: 'POST',
+                    data: {
+                        tec: element.getAttribute('tech'),
+                    },
+                    success: function (result) {
+                        result = JSON.parse(result)
+                        let string_virtal_select = []
+                        for (let i = 0; i < result.length; i++) {
+
+                            string_virtal_select[i] = result[i]['uf']
+
+                        }
+                        let virtual_select_div = document.querySelector(`#map-cells-ookla-select-uf${element.getAttribute('tech')}`)
+                        virtual_select_div.setOptions(string_virtal_select, true);
+
+
+                    },
+
+                    error: function (error) {
+						console.log("CAAAAAAAAA")
+                        Swal.fire({
+                            title: 'Error!',
+                            text: 'Error when getting data',
+                            icon: 'error',
+                            confirmButtonText: 'Ok'
+                        })
+                    }
+                });
+            })
+
+
+
+        }
+        const inicializateFlatPicker = () => {
+            var now = new Date();
+            var day = ("0" + now.getDate()).slice(-2);
+            var month = ("0" + (now.getMonth() + 1)).slice(-2);
+            var today = now.getFullYear() + "-" + (month) + "-" + (day);
+
+            let date = new Date();
+            date.setDate(date.getDate() - 30);
+            let year = date.getFullYear();
+            let month_30_ag = ('0' + (date.getMonth() + 1)).slice(-2);  // adiciona zero à esquerda se necessário
+            let day_30_ago = ('0' + date.getDate()).slice(-2);  // adiciona zero à esquerda se necessário
+            let date_30_ago = `${year}-${month_30_ag}-${day_30_ago}`;
+
+            $('input[id^="dateRangePicker"]').flatpickr({
+                mode: "range",
+                dateFormat: "Y-m-d",
+                locale: "en",
+                minDate: day_30_ago,
+                maxDate: today,
+                defaultDate: [today, today]
+
+            });
+
+            var date_ookla_flag = 0;
+            $('input[id^="dateRangePicker"]').on('input', function () {
+                let tech = $(this).attr('tech')
+                // delete_ookla_dots(tech)
+                date_ookla_flag++;
+                if (date_ookla_flag == 2) {
+                    date_ookla_flag = 0;
+                    removeLayerMap('mapCellsOoklaDots', {
+                        tec: tech
+                    },
+                        mapCellsInstancy)
+                    callOoklaData({
+                        tec: tech
+                    }, mapCellsInstancy)
+                }
+
+            })
+        }
+        const inicializateOoklaDotsVars = () => {
+            this.techs.forEach(element => {
+                this.ooklaDots[element] = []
+                this.ooklaDots[element] = L.DonutCluster(
+                    {
+                        chunkedLoading: true
+                    }, {
+                    key: 'title',
+                    arcColorDict: {
+                        A: 'red',
+                        B: 'pink',
+                        C: 'yellow',
+                        D: 'green',
+                        E: 'blue',
+                    },
+                    style: {
+                        size: 50,
+                        fill: '#99d8c9',
+                        opacity: 1, // Definindo a opacidade como 1 para tornar a cor sólida
+                        weight: 7,
+                    },
+                }
+                );
+            })
+        }
+
+        const inicializateRulerMaps = () => {
+            let icon_ruler_flag = true
+            $(".map-cells-icon-ruler").on('click', function () {
+                if (icon_ruler_flag) {
+
+                    $(this).css('box-shadow', ' 0px 3px 2px 0px #00000059 inset')
+                    icon_ruler_flag = !icon_ruler_flag
+                } else {
+                    $(this).css('box-shadow', ' 0px 3px 2px 0px #00000059 ')
+                    icon_ruler_flag = !icon_ruler_flag
+                    clearList()
+                }
+
+            })
+
+            const options = {
+                button: document.querySelector(".map-cells-icon-ruler")
+            };
+
+            L.Control.qgsmeasure(options)
+                .addTo(map);
+
+
+
+            function refreshList(e) {
+                let measure_text = ''
+                for (let i = 0; i < e.segments.length; i++) {
+                    let to = e.segments[i]['from']
+                    let from = e.segments[i]['to']
+                    let distance = parseFloat(e.segments[i]['distance']).toFixed(2)
+                    measure_text += `<b>Segment ${to} to ${from}</b> = ` + distance + 'm\n'
+                }
+                document.querySelector(".map-cells-measures-area").innerHTML = measure_text
+            }
+
+            function clearList() {
+                document.querySelector(".map-cells-measures-area").innerText = "";
+            }
+
+            map.on("qgsmeasure:newsegment", refreshList);
+            map.on("qgsmeasure:newmeasure", clearList);
+
+
+            $(document).on('keydown', function (e) {
+                if (e.key === "Escape") {
+                    $('.icon-ruler').css('box-shadow', ' 0px 3px 2px 0px #00000059')
+                    icon_ruler_flag = true;
+                    clearList()
+                }
+            })
+        }
+        const inicializateCompassMaps = () => {
+            $(".map-cells-icon-compass").on('mouseover', function (e) {
+                document.querySelector('.map-cells-icon-compass').src = '/npsmart/images/bussola-animated.gif'
+
+            })
+            $(".map-cells-icon-compass").on('mouseout', function (e) {
+                document.querySelector('.map-cells-icon-compass').src = '/npsmart/images/bussola-static.png'
+
+            })
+            $(".map-cells-icon-compass").on('click', function () {
+                let latitude;
+                let longitude;
+                latitude = document.querySelector('.map-cells-compass-latitude').value
+                longitude = document.querySelector('.map-cells-compass-longitude').value
+                if (latitude != '' && latitude != '') {
+                    map.flyTo([latitude, longitude], 18, {
+                        duration: 2
+                    });
+                }
+
+
+            })
+        }
+
+
+        const pullLibraries = () => {
+            console.log('pullLibraries')
+            const jsUrls = [
+
+                '/npsmart/js/virtual_select.js', // biblioteca js virtual selec
+                '/npsmart/js/Semicircle.js', //js semicircule 
+                'https://cdnjs.cloudflare.com/ajax/libs/axios/0.21.1/axios.min.js', //js ajax
+                'https://cdn.jsdelivr.net/npm/sweetalert2@11', //js sweet Alert
+                // 'https://cdnjs.cloudflare.com/ajax/libs/jquery/3.7.1/jquery.min.js', // jquery
+                '/npsmart/js/block-ui.js', //blockUI
+                '/npsmart/js/map-scripts/file-process.js', //processamento de arquivos
+                '/npsmart/js/map-scripts/fabric.min.js',//fabric para formatos
+            ]
+
+            const cssUrls = [
+                '/npsmart/js/map-scripts/leaflet.css', //css leaflet 
+                '/npsmart/css/virtual_select.css', //css virtual select 
+                'https://cdnjs.cloudflare.com/ajax/libs/leaflet.draw/1.0.4/leaflet.draw.css', //css draw 
+                'https://cdn.jsdelivr.net/npm/flatpickr/dist/flatpickr.min.css',//flatpicker
+                '/npsmart/css/cluster_leaflet.css',//cluster donut
+                '/npsmart/css/Leaflet.DonutCluster.css',//cluster donut
+            ]
+
+            cssUrls.forEach(element => {
+                let linkElement = document.createElement('link');
+                linkElement.rel = 'stylesheet';
+                linkElement.href = element;
+                document.head.appendChild(linkElement);
+            })
+
+            function loadLeaflet() {
+                var script = document.createElement('script');
+                script.src = '/npsmart/js/map-scripts/leaflet.js';
+                script.onload = function () {
+                    loadOtherScripts();
+                    loadDonutCluster();
+                    loadDrawnLeaflet();
+                    inicializateCompassMaps();
+                    initMap()
+                };
+                document.head.appendChild(script);
+            }
+            function loadDrawnLeaflet() {
+                var script = document.createElement('script');
+                script.src = 'https://cdnjs.cloudflare.com/ajax/libs/leaflet.draw/1.0.4/leaflet.draw.js';
+                script.onload = function () {
+                    loadQSGmeasure()
+                };
+                document.head.appendChild(script);
+            }
+            function loadQSGmeasure() {
+                var script = document.createElement('script');
+                script.src = '/npsmart/js/map-scripts/leaflet.qgsmeasure.min.js', //js leaflet measure
+
+                    script.onload = function () {
+                        inicializateRulerMaps()
+                    };
+
+                document.head.appendChild(script);
+            }
+            function loadFlatPicker2() {
+                var script = document.createElement('script');
+                script.src = 'https://cdn.jsdelivr.net/npm/flatpickr/dist/l10n/pt.js';
+                script.onload = function () {
+                    inicializateFlatPicker()
+                };
+                document.head.appendChild(script);
+            }
+            function loadFlatPicker() {
+                var script = document.createElement('script');
+                script.src = 'https://cdn.jsdelivr.net/npm/flatpickr';
+                script.onload = function () {
+                    loadFlatPicker2()
+                };
+                document.head.appendChild(script);
+            }
+            function loadDonutCluster2() {
+                var script = document.createElement('script');
+                script.src = '/npsmart/js/Leaflet.DonutCluster.js',//Leaflet DonutCluster
+
+                    script.onload = function () {
+                        inicializateOoklaDotsVars()
+
+                    };
+                document.head.appendChild(script);
+            }
+
+            function loadDonutCluster() {
+                var script = document.createElement('script');
+                script.src = '/npsmart/js/cluster_leaflet.js',//Leaflet DonutCluster
+
+                    script.onload = function () {
+                        loadDonutCluster2()
+
+                    };
+                document.head.appendChild(script);
+            }
+
+            function loadOtherScripts() {
+                // Aqui você pode carregar outros scripts que dependem do Leaflet
+                jsUrls.forEach(element => {
+                    var script = document.createElement('script');
+                    script.src = element;
+                    document.head.appendChild(script);
+                    if (element == '/npsmart/js/virtual_select.js') {
+                        inicializateVirtualSelect()
+                    }
+
+                })
+
+                // Continue carregando outros scripts conforme necessário
+            }
+            function loadHtmlMapFunctions() {
+                var script = document.createElement('script');
+
+                script.src = '/npsmart/js/map-scripts/html-map.js',//Leaflet DonutCluster
+
+                    script.onload = function () {
+
+                        createHtmlMap(mapCellsInstancy)
+                        loadMapFunctions()
+                        loadDocumentListeners()
+                    }
+                document.head.appendChild(script);
+            }
+            function loadMapFunctions() {
+                var script = document.createElement('script');
+
+                script.src = '/npsmart/js/map-scripts/functions-map.js?v=2.0',//Leaflet DonutCluster
+
+                    script.onload = function () {
+                        loadLeaflet()
+                    }
+                document.head.appendChild(script);
+            }
+            loadHtmlMapFunctions()
+            loadFlatPicker()
+        }
+
+        const loadDocumentListeners = () => {
+
+            let script = document.createElement('script');
+
+            let content = `
+            const getStationNames = () => {
+                let markers = []
+                console.log(map._zoom)
+                if ($('#labels').prop('checked') && map._zoom >= 10) {
+
+                    let state3G = $('.map-cells-control-panel .map-cells-set:has([select=uf][tech=3G]) input[type=hidden]').val();
+                    let state4G = $('.map-cells-control-panel .map-cells-set:has([select=uf][tech=4G]) input[type=hidden]').val();
+                    let state5G = $('.map-cells-control-panel .map-cells-set:has([select=uf][tech=5G]) input[type=hidden]').val();
+
+                    let stations5G = []
+                    let stations4G = []
+                    let stations3G = []
+
+                    $('#map-cells-control-panel-select-station3G').val().forEach(function(st){
+                        stations3G.push(st.split('<')[0].split('-')[1])
+                    })
+
+                    $('#map-cells-control-panel-select-station4G').val().forEach(function(st){
+                        stations4G.push(st.split('<')[0].split('-')[1])
+                    })
+
+                    $('#map-cells-control-panel-select-station5G').val().forEach(function(st){
+                        stations5G.push(st.split('<')[0].split('-')[1])
+                    })
+
+
+                    let req = fetch('/npsmart/map/show_stations', {
+                        headers: {
+                            'Content-type': 'application/json'
+                        },
+                        method: 'POST',
+                        body: JSON.stringify({
+                            'state': state4G,
+                            'state3G': state3G,
+                            'state5G': state5G
+                        })
+                    })
+                        .then((res) => {
+                            return res.json();
+                        }).then((data) => {
+                            for (let i = 0; i < data.length; i++) {
+                                if(stations5G.includes(data[i]['station']) || stations4G.includes(data[i]['station']) || stations3G.includes(data[i]['station']) ){
+                                    marker = L.marker([data[i]['latitude'], data[i]['longitude']], {
+                                        icon: L.divIcon({
+                                            className: 'labelClass',
+                                            html: '<div class="station-name" style="-webkit-text-stroke-width: 1px;-webkit-text-stroke-color: black;font-size: 22px;font-weight: bold;color: white; width:max-content">' + data[i]['station'] + '</div>'
+                                        })
+                                    })
+                                    markers.push(marker)
+                                }
+                            }
+
+                            for (let i = 0; i < markers.length; i++) {
+                                markers[i].addTo(map)
+                            }
+                        })
+                } else {
+                    for (let i = 0; i < markers.length; i++) {
+                        map.removeLayer(markers[i])
+                    }
+                }
+                document.querySelectorAll('.station-name').forEach(el => el.remove());
+            }
+
+            function ufResetAll(e) {
+                let close_buttons = e.closest('.map-cells-control-panel').querySelectorAll('.map-cells-set:not(:has([select=uf])) .vscomp-clear-icon')
+                for (let el of close_buttons) {
+                    el.click();
+                }
+                
+                $('.station-name').css('display', 'none')
+            }
+
+            setTimeout(() => {
+                $('.map-cells-control-panel [select=uf] .vscomp-clear-icon').on('click', (e) => {
+                    ufResetAll(e.target);
+                })
+
+                const vsoption_observer = new MutationObserver((mutationList) => {
+                    mutationList.forEach(record => {
+                        record.target.getAttribute(record.attributeName) == '' ? ufResetAll(record.target) : '';
+                    })
+                })
+
+                for (let el of document.querySelectorAll('.map-cells-control-panel [select=uf] input[type=hidden]')) {
+                    vsoption_observer.observe(el,
+                        {
+                            attributes: true,
+                            childList: false,
+                            subtree: false
+                        })
+                }
+            }, 1000)`
+
+            script.append(content)
+            document.head.appendChild(script);
+        }
+
+        // this.drawRouteThp = (data, tech) =>{
+        //     map.setView([data[0].lat, data[0].long], 11, { animation: true })
+        //     var myRenderer = L.canvas({ padding: 0.5 });
+        //     if(data != 0){
+        //         for(let i = 0; i < data.length; i++){
+        //             let point_color = 'blue'
+        //             let avg = parseFloat(data[i].avg)
+
+        //             if(tech_selected == '5G'){
+        //                 if(avg != 0){
+        //                     if(avg < 5){
+        //                         point_color = '#000000'
+        //                     }else if(avg < 15){
+        //                         point_color = '#7CB5EC'
+        //                     }else if(avg < 30){
+        //                         point_color = '#191970'
+        //                     }else if(avg < 50){
+        //                         point_color = 'blue'
+        //                     }else if(avg < 100){
+        //                         point_color = 'green'
+        //                     }else{
+        //                         point_color = 'grey'
+        //                     }
+        //                 }
+        //             }else if(tech_selected == '4G'){
+        //                 if(avg == 0){
+        //                     point_color = '#000000'
+        //                 }else if(avg < 1){
+        //                     point_color = 'grey'
+        //                 }else if(avg < 3){
+        //                     point_color = '#191970'
+        //                 }else if(avg < 5){
+        //                     point_color = 'blue'
+        //                 }else if(avg < 10){
+        //                     point_color = 'green'
+        //                 }else if(avg < 15){
+        //                     point_color = 'yellow'
+        //                 }else if(avg < 50){
+        //                     point_color = 'orange'
+        //                 }else if(avg >= 50){
+        //                     point_color = 'red'
+        //                 }
+        //             }
+
+        //             if(point_color != ''){
+        //                 L.circle([data[i].lat, data[i].long],{
+        //                     color: point_color,
+        //                     radius: 40,
+        //                     fillOpacity: 1,
+        //                     render: myRenderer
+        //                 }).addTo(map)
+        //             }
+        //         }
+        //     }
+        // }
+
+        const getPropagationDate = () => {
+            $.ajax({
+                url: "/npsmart/map/get_propagation_date",
+                method: 'POST',
+                data: {
+                    tec: this.techs
+                },
+                success: function (result) {
+
+                    result = JSON.parse(result)
+                    this.propagationDates = result
+                },
+
+                error: function (error) {
+                    // Swal.fire({
+                    //     title: 'Error!',
+                    //     text: 'Error when getting data',
+                    //     icon: 'error',
+                    //     confirmButtonText: 'Ok'
+                    // })
+                }
+            });
+
+            console.log(this.propagationDates)
+        }
+
+        const blockUi = (plot) => {
+            if (plot) {
+                var divNova = document.createElement("div");
+                var divAtual = document.querySelector(`#${this.id}`);
+                divNova.classList.add('map-cells-card-block')
+                divNova.style.backgroundColor = 'rgb(0,0,0,0.35)'
+                divAtual.append(divNova)
+            } else {
+                try {
+                    var divRemove = document.querySelector('.map-cells-card-block')
+                    divRemove.parentNode.removeChild(divRemove)
+                } catch (error) {
+
+                }
+            }
+        }
+        this.init = () => {
+            console.log('this.init')
+            // getPropagationDate();
+            pullLibraries()
+
+        };
+    }
+}
+

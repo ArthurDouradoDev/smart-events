@@ -1,0 +1,14 @@
+#map{
+    position: absolute;
+    top: 5vh;
+    width: 100vw;
+    height: 95vh;
+    background-color: black;
+}
+#map2{
+    position: absolute;
+    top: 5vh;
+    width: 100vw;
+    height: 95vh;
+    background-color: black;
+}

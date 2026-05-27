@@ -1,0 +1,18 @@
+curl ^"https://10.220.50.9:31943/rest/oss/access/fars/v1/traceresult/query/sort?nocache=1779299882490^" ^
+  -H ^"Accept: application/json, text/plain, */*^" ^
+  -H ^"Accept-Language: en-US,en;q=0.9^" ^
+  -H ^"Connection: keep-alive^" ^
+  -H ^"Content-Type: application/json^" ^
+  -b ^"locale=en-us; bspsession=x-ljdhs5mleqg79j9cnz1g3trv86sac6thanjt2kjw045dal4989g71gtdheg6rwbthfka3ydgqkaremnxdcte3x444a9fg7nvuo2p0amqlfekilkbljc6uksapftj7yul; user_time_a_lang=; user_digital_format=^%^2C^%^23^%^230.00; delimiter=-; format=yyyy-MM-dd^%^20HH^%^3Amm^%^3Ass; timezoneoffset=-180; user_time_show_dst=1; timezone=America^%^2FSao_Paulo; timemode=client; multiLanguage=false^" ^
+  -H ^"Origin: https://10.220.50.9:31943^" ^
+  -H ^"Referer: https://10.220.50.9:31943/omc/farswebsite/index.html?noCache7029^&refr-flags=e^&noAutoLoadPIU^&loadTopPIU=refr,message-transform^" ^
+  -H ^"Sec-Fetch-Dest: empty^" ^
+  -H ^"Sec-Fetch-Mode: cors^" ^
+  -H ^"Sec-Fetch-Site: same-origin^" ^
+  -H ^"User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36^" ^
+  -H ^"roarand: c395991d30c6b3c2df12ecf65dad05e47277588cd1bee28b^" ^
+  -H ^"sec-ch-ua: ^\^"Chromium^\^";v=^\^"148^\^", ^\^"Google Chrome^\^";v=^\^"148^\^", ^\^"Not/A)Brand^\^";v=^\^"99^\^"^" ^
+  -H ^"sec-ch-ua-mobile: ?0^" ^
+  -H ^"sec-ch-ua-platform: ^\^"Windows^\^"^" ^
+  --data-raw ^"^{^\^"msgId^\^":3977005,^\^"comparisonMsgId^\^":-1,^\^"taskId^\^":1925,^\^"isAscend^\^":true,^\^"sqlColumnName^\^":^\^"Time^\^",^\^"startRow^\^":0,^\^"pageSize^\^":1000,^\^"templateName^\^":^[^],^\^"isSetBenchMarkTime^\^":false,^\^"benchMarkTimeRowNo^\^":-1^}^" ^
+  --insecure

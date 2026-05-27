@@ -1,0 +1,80 @@
+# ==========================================
+# SmartEvents - Git Ignore Configuration
+# ==========================================
+
+# --- Python ---
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+develop-eggs/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# --- Virtual Environments ---
+.venv/
+venv/
+ENV/
+env.bak/
+venv.bak/
+
+# --- Database / Dynamic Application Data ---
+# SmartEvents databases are dynamically generated here
+data/
+server_data/
+*.db
+*.sqlite3
+
+# --- PyInstaller / Executable Builds ---
+dist/
+build/
+*.manifest
+*.spec
+
+# --- Logs ---
+*.log
+logs/
+err/
+
+# --- OS / System Files ---
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# --- IDEs / Editors ---
+.vscode/
+.idea/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.swp
+*.swo
+
+# --- Local Environment Variables ---
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+
+# --- Node / Frontend Packages ---
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*

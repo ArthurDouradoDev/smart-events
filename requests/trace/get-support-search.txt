@@ -1,0 +1,15 @@
+curl ^"https://10.220.50.9:31943/rest/oss/access/fars/v1/collectiontask/query/get-support-search-time-range?nocache=1779731865262^&taskId=1925^" ^
+  -H ^"Accept: application/json, text/plain, */*^" ^
+  -H ^"Accept-Language: en-US,en;q=0.9^" ^
+  -H ^"Connection: keep-alive^" ^
+  -b ^"locale=en-us; bspsession=x-uprsbwhirz7t1jo7rvaobtc6tery7zcb7vpcljftik5g2qakhgldhjjxs5g6sa9icbk5qrvviq8apcdcdimmdgfvg7mkdd48eruqns3xaqar2m3vo7aqg9dh46vsbwpi; user_time_a_lang=; user_digital_format=^%^2C^%^23^%^230.00; delimiter=-; format=yyyy-MM-dd^%^20HH^%^3Amm^%^3Ass; timezoneoffset=-180; user_time_show_dst=1; timezone=America^%^2FSao_Paulo; timemode=client; multiLanguage=false^" ^
+  -H ^"Referer: https://10.220.50.9:31943/omc/farswebsite/index.html?noCache4847^&refr-flags=e^&noAutoLoadPIU^&loadTopPIU=refr,message-transform^" ^
+  -H ^"Sec-Fetch-Dest: empty^" ^
+  -H ^"Sec-Fetch-Mode: cors^" ^
+  -H ^"Sec-Fetch-Site: same-origin^" ^
+  -H ^"User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36^" ^
+  -H ^"roarand: e1303158423ff0ce2569cee5b7553f3602bd8ef27b5e2d4c^" ^
+  -H ^"sec-ch-ua: ^\^"Not/A)Brand^\^";v=^\^"99^\^", ^\^"Chromium^\^";v=^\^"148^\^"^" ^
+  -H ^"sec-ch-ua-mobile: ?0^" ^
+  -H ^"sec-ch-ua-platform: ^\^"Windows^\^"^" ^
+  --insecure

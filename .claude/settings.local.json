@@ -1,0 +1,33 @@
+{
+  "permissions": {
+    "allow": [
+      "PowerShell($env:PYTHONIOENCODING='utf-8'; & \"c:\\\\Users\\\\a50057663\\\\Desktop\\\\Automações\\\\SmartEvents\\\\.venv\\\\Scripts\\\\python.exe\" \"c:\\\\Users\\\\a50057663\\\\Desktop\\\\Automações\\\\SmartEvents\\\\scratch\\\\diagnose_trace_500.py\")",
+      "PowerShell($env:PYTHONIOENCODING='utf-8'; & \"c:\\\\Users\\\\a50057663\\\\Desktop\\\\Automações\\\\SmartEvents\\\\.venv\\\\Scripts\\\\python.exe\" \"c:\\\\Users\\\\a50057663\\\\Desktop\\\\Automações\\\\SmartEvents\\\\scratch\\\\diagnose_task_state.py\")",
+      "PowerShell($env:PYTHONIOENCODING='utf-8'; & \"c:\\\\Users\\\\a50057663\\\\Desktop\\\\Automações\\\\SmartEvents\\\\.venv\\\\Scripts\\\\python.exe\" \"c:\\\\Users\\\\a50057663\\\\Desktop\\\\Automações\\\\SmartEvents\\\\scratch\\\\get_session.py\" --headless --module trace)",
+      "PowerShell($env:PYTHONIOENCODING='utf-8'; & \"c:\\\\Users\\\\a50057663\\\\Desktop\\\\Automações\\\\SmartEvents\\\\.venv\\\\Scripts\\\\python.exe\" \"c:\\\\Users\\\\a50057663\\\\Desktop\\\\Automações\\\\SmartEvents\\\\scratch\\\\diagnose_trace_500.py\" 2>&1 | Select-Object -First 25)",
+      "Bash(rtk ls *)",
+      "PowerShell($env:PYTHONIOENCODING='utf-8'; & \"c:\\\\Users\\\\a50057663\\\\Desktop\\\\Automações\\\\SmartEvents\\\\.venv\\\\Scripts\\\\python.exe\" \"c:\\\\Users\\\\a50057663\\\\Desktop\\\\Automações\\\\SmartEvents\\\\scratch\\\\test_correct_flow.py\")",
+      "PowerShell($env:PYTHONIOENCODING='utf-8'; & \"c:\\\\Users\\\\a50057663\\\\Desktop\\\\Automações\\\\SmartEvents\\\\.venv\\\\Scripts\\\\python.exe\" \"c:\\\\Users\\\\a50057663\\\\Desktop\\\\Automações\\\\SmartEvents\\\\scratch\\\\inspect_trace_messages.py\")",
+      "PowerShell($env:PYTHONIOENCODING='utf-8'; & \"c:\\\\Users\\\\a50057663\\\\Desktop\\\\Automações\\\\SmartEvents\\\\.venv\\\\Scripts\\\\python.exe\" \"c:\\\\Users\\\\a50057663\\\\Desktop\\\\Automações\\\\SmartEvents\\\\scratch\\\\inspect_msg_explain.py\")",
+      "PowerShell($env:PYTHONIOENCODING='utf-8'; & \"c:\\\\Users\\\\a50057663\\\\Desktop\\\\Automações\\\\SmartEvents\\\\.venv\\\\Scripts\\\\python.exe\" \"c:\\\\Users\\\\a50057663\\\\Desktop\\\\Automações\\\\SmartEvents\\\\scratch\\\\test_collector_vips.py\" 2>&1)",
+      "PowerShell($env:PYTHONIOENCODING='utf-8'; & \"c:\\\\Users\\\\a50057663\\\\Desktop\\\\Automações\\\\SmartEvents\\\\.venv\\\\Scripts\\\\python.exe\" \"c:\\\\Users\\\\a50057663\\\\Desktop\\\\Automações\\\\SmartEvents\\\\scratch\\\\test_vip_phase1.py\")",
+      "PowerShell($env:PYTHONIOENCODING='utf-8'; & \"c:\\\\Users\\\\a50057663\\\\Desktop\\\\Automações\\\\SmartEvents\\\\.venv\\\\Scripts\\\\python.exe\" -c \"import py_compile; py_compile.compile\\(r'c:\\\\Users\\\\a50057663\\\\Desktop\\\\Automações\\\\SmartEvents\\\\core\\\\database.py', doraise=True\\); py_compile.compile\\(r'c:\\\\Users\\\\a50057663\\\\Desktop\\\\Automações\\\\SmartEvents\\\\api\\\\api.py', doraise=True\\); py_compile.compile\\(r'c:\\\\Users\\\\a50057663\\\\Desktop\\\\Automações\\\\SmartEvents\\\\core\\\\collector.py', doraise=True\\); py_compile.compile\\(r'c:\\\\Users\\\\a50057663\\\\Desktop\\\\Automações\\\\SmartEvents\\\\server.py', doraise=True\\); py_compile.compile\\(r'c:\\\\Users\\\\a50057663\\\\Desktop\\\\Automações\\\\SmartEvents\\\\main.py', doraise=True\\); print\\('OK'\\)\")",
+      "PowerShell($env:PYTHONIOENCODING='utf-8'; & \"c:\\\\Users\\\\a50057663\\\\Desktop\\\\Automações\\\\SmartEvents\\\\.venv\\\\Scripts\\\\python.exe\" \"c:\\\\Users\\\\a50057663\\\\Desktop\\\\Automações\\\\SmartEvents\\\\scratch\\\\test_imports.py\")",
+      "Bash(powershell -Command \"Select-String -Path 'c:\\\\Users\\\\a50057663\\\\Desktop\\\\Automações\\\\SmartEvents\\\\server_data\\\\events\\\\sao-paulo.json' -Pattern '\\\\\"vips\\\\\"' -Context 0,15 | Select-Object -First 50\")",
+      "Bash(python -c ' *)",
+      "Bash(python scratch/migrate_vips.py)",
+      "Bash(python scratch/test_imports.py)",
+      "Bash(Get-ChildItem -Path \"c:\\\\Users\\\\a50057663\\\\Desktop\\\\Automações\\\\SmartEvents\" -Recurse -Directory)",
+      "Bash(Select-Object -ExpandProperty FullName)",
+      "Bash(Sort-Object)",
+      "Bash(Get-ChildItem -Path \"c:\\\\Users\\\\a50057663\\\\Desktop\\\\Automações\\\\SmartEvents\" -Recurse -Include \"*.py\", \"*.json\", \"*.js\")",
+      "Bash(Get-ChildItem -Path \"c:\\\\Users\\\\a50057663\\\\Desktop\\\\Automações\\\\SmartEvents\" -Recurse -Force)",
+      "Bash(Select-Object -First 50)",
+      "Bash(Get-ChildItem -Path \"c:\\\\Users\\\\a50057663\\\\Desktop\\\\Automações\\\\SmartEvents\" -Recurse -Depth 2)",
+      "Bash(Select-Object FullName)",
+      "Read(//c/Users/a50057663/Desktop/Automa��es/**)",
+      "PowerShell(head -30)",
+      "Bash(Remove-Item \"c:\\\\Users\\\\a50057663\\\\Desktop\\\\Automações\\\\SmartEvents\\\\frontend\\\\js\\\\vips-admin.js\")"
+    ]
+  }
+}

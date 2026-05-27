@@ -1,0 +1,40 @@
+    def _parse_kpi_response(self, response_json: dict) -> List[dict]:
+        rows = []
+        data_list = response_json.get("data", [])
+        if not data_list:
+            return rows
+
+        for task_data in data_list:
+            results = task_data.get("results", [])
+            for res_item in results:
+                # If the response has "objRes", iterate over the items inside it.
+                # Otherwise, treat the res_item itself as the object measurement.
+                items_to_process = res_item.get("objRes", []) if "objRes" in res_item else [res_item]
+                
+                exec_time = res_item.get("execTime") or task_data.get("execTime")
+                if exec_time:
+                    timestamp = datetime.utcfromtimestamp(exec_time / 1000.0).isoformat()
+                else:
+                    timestamp = datetime.utcnow().isoformat()
+
+                for item in items_to_process:
+                    obj_data = item.get("obj") or {}
+                    obj_no = item.get("objNo") or obj_data.get("objNo") or (item.get("obj", {}).get("objNo") if isinstance(item.get("obj"), dict) else None)
+                    if not obj_no:
+                        continue
+                    
+                    try:
+                        obj_no_int = int(obj_no)
+                    except ValueError:
+                        continue
+                    
+                    cell_info = self._obj_to_cell.get(obj_no_int)
+                    
+                    if not cell_info:
+                        obj_name = item.get("objName") or obj_data.get("objName") or ""
+                        if obj_name:
+                            obj_name_clean = obj_name.replace("-", "").replace(" ", "").upper()
+                            for c_id, s_id in self._cell_to_site.items():
+                                c_id_clean = c_id.replace("-", "").replace(" ", "").upper()
+                                if c_id in obj_name or
+<truncated 1442 bytes>

@@ -1,0 +1,726 @@
+"""
+Api: métodos Python expostos ao JavaScript via window.pywebview.api.
+Todos os métodos retornam dicts/lists serializáveis para JSON.
+"""
+
+import json
+import logging
+from datetime import datetime
+from pathlib import Path
+from typing import Optional
+
+from core import database as db
+from core.scheduler import scheduler
+
+logger = logging.getLogger(__name__)
+
+_active_event: Optional[dict] = None
+_update_callback = None  # função JS chamada quando novos dados chegam
+
+
+class Api:
+
+    # ── Ciclo de vida do evento ──────────────────────────────────────
+
+    def load_event(self, json_path: str) -> dict:
+        """Carrega arquivo de configuração do evento (.json)."""
+        global _active_event
+        try:
+            path = Path(json_path)
+            if not path.exists():
+                return {"ok": False, "error": f"Arquivo não encontrado: {json_path}"}
+
+            with open(path, encoding="utf-8") as f:
+                config = json.load(f)
+
+            db.save_event(config)
+            # Exporta para o servidor de API central para sincronizar com os outros computadores
+            db.export_event_to_server(config)
+            _active_event = config
+
+            return {"ok": True, "event": self._sanitize_event(config)}
+        except Exception as e:
+            logger.error(f"load_event error: {e}")
+            return {"ok": False, "error": str(e)}
+
+    def activate_event(self, event_id: str, mock: bool = False) -> dict:
+        """Ativa evento e inicia gravação de dados."""
+        global _active_event
+        try:
+            config = db.get_event(event_id) or _active_event
+            if not config:
+                return {"ok": False, "error": "Evento não encontrado"}
+
+            db.update_event_status(event_id, "ACTIVE")
+            config["status"] = "ACTIVE"
+            _active_event = config
+
+            def _notify():
+                if _update_callback:
+                    try:
+                        _update_callback()
+                    except Exception:
+                        pass
+
+            scheduler.set_update_callback(_notify)
+            scheduler.start(config, mock=mock)
+
+            return {"ok": True, "event": self._sanitize_event(config)}
+        except Exception as e:
+            logger.error(f"activate_event error: {e}")
+            return {"ok": False, "error": str(e)}
+
+    def end_event(self, event_id: str) -> dict:
+        """Encerra evento e para gravação."""
+        try:
+            scheduler.stop()
+            db.update_event_status(event_id, "ENDED")
+            global _active_event
+            if _active_event and _active_event.get("id") == event_id:
+                _active_event = None
+            return {"ok": True}
+        except Exception as e:
+            return {"ok": False, "error": str(e)}
+
+    def get_events(self) -> list:
+        """Lista todos os eventos salvos localmente."""
+        events = db.get_events()
+        out = []
+        for e in events:
+            full_event = db.get_event(e["id"])
+            if full_event:
+                out.append(self._sanitize_event(full_event))
+            else:
+                out.append(self._sanitize_event(e))
+        return out
+
+    def sync_events(self) -> dict:
+        """
+        Sincroniza eventos primeiro (garante que events existam para FK de event_vips)
+        e depois VIPs com suas associações a eventos.
+        """
+        try:
+            event_stats = db.sync_events_from_server()
+            vip_stats = db.sync_vips_from_server()
+            return {"ok": True, "stats": {"vips": vip_stats, "events": event_stats}}
+        except Exception as e:
+            logger.error(f"sync_events error: {e}")
+            return {"ok": False, "error": str(e)}
+
+    def get_settings(self) -> dict:
+        """Retorna as configurações atuais do aplicativo."""
+        try:
+            settings = db.get_settings()
+            return {"ok": True, "settings": settings}
+        except Exception as e:
+            return {"ok": False, "error": str(e)}
+
+    def save_settings(self, settings: dict) -> dict:
+        """Salva novas configurações do aplicativo e força uma sincronização com o servidor."""
+        try:
+            db.save_settings(settings)
+            stats = db.sync_events_from_server()
+            return {"ok": True, "stats": stats}
+        except Exception as e:
+            return {"ok": False, "error": str(e)}
+
+    def get_active_event(self) -> dict:
+        """Retorna o evento atualmente ativo."""
+        global _active_event
+        if _active_event:
+            return {"ok": True, "event": self._sanitize_event(_active_event)}
+        events = db.get_events(status="ACTIVE")
+        if events:
+            full_event = db.get_event(events[0]["id"])
+            if full_event:
+                _active_event = full_event
+                return {"ok": True, "event": self._sanitize_event(full_event)}
+        return {"ok": False, "event": None}
+
+    # ── Dados do mapa / sites ────────────────────────────────────────
+
+    def get_sites(self, event_id: str, timestamp: Optional[str] = None,
+                  metric: str = "utilization_dl") -> list:
+        """Retorna sites com status atual para renderização no mapa."""
+        try:
+            config = db.get_event(event_id) or _active_event
+            if not config:
+                return []
+
+            latest = db.get_latest_kpi(event_id, timestamp)
+            util_by_site = self._aggregate_utilization(latest)
+
+            # Calcula valor contextual para a métrica selecionada (exibição na lista)
+            VOLUME_METRICS = {"user_count", "traffic_volume_dl", "traffic_volume_ul"}
+
+            if metric != "utilization_dl":
+                latest_metric = db.get_latest_kpi_by_metric(event_id, metric, timestamp)
+            else:
+                latest_metric = latest  # reusa os dados já carregados
+
+            metric_by_site = self._aggregate_metric_for_list(latest_metric, metric)
+
+            sites_out = []
+            thresholds = config.get("thresholds", {})
+            warn = thresholds.get("utilization_warning", 80)
+            crit = thresholds.get("utilization_critical", 95)
+
+            for site in config.get("sites", []):
+                util = util_by_site.get(site["id"])
+                status = "unknown"
+                if util is not None:
+                    if util >= crit:
+                        status = "critical"
+                    elif util >= warn:
+                        status = "warning"
+                    else:
+                        status = "healthy"
+
+                sites_out.append({
+                    "id":              site["id"],
+                    "name":            site["name"],
+                    "lat":             site["lat"],
+                    "lng":             site["lng"],
+                    "cells":           site.get("cells", []),
+                    "status":          status,
+                    "utilization":     round(util, 1) if util is not None else None,
+                    "metric_value":    metric_by_site.get(site["id"]),
+                    "metric_is_share": metric in VOLUME_METRICS,
+                    "is_event_site":   site.get("is_event_site", True),
+                })
+
+            return sites_out
+        except Exception as e:
+            logger.error(f"get_sites error: {e}")
+            return []
+
+    def get_site_cells(self, event_id: str, site_id: str) -> list:
+        """
+        Retorna a lista de células de um site específico.
+        Usado para popular o seletor de célula no gráfico.
+        """
+        try:
+            config = db.get_event(event_id) or _active_event
+            if not config:
+                return []
+            for site in config.get("sites", []):
+                if site["id"] == site_id:
+                    cells = site.get("cells", [])
+                    out = []
+                    for c in cells:
+                        if isinstance(c, str):
+                            out.append({"id": c, "label": c})
+                        else:
+                            out.append({
+                                "id":    c.get("id", ""),
+                                "label": c.get("id", ""),
+                                "tech":  c.get("tech"),
+                                "freq":  c.get("frequency"),
+                            })
+                    return out
+            return []
+        except Exception as e:
+            logger.error(f"get_site_cells error: {e}")
+            return []
+
+    # ── KPI / gráfico ────────────────────────────────────────────────
+
+    def get_kpi_series(self, event_id: str, site_id: str, metric: str,
+                       minutes: int = 60, cell_id: str = "__all__") -> dict:
+        """Retorna série temporal para o gráfico de KPIs."""
+        try:
+            # 1. Obter medições brutas
+            if metric == "utilization":
+                rows = db.get_kpi_series(event_id, site_id, "utilization", minutes)
+                if not rows:
+                    # Busca DL e UL e combina por cell/timestamp
+                    rows_dl = db.get_kpi_series(event_id, site_id, "utilization_dl", minutes)
+                    rows_ul = db.get_kpi_series(event_id, site_id, "utilization_ul", minutes)
+                    
+                    combined = {}
+                    for r in rows_dl:
+                        key = (r["cell_id"], r["timestamp"])
+                        combined[key] = r["value"]
+                    for r in rows_ul:
+                        key = (r["cell_id"], r["timestamp"])
+                        if key in combined:
+                            combined[key] = max(combined[key], r["value"])
+                        else:
+                            combined[key] = r["value"]
+                    
+                    rows = [
+                        {"cell_id": cell, "timestamp": ts, "value": val}
+                        for (cell, ts), val in combined.items()
+                    ]
+            else:
+                rows = db.get_kpi_series(event_id, site_id, metric, minutes)
+
+            # Se célula específica solicitada, filtrar antes de agregar
+            if cell_id and cell_id not in ("__all__", "__media__"):
+                rows = [r for r in rows if r.get("cell_id") == cell_id]
+
+            # 2. Agrupar por timestamp para consolidar dados de múltiplas células do mesmo site
+            ts_groups = {}
+            for r in rows:
+                ts = r["timestamp"]
+                val = r["value"]
+                if val is not None:
+                    if ts not in ts_groups:
+                        ts_groups[ts] = []
+                    ts_groups[ts].append(val)
+
+            # 3. Consolidar grupos de timestamps para ter um único valor por timestamp no gráfico
+            aggregated = []
+            for ts, vals in sorted(ts_groups.items()):
+                if not vals:
+                    continue
+                # Se o usuário escolheu "Média" explicitamente, sempre calcula AVG
+                if cell_id == "__media__":
+                    val = sum(vals) / len(vals)
+                elif "availability" in metric or "accessibility" in metric:
+                    val = sum(vals) / len(vals)
+                elif "throughput" in metric:
+                    val = sum(vals)          # throughput é somado (capacidade do site)
+                elif "rsrp" in metric or "rsrq" in metric:
+                    val = sum(vals) / len(vals)
+                else:
+                    val = max(vals)          # utilização, user_count → pior/máximo
+                aggregated.append({"timestamp": ts, "value": val})
+
+            labels = [r["timestamp"] for r in aggregated]
+            values = [r["value"] for r in aggregated]
+            gaps = self._detect_gaps(labels, max_gap_seconds=90)
+
+            config = db.get_event(event_id) or _active_event
+            thresholds = config.get("thresholds", {}) if config else {}
+
+            warning_th = thresholds.get(f"{metric}_warning")
+            critical_th = thresholds.get(f"{metric}_critical")
+            if warning_th is None and "utilization" in metric:
+                warning_th = thresholds.get("utilization_warning")
+            if critical_th is None and "utilization" in metric:
+                critical_th = thresholds.get("utilization_critical")
+
+            return {
+                "ok":         True,
+                "labels":     labels,
+                "values":     values,
+                "gaps":       gaps,
+                "thresholds": {
+                    "warning":  warning_th,
+                    "critical": critical_th,
+                },
+            }
+        except Exception as e:
+            logger.error(f"get_kpi_series error: {e}")
+            return {"ok": False, "labels": [], "values": [], "gaps": []}
+
+    # ── VIPs (cadastro global) ───────────────────────────────────────
+
+    def list_vips(self) -> list:
+        """Lista todos os VIPs cadastrados globalmente."""
+        try:
+            return db.get_vips()
+        except Exception as e:
+            logger.error(f"list_vips error: {e}")
+            return []
+
+    def create_vip(self, name: str, role: Optional[str] = None,
+                    notes: Optional[str] = None) -> dict:
+        """Cadastra um VIP global. Id é gerado a partir do nome (slug)."""
+        try:
+            vip = db.save_vip({"name": name, "role": role, "notes": notes})
+            db.export_vip_to_server(vip)
+            return {"ok": True, "vip": vip}
+        except Exception as e:
+            logger.error(f"create_vip error: {e}")
+            return {"ok": False, "error": str(e)}
+
+    def update_vip(self, vip_id: str, name: str,
+                    role: Optional[str] = None,
+                    notes: Optional[str] = None) -> dict:
+        """Atualiza um VIP existente (mantendo o id)."""
+        try:
+            vip = db.save_vip({"id": vip_id, "name": name, "role": role, "notes": notes})
+            db.export_vip_to_server(vip)
+            return {"ok": True, "vip": vip}
+        except Exception as e:
+            logger.error(f"update_vip error: {e}")
+            return {"ok": False, "error": str(e)}
+
+    def delete_vip(self, vip_id: str) -> dict:
+        """Remove um VIP global (em cascata, sai de event_vips)."""
+        try:
+            removed = db.delete_vip(vip_id)
+            db.delete_vip_on_server(vip_id)
+            return {"ok": removed}
+        except Exception as e:
+            logger.error(f"delete_vip error: {e}")
+            return {"ok": False, "error": str(e)}
+
+    def get_event_vips(self, event_id: str) -> list:
+        """Lista os VIPs atribuídos ao evento (com name/role/notes + task_id)."""
+        try:
+            return db.get_event_vips(event_id)
+        except Exception as e:
+            logger.error(f"get_event_vips error: {e}")
+            return []
+
+    def assign_vip_to_event(self, event_id: str, vip_id: str,
+                             task_id: Optional[int] = None) -> dict:
+        """Associa um VIP global a um evento e grava o task_id desse evento."""
+        try:
+            db.assign_vip_to_event(event_id, vip_id, task_id)
+            # Reflete a mudança no servidor: re-exporta o evento atualizado.
+            evt = db.get_event(event_id)
+            if evt:
+                db.export_event_to_server(evt)
+            return {"ok": True}
+        except Exception as e:
+            logger.error(f"assign_vip_to_event error: {e}")
+            return {"ok": False, "error": str(e)}
+
+    def unassign_vip_from_event(self, event_id: str, vip_id: str) -> dict:
+        """Remove a associação VIP↔evento (não apaga o VIP global)."""
+        try:
+            db.unassign_vip_from_event(event_id, vip_id)
+            evt = db.get_event(event_id)
+            if evt:
+                db.export_event_to_server(evt)
+            return {"ok": True}
+        except Exception as e:
+            logger.error(f"unassign_vip_from_event error: {e}")
+            return {"ok": False, "error": str(e)}
+
+    # ── VIPs (medições em tempo real do evento ativo) ────────────────
+
+    def get_vips(self, event_id: str, timestamp: Optional[str] = None) -> list:
+        """Retorna status atual de todos os VIPs (opcionalmente até timestamp).
+
+        VIP measurements são globais: a medição mais recente é a mesma
+        independente do evento que está sendo visualizado. O campo `in_event`
+        é calculado dinamicamente comparando a célula servidora com os sites
+        do evento atual — sem depender do valor gravado no banco.
+        """
+        try:
+            # Migra dados legados do banco específico deste evento para o global
+            # (executa apenas uma vez por evento por sessão).
+            db.migrate_event_vip_measurements(event_id)
+
+            config = db.get_event(event_id) or _active_event
+            if not config:
+                return []
+
+            # Lista vem do JOIN event_vips↔vips (cadastro global).
+            event_vips = db.get_event_vips(event_id)
+            # get_vip_latest agora é global: sem filtro de event_id.
+            latest = {r["vip_name"]: r for r in db.get_vip_latest(timestamp)}
+            thresholds = config.get("thresholds", {})
+            rsrp_warn = thresholds.get("rsrp_warning", -100)
+            rsrp_crit = thresholds.get("rsrp_critical", -110)
+
+            # Mapeamento para resolução de célula em site ID (case-insensitive)
+            cell_to_site = {}
+            for site in config.get("sites", []):
+                site_id = site["id"]
+                for cell in site.get("cells", []):
+                    if isinstance(cell, str):
+                        cell_to_site[cell.upper()] = site_id
+                    elif isinstance(cell, dict):
+                        c_id = cell.get("id")
+                        if c_id:
+                            cell_to_site[c_id.upper()] = site_id
+                        obj_no = cell.get("obj_no")
+                        if obj_no is not None:
+                            cell_to_site[str(obj_no).upper()] = site_id
+
+            def resolve_site_id(cell_id):
+                if not cell_id:
+                    return None
+                cell_id_str = str(cell_id).strip()
+                cell_id_upper = cell_id_str.upper()
+
+                # 1. Match exato com célula/obj_no mapeado
+                if cell_id_upper in cell_to_site:
+                    return cell_to_site[cell_id_upper]
+
+                # 2. Match por prefixo ou contendo no site ID/Nome
+                for site in config.get("sites", []):
+                    s_id = site["id"]
+                    s_id_upper = s_id.upper()
+                    s_name_upper = site.get("name", "").upper()
+                    if (cell_id_upper.startswith(s_id_upper) or s_id_upper in cell_id_upper or
+                            s_name_upper in cell_id_upper or cell_id_upper in s_name_upper):
+                        return s_id
+
+                # 3. Decodificação de ID global de célula (4G ECI // 256 ou 5G NCI // 4096)
+                if cell_id_str.isdigit():
+                    try:
+                        val = int(cell_id_str)
+                        for divisor in (256, 4096):
+                            inferred_site = val // divisor
+                            inferred_str = str(inferred_site)
+                            if inferred_site > 0:
+                                for site in config.get("sites", []):
+                                    s_id = site["id"]
+                                    s_id_upper = s_id.upper()
+                                    s_name_upper = site.get("name", "").upper()
+                                    if inferred_str in s_id_upper or inferred_str in s_name_upper:
+                                        return s_id
+                    except ValueError:
+                        pass
+
+                return None
+
+            site_id_to_name = {site["id"]: site["name"] for site in config.get("sites", [])}
+
+            out = []
+            for vip in event_vips:
+                name = vip["name"]
+                row = latest.get(name)
+
+                if row:
+                    rsrp    = row["rsrp"]
+                    rsrq    = row["rsrq"]
+                    serving = row["serving_cell"]
+                    last_ts = row["timestamp"]
+
+                    if rsrp is not None:
+                        if rsrp <= rsrp_crit:
+                            signal_status = "critical"
+                        elif rsrp <= rsrp_warn:
+                            signal_status = "warning"
+                        else:
+                            signal_status = "ok"
+                    else:
+                        signal_status = "unknown"
+                else:
+                    rsrp = rsrq = serving = last_ts = None
+                    signal_status = "unknown"
+
+                # in_event calculado dinamicamente contra os sites do evento atual —
+                # não depende do valor gravado, por isso é correto ao trocar de evento.
+                serving_site = resolve_site_id(serving)
+                in_event = bool(serving_site)
+                serving_site_name = site_id_to_name.get(serving_site) if serving_site else None
+
+                out.append({
+                    "id":                vip["id"],
+                    "name":              name,
+                    "role":              vip.get("role"),
+                    "notes":             vip.get("notes"),
+                    "task_id":           vip.get("task_id"),
+                    "in_event":          in_event,
+                    "serving_cell":      serving,
+                    "serving_site":      serving_site,
+                    "serving_site_name": serving_site_name,
+                    "last_timestamp":    last_ts,
+                    "rsrp":              rsrp,
+                    "rsrq":              rsrq,
+                    "status":            signal_status,
+                    "rsrp_min":          thresholds.get("rsrp_warning"),
+                    "rsrp_max":          -40,  # teto prático
+                })
+
+            out.sort(key=lambda v: (not v["in_event"], v["status"] == "ok"))
+            return out
+        except Exception as e:
+            logger.error(f"get_vips error: {e}")
+            return []
+
+    def get_vip_series(self, event_id: str, vip_name: str, minutes: int = 60) -> dict:
+        """Retorna série temporal de RSRP/RSRQ para um VIP específico."""
+        try:
+            rows = db.get_vip_series(event_id, vip_name, minutes)
+            return {"ok": True, "series": rows}
+        except Exception as e:
+            logger.error(f"get_vip_series error: {e}")
+            return {"ok": False, "series": []}
+
+    # ── Alertas ──────────────────────────────────────────────────────
+
+    def get_alerts(self, event_id: str, timestamp: Optional[str] = None) -> list:
+        try:
+            return db.get_active_alerts(event_id, timestamp)
+        except Exception as e:
+            logger.error(f"get_alerts error: {e}")
+            return []
+
+    def get_event_timestamps(self, event_id: str) -> list:
+        try:
+            return db.get_event_timestamps(event_id)
+        except Exception as e:
+            logger.error(f"get_event_timestamps error: {e}")
+            return []
+
+    def acknowledge_alert(self, alert_id: int) -> dict:
+        try:
+            event_id = None
+            if _active_event:
+                event_id = _active_event.get("id")
+            if not event_id:
+                events = db.get_events(status="ACTIVE")
+                if events:
+                    event_id = events[0]["id"]
+            if not event_id:
+                return {"ok": False, "error": "Nenhum evento ativo para reconhecer o alerta"}
+
+            db.acknowledge_alert(event_id, alert_id)
+            return {"ok": True}
+        except Exception as e:
+            return {"ok": False, "error": str(e)}
+
+    def acknowledge_all_alerts(self, event_id: str) -> dict:
+        try:
+            db.acknowledge_all_alerts(event_id)
+            return {"ok": True}
+        except Exception as e:
+            return {"ok": False, "error": str(e)}
+
+    def silence_alert(self, alert_key: str) -> dict:
+        try:
+            db.silence_alert(alert_key)
+            return {"ok": True}
+        except Exception as e:
+            return {"ok": False, "error": str(e)}
+
+    # ── Estado da aplicação ──────────────────────────────────────────
+
+    def get_app_status(self) -> dict:
+        return {
+            "recording":  scheduler.is_recording,
+            "db_size_mb": db.get_db_size_mb(),
+            "now":        datetime.utcnow().isoformat(),
+        }
+
+    def open_file_dialog(self) -> dict:
+        """Abre seletor de arquivo para carregar JSON de evento."""
+        import webview
+        result = webview.windows[0].create_file_dialog(
+            webview.OPEN_DIALOG,
+            allow_multiple=False,
+            file_types=("Event Config (*.json)",)
+        )
+        if result:
+            return {"ok": True, "path": result[0]}
+        return {"ok": False, "path": None}
+
+    # ── Helpers internos ─────────────────────────────────────────────
+
+    def _sanitize_event(self, event: dict) -> dict:
+        """Remove sites e vips do payload (inclui task_ids de integração) antes de enviar ao frontend."""
+        if isinstance(event, str):
+            try:
+                event = json.loads(event)
+            except Exception:
+                return {}
+
+        out = dict(event)
+
+        # Garante que polygon seja um objeto Python (list) caso venha do banco como string
+        if isinstance(out.get("polygon"), str):
+            try:
+                out["polygon"] = json.loads(out["polygon"])
+            except Exception:
+                pass
+
+        # Remove config_json se vier do banco
+        out.pop("config_json", None)
+        
+        # Remove listagens massivas de sites e vips do payload de metadados
+        out.pop("sites", None)
+        out.pop("vips", None)
+        
+        return out
+
+    def _aggregate_utilization(self, kpi_rows: list) -> dict:
+        """Calcula utilização máxima por site a partir das células (incluindo DL/UL)."""
+        agg = {}
+        for r in kpi_rows:
+            if r["metric"] not in ("utilization", "utilization_dl", "utilization_ul"):
+                continue
+            site = r["site_id"]
+            if site not in agg or r["value"] > agg[site]:
+                agg[site] = r["value"]
+        return agg
+
+    def _aggregate_metric_for_list(self, kpi_rows: list, metric: str) -> dict:
+        """
+        Agrega valores de células para exibição na coluna da lista de sites.
+        Retorna dict: { site_id: float }
+        
+        Regras:
+        - user_count / traffic_volume_*: retorna soma das células (share calculado depois)
+        - accessibility: mínimo das células (pior caso)
+        - rsrp / rsrq: média das células
+        - outros (utilização, throughput): máximo das células (pior caso)
+        """
+        VOLUME_METRICS = {"user_count", "traffic_volume_dl", "traffic_volume_ul"}
+        MEAN_METRICS   = {"rsrp", "rsrq", "throughput_dl", "throughput_ul"}
+        MIN_METRICS    = {"accessibility"}
+
+        # Acumula valores por site
+        site_vals = {}
+        for r in kpi_rows:
+            if r.get("metric") != metric:
+                continue
+            site = r["site_id"]
+            val = r.get("value")
+            if val is None:
+                continue
+            if site not in site_vals:
+                site_vals[site] = []
+            site_vals[site].append(val)
+
+        result = {}
+        total = 0.0
+
+        for site, vals in site_vals.items():
+            if not vals:
+                continue
+            if metric in VOLUME_METRICS:
+                agg = sum(vals)
+                total += agg
+            elif metric in MIN_METRICS:
+                agg = min(vals)
+            elif metric in MEAN_METRICS:
+                agg = sum(vals) / len(vals)
+            else:
+                agg = max(vals)  # utilization_dl, utilization_ul
+            result[site] = agg
+
+        # Para volume: converte soma em share percentual
+        if metric in VOLUME_METRICS and total > 0:
+            return {site: round((val / total) * 100, 1)
+                    for site, val in result.items()}
+        
+        return {site: round(val, 1) for site, val in result.items()}
+
+    def _detect_gaps(self, timestamps: list, max_gap_seconds: int = 90) -> list:
+        """Retorna lista de índices onde há gaps de coleta."""
+        from datetime import datetime as dt
+        gaps = []
+        for i in range(1, len(timestamps)):
+            try:
+                t0 = dt.fromisoformat(timestamps[i - 1])
+                t1 = dt.fromisoformat(timestamps[i])
+                delta = (t1 - t0).total_seconds()
+                if delta > max_gap_seconds:
+                    gaps.append({"from_idx": i - 1, "to_idx": i, "seconds": delta})
+            except Exception:
+                pass
+        return gaps
+
+    def clear_event_history(self, event_id: str) -> dict:
+        """Limpa o histórico de medições e alertas do evento atual."""
+        try:
+            db.clear_event_history(event_id)
+            # Se o scheduler estiver ativo e coletando o evento atual, limpa a memória do coletor de CSV
+            if scheduler.is_recording and scheduler._event_config and scheduler._event_config.get("id") == event_id:
+                if hasattr(scheduler._collector, "_processed"):
+                    scheduler._collector._processed.clear()
+            return {"ok": True}
+        except Exception as e:
+            logger.error(f"clear_event_history error: {e}")
+            return {"ok": False, "error": str(e)}
+

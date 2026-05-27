@@ -1,0 +1,2313 @@
+const createHtmlLeftMenu = (element, mapInstancy) => {
+    console.log('createHtmlLeftMenu')
+    let card = '';
+    switch (element) {
+        case 'control_panel':
+
+            mapInstancy.techs.forEach(tech => {
+                card += `
+                <div class="map-cells-control-panel map-cells-controller">
+                    <h5>${tech} control</h5>
+                    <div class='map-cells-set'>
+                        <label><b>UF:</b></label>
+                        <div class='map-cells-select-menu' select='uf' tech='${tech}' id='map-cells-control-panel-select-uf${tech}'></div>
+                    </div>
+                    <div class='map-cells-set'>
+                        <label><b>City:</b></label>
+                        <div class='map-cells-select-menu' select='cities' tech='${tech}' id='map-cells-control-panel-select-cities${tech}'></div>
+                    </div>
+                    <div class='map-cells-set'>
+                        <label><b>Station:</b></label>
+                        <div class='map-cells-select-menu' select='station' tech='${tech}' id='map-cells-control-panel-select-station${tech}'></div>
+                    </div>
+                    <div class='map-cells-set'>
+                        <label><b>Cell:</b></label>
+                        <div class='map-cells-select-menu' select='cell' tech='${tech}' id='map-cells-control-panel-select-cell${tech}'></div>
+                    </div>
+                </div>
+                `
+            })
+            card += `<div class="map-cells-control-panel map-cells-controller">
+                        <div style="display:flex;align-items:center">
+                            <input type="checkbox" onclick="getStationNames()" id="labels" style="display:inline-block;margin: 2px 2px 0 0" />Station Names
+                        </div>
+                    </div>`
+            break;
+
+        case 'cell_propagation':
+            mapInstancy.techs.forEach(tech => {
+                let date = mapInstancy.propagationDates[tech] !== undefined ? `<p>${mapInstancy.propagationDates[tech]}</p>` : ''
+                card += `
+                <div class="map-cells-cell-propagation map-cells-controller">
+                    <h5>${tech} Propagation</h5>
+                    ${date}
+                    <div class='map-cells-set'>
+                        <label><b>Cell:</b></label>
+                        <div class='map-cells-select-menu' select='cell' tech='${tech}' id='map-cells-cell-propagation-select-cell${tech}'></div>
+                    </div>
+                </div>
+                `
+            })
+            break;
+        case 'ookla':
+            mapInstancy.techs.forEach(tech => {
+                if (tech != '3G') {
+                    card += `
+                        <div class="map-cells-ookla map-cells-controller">
+                            <h5>${tech} Ookla</h5>
+                            <div class='map-cells-set'>
+                                <label ><b>Date:</b></label>
+                                <input type="text" id="dateRangePicker${tech}" tech="${tech}" class="map-cells-input-date" placeholder="Select Date Range">
+                            </div>
+                            <div class='map-cells-set'>
+                                <label><b>UF:</b></label>
+                                <div class='map-cells-select-menu' select='uf' tech='${tech}' id='map-cells-ookla-select-uf${tech}'></div>
+                            
+                            </div>
+                        </div>
+                    `
+                }
+
+            })
+            break;
+        case 'tools':
+
+            mapInstancy.tools.forEach(element => {
+                switch (element) {
+                    case 'ruler':
+                        card += `
+                    <div class="map-cells-tools map-cells-controller">
+                        <div class='map-cells-set'>
+                            <div class="map-cells-ruler">
+                                <img src="/npsmart/images/ruller.png" alt="" class="map-cells-icon-ruler">
+                            </div>
+                            <div class='map-cells-measures-area'>
+                                <canvas id="elevationChart"></canvas>
+                            </div>
+                        </div>
+                    </div>
+                `
+                        break;
+                    case 'compass':
+                        card += `
+                        <div class="map-cells-tools map-cells-controller">
+                            <div class='map-cells-set'>
+                                <div class="map-cells-compass">
+                                    <img src="/npsmart/images/bussola-static.png" alt="" class="map-cells-icon-compass">
+                                </div>
+                                <div class='map-cells-compass-input-area'>
+                                    <input class='map-cells-compass-latitude' placeholder="Latitude" type="text">
+                                    <input class='map-cells-compass-longitude'  placeholder="Longitude" type="text">
+                                </div>
+                            </div>
+                        </div>
+                    `
+                        break;
+
+                    default:
+                        break;
+                }
+
+            })
+
+            break;
+        case 'csv':
+            card += `
+                        <div class="map-cells-csv map-cells-controller">
+                            <h5>Drag and drop a file here or click to select</h5>
+                            <div class='map-cells-set'>
+                                <input type="file" id="map-cells-choose-file" accept="csv">
+                            </div>
+                            
+                        </div>
+                    `
+    }
+
+
+    return card;
+}
+
+const createHtmlRightMenu = (element, mapInstancy) => {
+    console.log('createHtmlRightMenu')
+
+    let card = '<div class="map-cells-subtitles-agregation">';
+    let agregation_content = ''
+    switch (element) {
+        case 'control_panel':
+            agregation_content = '<div class="map-cells-agregation-content">'
+            mapInstancy.techs.forEach(tech => {
+                if (mapInstancy.frequencies[tech] != undefined) {
+                    let tech_div = `<div class ='map-cells-tech-subtitle' id='subtitle-petalMapCell${tech}' >
+                        <div class='map-cells-subtitle-title'>
+                            <span>${tech}</span>
+                        </div>
+                        <div class = map-cells-subtitle-agregation-frequencies>
+                        
+                        `
+                    for (const [frequency, values] of Object.entries(mapInstancy.frequencies[tech])) {
+
+                        tech_div += `
+                            <div class='map-cells-subtitle-frequency map-cells-subtitle-info' frequency='${frequency}' tech='${tech}'  style='background-color: ${values['color']}; color:${values['font']} ' ><b><span>${frequency}MHz</span></b></div>
+                            `
+
+
+                    }
+                    tech_div += `</div></div>`
+                    agregation_content += tech_div
+                }
+
+
+            })
+            agregation_content += `</div>`
+            card += `
+            ${agregation_content}
+            </div>
+                `
+            break;
+        case 'cell_propagation':
+            agregation_content = '<div class="map-cells-agregation-content">'
+
+            let tech_div = `<div class ='map-cells-tech-subtitle' id = 'subtitle-mapCellsPropagationDelay'>
+            <div class='map-cells-subtitle-title'>
+                <span>Propagation Layers</span>
+            </div>
+            <div class = map-cells-subtitle-agregation-frequencies>
+            
+            `
+
+            tech_div += `
+                <div class='map-cells-subtitle-info'  style='background-color: ${mapInstancy.propagationDelayConsts['colors']['green']};  ' ><b><span>< 3%</span></b></div>
+                <div class='map-cells-subtitle-info'  style='background-color: ${mapInstancy.propagationDelayConsts['colors']['yellow']};' ><b><span>< 5%</span></b></div>
+                <div class='map-cells-subtitle-info'  style='background-color: ${mapInstancy.propagationDelayConsts['colors']['orange']};  ' ><b><span>< 15%</span></b></div>
+                <div class='map-cells-subtitle-info'  style='background-color: ${mapInstancy.propagationDelayConsts['colors']['dark_orange']}; color:#FFF ' ><b><span>< 30%</span></b></div>
+                <div class='map-cells-subtitle-info'  style='background-color: ${mapInstancy.propagationDelayConsts['colors']['red']}; color:#FFF ' ><b><span>> 30%</span></b></div>
+
+                `
+            tech_div += `</div></div>`
+            agregation_content += tech_div
+            agregation_content += `</div>`
+            card += `
+            ${agregation_content}
+            </div>
+                `
+            break;
+        case 'ookla':
+            agregation_content = '<div class="map-cells-agregation-content">'
+
+            mapInstancy.techs.forEach(element => {
+                if (element != '3G') {
+                    let tech_div = `<div class ='map-cells-tech-subtitle' id='subtitle-mapCellsOoklaDots${element}'>
+                    <div class='map-cells-subtitle-title'>
+                        <span>Ookla ${element}</span>
+                    </div>
+                    <div class = map-cells-subtitle-agregation-frequencies>
+                    
+                    `
+                    tech_div += `
+                        <div class='map-cells-subtitle-info' selected="true" tech="${element}" value=${mapInstancy.ooklaVelocity[element][0]} style="background-color: #ff0101;color: white;box-shadow: rgba(0, 0, 0, 0.3) 0px 4px 4px 0px inset" ><b><span>< ${mapInstancy.ooklaVelocity[element][0]}Mbps</span></b></div>
+                        <div class='map-cells-subtitle-info' selected="true" tech="${element}" value=${mapInstancy.ooklaVelocity[element][1]} style="background-color: #ffc0cc;box-shadow: rgba(0, 0, 0, 0.3) 0px 4px 4px 0px inset" ><b><span>< ${mapInstancy.ooklaVelocity[element][1]}Mbps</span></b></div>
+                        <div class='map-cells-subtitle-info' selected="true" tech="${element}" value=${mapInstancy.ooklaVelocity[element][2]} style="background-color: #fefd02;box-shadow: rgba(0, 0, 0, 0.3) 0px 4px 4px 0px inset";><b><span>< ${mapInstancy.ooklaVelocity[element][2]}Mbps</span></b></div>
+                        <div class='map-cells-subtitle-info' selected="true" tech="${element}" value=${mapInstancy.ooklaVelocity[element][3]} style="background-color: #00ff03;box-shadow: rgba(0, 0, 0, 0.3) 0px 4px 4px 0px inset" ><b><span>< ${mapInstancy.ooklaVelocity[element][3]}Mbps</span></b></div>
+                        <div class='map-cells-subtitle-info' selected="true" tech="${element}" value=${46} style="background-color: #0473ff;color: white;box-shadow: rgba(0, 0, 0, 0.3) 0px 4px 4px 0px inset"><b><span>> ${mapInstancy.ooklaVelocity[element][3]}Mbps</span></b></div>
+
+                        `
+                    tech_div += `</div></div>`
+                    agregation_content += tech_div
+
+                }
+            })
+            agregation_content += `</div>`
+            card += `
+            ${agregation_content}
+            </div>
+                `
+            break;
+
+
+    }
+
+
+    return card;
+}
+
+const createHtmlMap = (mapInstancy) => {
+    console.log('createHtmlMap')
+    let html_menu = ''
+    if (mapInstancy.menus.left != undefined) {
+        var cards_menu_left = '<div class="map-cells-card-menu">'
+
+        let tab_menu_left = '<div class="map-cells-tabs">'
+        mapInstancy.menus.left.forEach(element => {
+            tab_menu_left += `<div class ='map-cells-tab' id='${element.replace('_', '-')}'>${element.replace('_', ' ').toUpperCase()}</div>`
+            cards_menu_left += createHtmlLeftMenu(element, mapInstancy)
+        });
+        tab_menu_left += '</div>';
+        cards_menu_left += '</div>'
+        html_menu = `
+        <div class = 'map-cells-card-files-subtitles'>
+
+        </div>
+        <div class='map-cells-loading-upload'>
+            
+        </div>
+        <div class ='map-cells-show-hide-menu-left'>
+            <img class='map-cells-icon' src='/npsmart/images/arrow.png'>
+        </div>
+        <div class='map-cells-menu'>
+            ${tab_menu_left}
+            ${cards_menu_left}
+            
+        </div>
+        <div class = 'map-cells-layer-control'>
+
+            <div class ='map-cells-layer-control-title'>
+            <apam>Layer Control</apam>
+            </div>
+            <div class= 'map-cells-layer-control-content map-cells-drag-drop-container'>
+                
+            </div>
+        </div>
+        `
+    }
+    let html_subtitle = ''
+    if (mapInstancy.menus.right != undefined) {
+        var card_menu_right = '<div class="map-cells-card-subtitle">'
+
+        mapInstancy.menus.right.forEach(element => {
+            card_menu_right += createHtmlRightMenu(element, mapInstancy)
+        });
+        card_menu_right += '</div>'
+        // html_subtitle = `
+        // <div class ='map-cells-show-hide-menu-right'>
+        //     <img class='map-cells-icon' src='/npsmart/images/arrow.png'>
+        // </div>
+        // <div class='map-cells-subtitle'>
+        //     ${card_menu_right}
+        // </div>
+        // `
+        html_subtitle = `
+        <div class='map-cells-subtitle'>
+            ${card_menu_right}
+        </div>
+        
+        `
+    }
+
+    const html_structured = `
+        <div class='map-cells-main'>
+            ${html_menu}
+            <div style ='height:100%; width:100%;' id='map-cells-${mapInstancy.id}'></div>
+            ${html_subtitle}
+        </div>
+    `;
+    document.querySelector(`#${mapInstancy.id}`).innerHTML = html_structured
+
+
+    if (mapInstancy.menus.left != undefined) {
+        var menu_left_hidden = false;
+        var previousMenuWidth, previousMenuMinWidth, previousArrowLeft, previousLayerWidth, previousLayerMinWidth;
+        document.querySelector('.map-cells-show-hide-menu-left').addEventListener('click', function () {
+            if (!menu_left_hidden) {
+                previousMenuWidth = document.querySelector('.map-cells-menu').style.width;
+                previousMenuMinWidth = document.querySelector('.map-cells-menu').style.minWidth;
+                previousArrowLeft = document.querySelector('.map-cells-show-hide-menu-left').style.left;
+                previousLayerWidth = document.querySelector('.map-cells-layer-control').style.width;
+                previousMenuMinWidth = document.querySelector('.map-cells-layer-control').style.minWidth;
+
+                document.querySelector('.map-cells-tabs').style.opacity = '0'
+                document.querySelector('.map-cells-card-menu').style.opacity = '0'
+
+                document.querySelector('.map-cells-menu').style.minWidth = '0'
+                document.querySelector('.map-cells-menu').style.width = '0'
+                document.querySelector('.map-cells-layer-control').style.minWidth = '0'
+                document.querySelector('.map-cells-layer-control').style.width = '0'
+
+                document.querySelector('.map-cells-show-hide-menu-left').style.left = '0'
+                document.querySelector('.map-cells-show-hide-menu-left img').style.transform = 'rotate(0deg)';
+
+                document.querySelector('.map-cells-card-files-subtitles').style.left = '0'
+
+                menu_left_hidden = !menu_left_hidden
+            } else {
+                document.querySelector('.map-cells-tabs').style.opacity = '1'
+                document.querySelector('.map-cells-card-menu').style.opacity = '1'
+
+                document.querySelector('.map-cells-menu').style.minWidth = previousMenuMinWidth
+                document.querySelector('.map-cells-menu').style.width = previousMenuWidth
+                document.querySelector('.map-cells-layer-control').style.minWidth = previousMenuMinWidth
+                document.querySelector('.map-cells-layer-control').style.width = previousMenuWidth
+
+                document.querySelector('.map-cells-show-hide-menu-left').style.left = previousArrowLeft
+                document.querySelector('.map-cells-show-hide-menu-left img').style.transform = 'rotate(180deg)';
+
+                document.querySelector('.map-cells-card-files-subtitles').style.left = previousMenuWidth
+                menu_left_hidden = !menu_left_hidden
+
+            }
+        })
+        document.querySelectorAll('.map-cells-tab').forEach(element => {
+            element.addEventListener('click', function () {
+                const map_menu = document.querySelector('.map-cells-card-menu');
+                const divs_map_menu = map_menu.querySelectorAll('.map-cells-controller');
+                divs_map_menu.forEach(div => {
+                    div.style.display = 'none';
+                });
+                const divs_map_menu_tab = map_menu.querySelectorAll(`.map-cells-${element.getAttribute('id')}`)
+                divs_map_menu_tab.forEach(div => {
+                    div.style.display = 'flex';
+                });
+            })
+        })
+
+    }
+    if (mapInstancy.menus.right != undefined) {
+        // var menu_right_hidden = false;
+        // var previousSubtitleWidth, previousSubtitleMinWidth, previousArrowRight;
+        // document.querySelector('.map-cells-show-hide-menu-right').addEventListener('click', function () {
+        //     if (!menu_right_hidden) {
+        //         previousSubtitleWidth = document.querySelector('.map-cells-subtitle').style.width;
+        //         previousSubtitleMinWidth = document.querySelector('.map-cells-subtitle').style.minWidth;
+        //         previousArrowRight = document.querySelector('.map-cells-show-hide-menu-right').style.right;
+
+        //         // document.querySelector('.map-cells-tabs').style.opacity = '0'
+        //         // document.querySelector('.map-cells-card-menu').style.opacity = '0'
+
+        //         document.querySelector('.map-cells-subtitle').style.minWidth = '0'
+        //         document.querySelector('.map-cells-subtitle').style.width = '0'
+        //         document.querySelector('.map-cells-show-hide-menu-right').style.right = '0'
+        //         document.querySelector('.map-cells-show-hide-menu-right img').style.transform = 'rotate(180deg)';
+
+        //         menu_right_hidden = !menu_right_hidden
+        //     } else {
+        //         // document.querySelector('.map-cells-tabs').style.opacity = '1'
+        //         // document.querySelector('.map-cells-card-menu').style.opacity = '1'
+
+        //         document.querySelector('.map-cells-subtitle').style.minWidth = previousSubtitleMinWidth
+        //         document.querySelector('.map-cells-subtitle').style.width = previousSubtitleWidth
+        //         document.querySelector('.map-cells-show-hide-menu-right').style.right = previousArrowRight
+        //         document.querySelector('.map-cells-show-hide-menu-right img').style.transform = 'rotate(0deg)';
+
+        //         menu_right_hidden = !menu_right_hidden
+
+        //     }
+        // })
+        if (mapInstancy.menus.right.includes('control_panel')) {
+            const subtitle_frequency = document.querySelectorAll('.map-cells-subtitle-frequency')
+            subtitle_frequency.forEach(function (element) {
+                element.addEventListener('click', function () {
+
+                    let data = {
+                        state: document.querySelector(`#map-cells-control-panel-select-uf${element.getAttribute('tech')}`).value,
+                        city: document.querySelector(`#map-cells-control-panel-select-cities${element.getAttribute('tech')}`).value,
+                        station: document.querySelector(`#map-cells-control-panel-select-station${element.getAttribute('tech')}`).value,
+                        cell: document.querySelector(`#map-cells-control-panel-select-cell${element.getAttribute('tech')}`).value,
+                    };
+
+
+                    data.frequency = element.getAttribute('frequency');
+                    data.tec = element.getAttribute('tech')
+
+                    if (element.getAttribute('selected') == 'true') {
+                        removeLayerMap('petalMapCell', {
+                            tec: data.tec,
+                            frequency: data.frequency,
+                        },
+                            mapInstancy)
+                        element.setAttribute('selected', 'false');
+                        element.style.boxShadow = '0px 4px 4px 0px rgba(0, 0, 0, 0.30)'
+
+                    } else {
+                        element.style.boxShadow = 'rgba(0, 0, 0, 0.3) 0px 4px 4px 0px inset'
+
+                        callCellDataBySubtitles(data, mapInstancy)
+                        element.setAttribute('selected', 'true');
+                    }
+
+                })
+            })
+        }
+
+        if (mapInstancy.menus.left.includes('csv')) {
+
+            document.querySelector('#map-cells-choose-file').addEventListener('change', function () {
+
+                var file = this.files[0];
+
+                var reader = new FileReader();
+
+                reader.onload = function (e) {
+                    var contents = e.target.result;
+                    manageScreenLayer(contents, mapInstancy)
+                    blockUi(true, mapInstancy)
+
+                };
+
+                reader.readAsText(file);
+            })
+        }
+
+        if (mapInstancy.menus.left.includes('ookla')) {
+            const elements = document.querySelectorAll('[id^="subtitle-mapCellsOoklaDots"]');
+
+            // Passo 2: Itera sobre cada um desses elementos para encontrar os descendentes com a classe '.subtitles'
+            elements.forEach(element => {
+                // Seleciona os elementos com a classe '.subtitles' dentro do elemento atual
+                const subtitles = element.querySelectorAll('.map-cells-subtitle-info');
+
+                // Itera sobre os elementos encontrados e faz algo com cada um
+                subtitles.forEach(subtitle => {
+                    subtitle.addEventListener("click", function () {
+
+                        if (subtitle.getAttribute("selected") == "true") {
+                            subtitle.setAttribute("selected", "false")
+                            subtitle.style.boxShadow = '0px 4px 4px 0px rgba(0, 0, 0, 0.30)'
+                        } else {
+                            subtitle.setAttribute("selected", "true")
+                            subtitle.style.boxShadow = 'rgba(0, 0, 0, 0.3) 0px 4px 4px 0px inset'
+                        }
+
+                        let tech = {
+                            tec: subtitle.getAttribute("tech")
+                        }
+
+                        removeLayerMap('mapCellsOoklaDots', {
+                            tec: subtitle.getAttribute('tech')
+                        },
+                            mapInstancy)
+                        callOoklaData(tech, mapInstancy)
+
+                    })
+                });
+            });
+        }
+
+    }
+};
+
+
+const filterBounds = (data, bounds, info) => {
+
+    var filteredPoints = data.filter(function (ponto) {
+        var lat = ponto[`${info['y']}`]
+        var lng = ponto[`${info['x']}`];
+        if (lat != undefined && lng != undefined) {
+
+            return bounds.contains([parseFloat(lat), parseFloat(lng)]);
+        }
+
+    });
+    return filteredPoints;
+}
+
+
+const calcProporcao = (dataLength, zoom) => {
+    let DataMin = 1000;
+    let DataMax = 4000;
+    let ZoomMin = 1;
+    let ZoomMax = 17;
+
+    let SizeMin = 60;
+    let SizeMax = 10;
+
+    if (zoom >= ZoomMax) {
+        return {
+            proportionData: 1,
+            proportionSize: 10
+        } // Se o zoom for maior ou igual ao máximo, retorna o máximo de dados
+
+    }
+
+    // Calcula a proporção linearmente entre DataMin e DataMax conforme o zoom varia de ZoomMin a ZoomMax
+    let proportion = DataMin + (zoom - ZoomMin) * (DataMax - DataMin) / (ZoomMax - ZoomMin);
+    let proportionSize = SizeMin + (zoom - ZoomMin) * (SizeMax - SizeMin) / (ZoomMax - ZoomMin);
+
+    // Arredonda o resultado para o inteiro mais próximo
+    return {
+        proportionData: Math.round(parseInt(dataLength) / parseInt(proportion)),
+        proportionSize: Math.round(proportionSize)
+    }
+
+}
+
+
+const filterZoom = (data) => {
+    let zoom = map.getZoom()
+    let dataFiltered = []
+    // let prop = parseInt(calcProporcao(zoom))
+    let prop = calcProporcao(data.length, zoom)
+    let propData = prop.proportionData
+    // let propSize = prop.proportionSize
+    let j = 0
+    for (let i = 0; i < data.length; i = i + propData) {
+        try {
+
+            dataFiltered[j] = data[i]
+        } catch (error) {
+        }
+
+        j++
+    }
+    return dataFiltered
+
+
+
+
+}
+const displayContents = async (table, contents, mapCellsInstancy) => {
+    let zoom = map.getZoom()
+    let bounds = JSON.stringify(map.getBounds())
+
+    if (contents.info.request == 0) {
+        requestAjaxCount++
+        contents.info.request = 1;
+
+        $.ajax({
+            url: "/npsmart/map/get_data_from_files",
+            method: 'POST',
+            data: {
+                latitude: contents.info.y,
+                longitude: contents.info.x,
+                table: table,
+                bounds: bounds,
+                zoom: zoom,
+            },
+            success: function (result) {
+                requestAjaxCount--
+                contents.info.request = 0;
+                let info = {
+                    data: JSON.parse(result),
+                    name: table,
+                    color: contents.info.color,
+
+                }
+
+                try {
+                    removeLayerMap('newLayer', info, mapCellsInstancy);
+                } catch (error) {
+                    console.error('Erro ao remover camada:', error);
+                }
+                createPolygonLayer(info, '', 'newLayer', mapCellsInstancy)
+
+                captureListState(mapCellsInstancy)
+
+                setTimeout(function () {
+                    if (requestAjaxCount == 0 && timeOutFlag) {
+                        timeOutFlag = false
+                        handleZoomMoveEnd(mapCellsInstancy)
+                    }
+
+                }, 2000);
+
+            },
+
+            error: function (error) {
+                contents.info.request = 0;
+                handleZoomMoveEnd(mapCellsInstancy)
+                console.log((error))
+
+            }
+        });
+    }
+
+
+
+}
+
+
+// Função para obter valores distintos de uma coluna pelo índice
+function getDistinctValues(data, columnIndex) {
+    var distinctValues = new Set();
+    data.slice(1).forEach(row => { // Ignora o cabeçalho, por isso inicia de 1
+        distinctValues.add(row[columnIndex]);
+    });
+    return Array.from(distinctValues);
+}
+
+var requestAjaxCount = 0;
+var timeOutFlag = true;
+
+function handleZoomMoveEnd(mapCellsInstancy) {
+    console.log('handleZoomMoveEnd')
+
+    for (let key in mapCellsInstancy.files) {
+
+        let element = mapCellsInstancy.files[key];
+        displayContents(key, element, mapCellsInstancy);
+
+    }
+}
+
+function callAddLayerOnLayerControl(info, mapCellsInstancy) {
+    addLayerOnLayerControl(info, mapCellsInstancy)
+}
+
+const createManageScreenLayerContent = (divManageScreenLayer, contents, mapCellsInstancy) => {
+
+    let filePath = document.querySelector('#map-cells-choose-file').value
+    let fileName = filePath.replace(/^.*[\\\/]/, '').replace(/\.[^/.]+$/, '').replace(/\s/g, '_');
+    contents = encondingCotent(contents)
+
+    mapCellsInstancy.files[fileName] = contents
+
+
+
+    let encodingOptions = `
+        <option value="utf-8">UTF-8</option>
+        <option value="iso-8859-1">ISO-8859-1</option>
+        <option value="windows-1252">Windows-1252</option>
+    `
+    let fileFormatOptions = `
+    <label>
+        <input type="checkbox" checked='true' name="fileFormatOption" value="csv">
+        CSV (Comma Separeted Values)
+    </label>
+    <label>
+        <input type="checkbox" name="fileFormatOption" value="regularExpression">
+        Regular Expression
+    </label>
+    <label>
+        <input type="checkbox" name="fileFormatOption" value="custom">
+        Custom delimiters
+    </label>
+    `
+
+    let fileFormatOptionsContent = `
+        <div value ='regularExpression' class ='map-cells-file-format-set'>
+            <div>
+                <span>Expression:</span>
+                <input type='text'>
+            </div>
+        </div>
+        <div value ='custom' class ='map-cells-file-format-set'>
+            <div>
+                <input value='tab' type="checkbox">
+                <span>Tab</span>
+            </div>
+            <div>
+                <input value='colon' type="checkbox">
+                <span>Colon</span>
+            </div>
+            <div>
+                <input value='space' type="checkbox">
+                <span>Space</span>
+            </div>
+            <div>
+                <input value='semicolon' type="checkbox">
+                <span>Semicolon</span>
+            </div>
+            <div>
+                <input value='comma' type="checkbox">
+                <span>Comma</span>
+            </div>
+            <div>
+                <span>Others</span>
+                <input type='text'>
+            </div>
+            <div>
+                <span>Quote</span>
+                <input type='text'>
+            </div>
+            <div>
+                <span>Scape</span>
+                <input type='text'>
+            </div>
+ 
+        </div>
+    `
+
+    let recordFieldsContent = `
+        <div value ='headerNumber' class ='map-cells-record-fields-set'>
+            <div>
+                <span>Number of header lines to discard:</span>
+                <input type="number"  min="0" value='0'/>
+            </div>
+        </div>
+        <div value ='firstNames' class ='map-cells-record-fields-set'>
+            <div>
+                <input type="checkbox" checked/>
+                <span>First record has field names</span>
+            </div>
+        </div>
+        <div value ='decimalSeparator' class ='map-cells-record-fields-set'>
+            <div>
+                <input type="checkbox"/>
+                <span>Decimal separator is comma</span>
+            </div>
+        </div>
+        <div value ='trimFields' class ='map-cells-record-fields-set'>
+            <div>
+                <input type="checkbox" checked/>
+                <span>Trim fields </span>
+            </div>
+        </div>
+
+    `
+
+    let geometryDefinitionOptions = `
+        <label>
+            <input type="checkbox" checked='true' name="fileFormatOption" value="pointCoordinates">
+            Point coordinates
+        </label>
+    
+    `
+
+    let geometryDefinitionOptionsContent = `
+        <div value ='pointCoordinates' class ='map-cells-geometry-definition-set'>
+            <div value ='x-field'>
+                <span>X field</span>
+                <select class='map-cells-geometry-definition-field' axis='x'>
+                
+                </select>
+            </div>
+            <div value ='y-field'>
+                <span>Y field</span>
+                <select class='map-cells-geometry-definition-field' axis='y'>
+                
+                </select>
+            </div>
+            <div value ='z-field'>
+                <span>Z field</span>
+                <select class='map-cells-geometry-definition-field' axis='z'>
+                
+                </select>
+            </div>
+        </div>
+    `
+
+    let mainContent = `
+        <div class = 'map-cells-manage-input-areas'>
+            <div class = 'map-cells-manage-input-layer'>
+                <div class = 'map-cells-manage-input-layer-name'>
+                    <span>Layer Name:</span>
+                    <input value='${fileName}'></input>
+                </div>
+                <div class = 'map-cells-manage-input-layer-encoding'>
+                    <span>Encoding</span>
+                    <select>
+                        ${encodingOptions}
+                    </select>
+                </div>
+            </div>
+            
+        </div>
+        <div class = 'map-cells-manage-file-format'>
+            <div class ='map-cells-manage-file-format-title'>
+                <span>
+                    <b>File Format</b>
+                    <img status ='open' class='map-cells-icon-manage' value ='file-format' src='/npsmart/images/icon-show-hide-arrow-management-menu.png'>
+                </span>
+            </div>
+            <div class ='map-cells-manage-file-format-content'>
+                <div class = 'map-cells-manage-file-format-options'>
+                    ${fileFormatOptions}
+                </div>
+                <div class ='map-cells-manage-file-format-options-content'>
+                    ${fileFormatOptionsContent}
+                </div>
+            </div>
+        </div>
+
+        <div class = 'map-cells-manage-record-fields'>
+            <div class ='map-cells-manage-record-fields-title'>
+                <span>
+                    <b>Record and Fields Options</b>
+                    <img status ='open' class='map-cells-icon-manage' value ='record-fields' src='/npsmart/images/icon-show-hide-arrow-management-menu.png'>
+                </span>
+            </div>
+            <div class ='map-cells-manage-record-fields-content'>
+                ${recordFieldsContent}
+            </div>
+            
+        </div>
+
+        <div class = 'map-cells-manage-geometry-definition'>
+            <div class ='map-cells-manage-geometry-definition-title'>
+                <span>
+                    <b>Geometry Definition</b>
+                    <img status ='open' class='map-cells-icon-manage' value ='geometry-definition' src='/npsmart/images/icon-show-hide-arrow-management-menu.png'>
+                </span>
+            </div>
+            <div class ='map-cells-manage-geometry-definition-content'>
+                <div class = 'map-cells-manage-geometry-definition-options'>
+                    ${geometryDefinitionOptions}
+                </div>
+                <div  class ='map-cells-manage-geometry-definition-options-content'>
+                    ${geometryDefinitionOptionsContent}
+                </div>
+            </div>
+        </div>
+
+        <div class = 'map-cells-manage-table-data-formated'>
+            <table id="map-cells-manage-dinamic-table">
+                <thead>
+                    <tr id="map-cells-manage-table-thead"></tr>
+                </thead>
+                <tbody>
+                
+                </tbody>
+            </table>
+            
+        </div>
+        <div>
+            <span style='color:black'>
+                Datetime types will only be detected if they are in this format: YYYY/MM/DD HH:mm:ss[.sss], with milliseconds optional
+            </span>
+        </div>
+
+    `
+
+
+
+    divManageScreenLayer.innerHTML += `
+            <div class = 'map-cells-close-manage-screen'> 
+                    <span>Data Sorce Manager - NPGIS</span>
+                    <img class = 'map-cells-close-manage-screen-icon' src="/npsmart/images/icon-close.png">
+            </div>
+            <div class = 'map-cells-main-manage-screen'>
+                ${mainContent}
+            </div>
+            <div class='map-cells-confirmation-manage-screen'> 
+                <button id='map-cells-confirmation-manage-cancel'>Cancel</button>
+                <button id='map-cells-confirmation-manage-set'>Add</button>
+            </div>
+        `
+    //Fechar a tela de criação de um novo layer
+    document.querySelector('.map-cells-close-manage-screen-icon').addEventListener('click', function () {
+        divManageScreenLayer.remove()
+        document.querySelector('#map-cells-choose-file').value = ''
+        blockUi(false, mapCellsInstancy)
+    })
+
+    document.querySelector('#map-cells-confirmation-manage-cancel').addEventListener('click', function () {
+        divManageScreenLayer.remove()
+        document.querySelector('#map-cells-choose-file').value = ''
+        blockUi(false, mapCellsInstancy)
+    })
+
+    let recordFieldsValues = {}
+
+    function getRecordFieldsValues() {
+        document.querySelectorAll('.map-cells-record-fields-set').forEach(function (element) {
+            element.querySelectorAll('input').forEach(function (input) {
+                var fieldName = element.getAttribute('value');
+                var value;
+
+                if (input.type === 'checkbox') {
+                    value = input.checked;
+                } else if (input.type === 'number') {
+                    value = input.value;
+                } else {
+                    value = input.value;
+                }
+                recordFieldsValues[fieldName] = value;
+            })
+        })
+    }
+    getRecordFieldsValues()
+    let fileProcessed = processFile(mapCellsInstancy.files[fileName].slice(0, 100), [','], recordFieldsValues)
+
+    let header = fileProcessed.header
+    let dataTable = fileProcessed.jsonData
+
+
+    document.querySelectorAll('.map-cells-record-fields-set').forEach(function (element) {
+        element.querySelectorAll('input').forEach(function (input) {
+            input.addEventListener('change', function () {
+
+                getRecordFieldsValues()
+                let jsonProcessed = processFile(mapCellsInstancy.files[fileName].slice(0, 100), fileFormatinputsValues, recordFieldsValues)
+                setSelectOptionsGeometryDefinition(jsonProcessed.header)
+                AttThead(jsonProcessed.header)
+                addTableData(jsonProcessed.jsonData.slice(0, 5))
+            })
+        })
+    })
+
+    document.querySelectorAll('.map-cells-icon-manage').forEach(function (element) {
+        element.addEventListener('click', function () {
+            if (element.getAttribute('status') === 'open') {
+                $(`.map-cells-manage-${element.getAttribute('value')}-content`).css({
+                    'display': 'none'
+                });
+                $(this).css('transform', 'rotate(90deg)');
+                element.setAttribute('status', 'close');
+            } else {
+                $(`.map-cells-manage-${element.getAttribute('value')}-content`).css({
+                    'display': 'flex'
+                });
+                $(this).css('transform', 'rotate(-90deg)');
+                element.setAttribute('status', 'open');
+            }
+        });
+    });
+
+    var options_input = document.querySelectorAll('.map-cells-manage-file-format-options input');
+
+    var fileFormatinputsValues = [',']
+    var dataInputChoice = ''
+
+    var encondingValue = ''
+    function getEncodingValue() {
+        encondingValue = document.querySelector('.map-cells-manage-input-layer-encoding select').value
+    }
+
+    document.querySelector('.map-cells-manage-input-layer-encoding select').addEventListener('change', function () {
+        getEncodingValue()
+    })
+
+
+    function AttThead(headers) {
+        var theadRow = document.getElementById('map-cells-manage-table-thead');
+        theadRow.innerHTML = '';
+
+        headers.forEach(function (header) {
+            var th = document.createElement('th');
+            th.textContent = header;
+            theadRow.appendChild(th);
+        });
+    }
+
+    function addTableData(data) {
+        var tbody = document.querySelector('#map-cells-manage-dinamic-table tbody');
+        tbody.innerHTML = '';
+
+        data.forEach(function (element) {
+            var tr = document.createElement('tr');
+
+            // Adicione células para cada dado
+            Object.values(element).forEach(function (value) {
+                var td = document.createElement('td');
+                td.textContent = value;
+                tr.appendChild(td);
+            });
+
+            tbody.appendChild(tr);
+        });
+    }
+
+    function getFileFormatInputValues() {
+        fileFormatinputsValues = []
+        if (dataInputChoice != 'csv') {
+            let fileFormatInputChoice = document.querySelector(`.map-cells-file-format-set[value="${dataInputChoice}"]`)
+            fileFormatInputChoice.querySelectorAll('div input').forEach(element => {
+                if (element.type == 'text' && element.value != '') {
+                    fileFormatinputsValues.push(element.value)
+                } else if (element.type == 'checkbox' && element.checked) {
+                    let delimiterMap = {
+                        'tab': '\t',
+                        'colon': ':',
+                        'space': ' ',
+                        'semicolon': ';',
+                        'comma': ','
+                    };
+                    fileFormatinputsValues.push(delimiterMap[element.value])
+                }
+            })
+        } else {
+            fileFormatinputsValues.push(',')
+        }
+
+        getRecordFieldsValues()
+        let jsonProcessed = processFile(mapCellsInstancy.files[fileName].slice(0, 100), fileFormatinputsValues, recordFieldsValues)
+        setSelectOptionsGeometryDefinition(jsonProcessed.header)
+        AttThead(jsonProcessed.header)
+        addTableData(jsonProcessed.jsonData.slice(0, 5))
+    }
+
+    options_input.forEach(option => {
+        option.addEventListener('change', function (e) {
+            options_input.forEach(input => {
+                if (input !== e.target) {
+                    input.checked = false;
+                    document.querySelectorAll('.map-cells-file-format-set').forEach(element => {
+                        element.style.display = 'none'
+                        if (element.getAttribute('value') == e.target.value) {
+                            element.style.display = 'grid'
+                        }
+
+                    })
+                }
+            });
+
+            dataInputChoice = e.target.value
+            getFileFormatInputValues()
+
+        });
+    });
+
+    function setSelectOptionsGeometryDefinition(header) {
+        let optionsGeometryDefinitionFields = ''
+        header.forEach(element => {
+            optionsGeometryDefinitionFields += `
+                <option value='${element}'>${element}</option>
+            `
+        })
+
+
+
+        let selectsGeometryDefinition = document.querySelectorAll('.map-cells-geometry-definition-field')
+        selectsGeometryDefinition.forEach(element => {
+            element.innerHTML = optionsGeometryDefinitionFields
+            let findValue = ''
+            if (element.getAttribute('axis') == 'x') {
+                findValue = 'lon'
+            }
+            if (element.getAttribute('axis') == 'y') {
+                findValue = 'lat'
+            }
+            if (element.getAttribute('axis') == 'z') {
+                findValue = 'azi'
+            }
+            for (let value of header) {
+                // Transforma o elemento para minúsculas e verifica se contém "lat"
+                if (value.toLowerCase().includes(findValue)) {
+                    element.value = value
+                    break
+                } else {
+                    element.value = ''
+                }
+            }
+
+        })
+
+    }
+
+    setSelectOptionsGeometryDefinition(header)
+    AttThead(header)
+    addTableData(dataTable.slice(0, 5))
+
+
+    let fileFormatInputs = document.querySelectorAll('.map-cells-file-format-set div input')
+
+    fileFormatInputs.forEach(element => {
+        element.addEventListener('change', function () {
+            getFileFormatInputValues()
+        })
+        element.addEventListener('input', function () {
+            getFileFormatInputValues()
+        })
+    })
+
+
+
+    document.querySelector('#map-cells-confirmation-manage-set').addEventListener('click', function () {
+        console.log('click #map-cells-confirmation-manage-set')
+
+        $('.map-cells-loading-upload').css('opacity','1')
+
+        let jsonProcessed = processFile(mapCellsInstancy.files[fileName], fileFormatinputsValues, recordFieldsValues)
+
+
+        let layerName = document.querySelector('.map-cells-manage-input-layer-name input').value
+        layerName = layerName.replace(/\s+/g, '');
+        let fileinput = document.querySelector('#map-cells-choose-file').files[0]
+        let info = {}
+        let geometryDefinitionSelects = document.querySelectorAll(`.map-cells-geometry-definition-set div select`)
+        geometryDefinitionSelects.forEach(element => {
+            info[element.getAttribute('axis')] = element.value
+        })
+        info.layerName = layerName
+
+        function uploadFile(fileSelected, newFileName, fileFormatinputsValues, encondingValue, header, info, recordFieldsValues) {
+            console.log('LINHA 1109')
+            console.log(info, header)
+
+            Object.entries(header).forEach((e) => {
+                if(!e[1]) {
+                    header[e[0]] = 'TEXT'
+                }
+            })
+
+            const formData = new FormData();
+            const newFile = new File([fileSelected], newFileName, { type: fileSelected.type });
+            formData.append('file', newFile);
+            formData.append('format', JSON.stringify(fileFormatinputsValues));
+            formData.append('encoding', encondingValue);
+            formData.append('header', JSON.stringify(header));
+            formData.append('recordFields', JSON.stringify(recordFieldsValues))
+            fetch('/npsmart/map/saveFile', {
+                method: 'POST',
+                body: formData,
+            })
+                .then(response => response.json())
+                .then(data => {
+                    console.log(data)
+                    $('.map-cells-loading-upload').css('opacity','0')
+                    blockUi(false, mapCellsInstancy)
+                    mapCellsInstancy.files[data] = {}
+                    mapCellsInstancy.files[data].info = info
+                    mapCellsInstancy.files[data].info.color = colorHexa()
+                    mapCellsInstancy.files[data].info.headerTypes = header
+                    mapCellsInstancy.files[data].info.request = 0
+
+                    info.layer = 'newLayer'
+                    info.layerNameData = data
+                    handleZoomMoveEnd(mapCellsInstancy);
+                    callAddLayerOnLayerControl(info, mapCellsInstancy)
+                    map.off('zoomend moveend');
+                    map.on('zoomend moveend', function () {
+                        timeOutFlag = true;
+
+                        handleZoomMoveEnd(mapCellsInstancy);
+                    })
+                })
+                .catch(error => {
+                    console.log('Erro:', error);
+                });
+        }
+        uploadFile(fileinput, layerName, fileFormatinputsValues, encondingValue, jsonProcessed.types, info, recordFieldsValues)
+
+        delete mapCellsInstancy.files[fileName];
+
+        divManageScreenLayer.remove()
+        document.querySelector('#map-cells-choose-file').value = ''
+
+    })
+
+}
+
+const manageScreenLayer = (contents, mapCellsInstancy) => {
+
+    const divMap = document.querySelector('.map-cells-main')
+    let divManageScreenLayer = document.createElement('div');
+
+    // Adicionar classes, atributos ou conteúdo à nova div, se necessário
+    divManageScreenLayer.classList.add('map-cells-manage-screen-layer'); // Adiciona uma classe à nova div
+    divManageScreenLayer.style.position = 'absolute';
+
+    // Calcular a posição left com base na largura da divMap e 57.5%
+    const leftPosition = divMap.offsetWidth * 0.40; // 57.5% de distância do left
+
+    // Definir o estilo left da nova div
+    divManageScreenLayer.style.left = `${leftPosition}px`; // Define a posição left em pixels
+    divManageScreenLayer.style.top = `5%`; // Define a posição left em pixels
+
+    // Adicionar a nova div dentro da divMap
+    divMap.appendChild(divManageScreenLayer);
+    createManageScreenLayerContent(divManageScreenLayer, contents, mapCellsInstancy)
+}
+
+const categorizedSymbols = (color, size, opacity, fillOpacity, fileinfos, columnRef) => {
+
+    console.log(fileinfos)
+
+    let forms = ['circle', 'square', 'diamond', 'cone']
+    let formDiv = ''
+    forms.forEach(form => {
+        formDiv += `
+            <div class='map-cells-item-representation'>
+                <div class = 'map-cells-format-${form}'>
+                </div>
+            </div>
+        `
+    })
+
+    let selectOptions = ''
+
+    for (const [key, value] of Object.entries(fileinfos)) {
+        selectOptions += `
+            <option value="${key}" type = '${value}'>${key}:<b>${value}</b></option>
+        `
+    }
+
+
+    let screenContent = `
+        <div class = 'map-cells-edit-symbol-form-representation'>
+            <div class = 'map-cells-form-representation'>
+                <div class = 'map-cells-form-representation-center'> 
+                    <div id ='map-cells-symbol-form'></div>
+                </div>
+            </div>
+            <div class= 'map-cells-edit-symbol-list-forms'>
+                ${formDiv}
+            </div>
+        </div>
+        <div class = 'map-cells-categorize-data'>
+            <div class= 'map-cells-categorize-data-select'>
+                <span>Value:</span>
+                <select class = 'map-cells-select-classify-value'>
+                    ${selectOptions}
+                </select>
+                <span>Category:</span>
+                <select class = 'map-cells-select-classify-type'>
+                    
+                </select>
+                <button id='map-cells-classify-button'>Classify</button>
+            </div>
+            <div class ='map-cells-set-all-values'>
+                <input type="number" placeholder='Set all border opacity' min="0" max="100"  class ='map-cells-set-all-border'>
+                <input type="number" placeholder='Set all fill opacity' min="0" max="100" class ='map-cells-set-all-fill' >
+                <input type="number" placeholder='Set all size' min="0" max="3000" class ='map-cells-set-all-size' >
+                <button class='map-cells-set-all'>Apply</button>
+            </div>
+            <div class='map-cells-symbol-select-forms-options'>
+                    <div class= 'map-cells-symbol-select-forms-options-check-azimuth'>
+                        <input checked type='checkbox'>
+                        <span>Use Azimuth column</span>
+                    </div>
+                    <div>
+                        <span>Azimuth column:</span>
+                        <select>
+                            ${selectOptions}
+                        </select>
+                    </div>
+                    <div>
+                        <span>
+                            Aperture angle
+                        </span>
+                        <input type='number' min='0' max ='360' value = '30'>
+                    </div>
+
+                    
+                </div>
+            <div class = 'map-cells-classified-content'>
+                
+            </div>
+            <button class ='map-cells-add-range'>Add Range</button>
+        </div>
+        
+        
+
+    `
+
+
+
+    return screenContent
+}
+
+const SingleSymbol = (color, size, opacity, fillOpacity,fileInfo) => {
+
+    let forms = ['circle', 'square', 'diamond', 'cone']
+    let formDiv = ''
+    forms.forEach(form => {
+        formDiv += `
+            <div class='map-cells-item-representation'>
+                <div class = 'map-cells-format-${form}'>
+                </div>
+            </div>
+        `
+    })
+
+    let columnOptions = ''
+
+    for (const [key, value] of Object.entries(fileInfo.headerTypes)) {
+        columnOptions += `
+            <option value="${key}" type = '${value}'>${key}:<b>${value}</b></option>
+        `
+    }
+
+    let screenContent = `
+
+        <div class = 'map-cells-edit-symbol-form-representation'>
+            <div class = 'map-cells-form-representation'>
+                <div class = 'map-cells-form-representation-center'> 
+                    <div id ='map-cells-symbol-form'></div>
+                </div>
+            </div>
+            <div class = 'map-cells-form-representation-options'>
+                <div class='map-cells-symbol-select-color'>
+                    <span>Color:</span>
+                    <input type="color"  value="${color}">
+                </div>
+                <div class='map-cells-symbol-select-fill-opacity'>
+                    <span>Fill Opacity:</span>
+                    <input type="range" min="0" max="100" value="${fillOpacity * 100}"  >
+                </div>
+                <div class='map-cells-symbol-select-border-opacity'>
+                    <span>Border Opacity:</span>
+                    <input type="range" min="0" max="100" value="${opacity * 100}"  >
+                </div>
+                <div class='map-cells-symbol-select-size'>
+                    <span>Size:</span>
+                    <input type="number" value='${size}' id="numberInput" min="5" max="3000" step="1">
+                    <span>meters</span>
+                </div>
+                <div class='map-cells-symbol-select-forms-options'>
+                    <div class= 'map-cells-symbol-select-forms-options-check-azimuth'>
+                        <input checked type='checkbox'>
+                        <span>Use Azimuth column</span>
+                    </div>
+                    <div>
+                        <span>Azimuth column:</span>
+                        <select>
+                            ${columnOptions}
+                        </select>
+                    </div>
+                    <div>
+                        <span>
+                            Aperture angle
+                        </span>
+                        <input type='number' min='0' max ='360' value = '30'>
+                    </div>
+
+                    
+                </div>
+                
+            </div>
+        </div>
+        <div class= 'map-cells-edit-symbol-list-forms'>
+            ${formDiv}
+        </div>
+
+    `
+
+    return screenContent
+}
+
+
+const setFormSymbolStyle = (styles) => {
+    let forms = ['circle', 'square', 'diamond', 'cone']
+
+    let form = styles.form
+    let size = styles.size
+    let color = styles.color
+    let opacity = styles.opacity
+    let fillOpacity = styles.fillOpacity
+
+    let divform = document.querySelector('#map-cells-symbol-form')
+    divform.className = 'map-cells-format-' + form
+
+    console.log(styles)
+
+    forms.forEach(element => {
+        switch (element) {
+            // case 'cone':
+            //     $(`.map-cells-format-${element}`).css({
+            //         'border-left': `5vh solid transparent`,
+            //         'border-right': `5vh solid transparent`,
+            //         'border-top': `5vh solid rgba(${parseInt(color.slice(1, 3), 16)}, ${parseInt(color.slice(3, 5), 16)}, ${parseInt(color.slice(5, 7), 16)}, ${fillOpacity})`,
+                    
+            //     })
+            //     break;
+
+            default:
+                
+                $(`.map-cells-format-${element}`).css({
+                    'background-color': `rgba(${parseInt(color.slice(1, 3), 16)}, ${parseInt(color.slice(3, 5), 16)}, ${parseInt(color.slice(5, 7), 16)}, ${fillOpacity})`,
+                    'border': `2px solid rgba(${parseInt(color.slice(1, 3), 16)}, ${parseInt(color.slice(3, 5), 16)}, ${parseInt(color.slice(5, 7), 16)}, ${opacity})`
+                })
+                console.log('entrei no default')
+
+                break;
+        }
+    })
+
+    switch (form) {
+        case 'cone':
+            $('.map-cells-symbol-select-forms-options').css('display','flex')
+        //     $(divform).css({
+        //         'background-color': `transparent`,
+        //         'height': '0',
+        //         'width': '0',
+        //         'border': `transparent`,
+        //         'border-left': `${size}px solid transparent`,
+        //         'border-right': `${size}px solid transparent`,
+        //         'border-top': `${size}px solid rgba(${parseInt(color.slice(1, 3), 16)}, ${parseInt(color.slice(3, 5), 16)}, ${parseInt(color.slice(5, 7), 16)}, ${fillOpacity})`,
+        //     })
+            break;
+    
+        default:
+            $('.map-cells-symbol-select-forms-options').css('display','none')
+            $(divform).css({
+                'background-color': `rgba(${parseInt(color.slice(1, 3), 16)}, ${parseInt(color.slice(3, 5), 16)}, ${parseInt(color.slice(5, 7), 16)}, ${fillOpacity})`,
+                'height': size,
+                'width': size,
+                'border': `2px solid rgba(${parseInt(color.slice(1, 3), 16)}, ${parseInt(color.slice(3, 5), 16)}, ${parseInt(color.slice(5, 7), 16)}, ${opacity})`
+            })
+            break;
+    }
+    
+
+    
+
+
+}
+
+const setDistinctDivs = (mapInfo) => {
+    let categoriesDivs = `
+    <div class= 'map-cells-option-classified-titles'>
+        <span>Value</span>
+        <span>Color</span>
+        <span>Border Opacity</span>
+        <span>Fill Opacity</span>
+        <span>Size (meters)</span>
+    </div>
+    
+    `;
+    document.querySelector('.map-cells-set-all-values').style.display = 'flex'
+    let column = mapInfo.columnRef
+    for (const [key, values] of Object.entries(mapInfo.categories)) {
+
+        categoriesDivs += `
+                <div class ='map-cells-option-classified' column ='${column}'  value='${key}'>
+                    <span>${key}</span>  
+                    <input type="color" class="map-cells-option-classified-color" value='${values.color}'> 
+                    
+                    <input type="number" value='${values.opacity}' class="map-cells-option-classified-border-opacity" min="0" max="100" step="1">
+                    
+                    <input type="number" value='${values.fillOpacity}' class="map-cells-option-classified-fill-opacity" min="0" max="100" step="1">
+                    
+                    <input type="number" value='${values.size}' class="map-cells-option-classified-size" min="0" max="100" step="1">
+                    
+                </div>
+            `
+
+    }
+    document.querySelector('.map-cells-classified-content').innerHTML = categoriesDivs
+
+
+    
+}
+
+const setRangeDivs = (ranges) => {
+    let newRangesOptions = `
+    <div class= 'map-cells-option-classified-titles'>
+        <span>Min</span>
+        <span>~</span>
+        <span>Max</span>
+        <span>Color</span>
+        <span>Border Opacity</span>
+        <span>Fill Opacity</span>
+        <span>Size (meters)</span>
+        <span></span>
+    </div>
+`
+    document.querySelector('.map-cells-set-all-values').style.display = 'flex'
+    let i = 0;
+    let lastItem = ranges.length - 1
+    ranges.forEach(range => {
+
+
+        switch (i) {
+            case 0:
+                newRangesOptions += `
+                <div class ='map-cells-option-classified'  value='${i}'>
+                    <div class='map-cells-option-classified-range-set'>
+                        <input type ='text' value ='${range['min']}' class="map-cells-option-classified-range-min">
+                        <button class= 'map-cells-set-inf-value' value ='negative'> - </button>
+                    </div>
+                    <span> ~ </span>
+                    <input type ='text' value ='${range['max']}'  class="map-cells-option-classified-range-max">
+
+                    <input type="color" class="map-cells-option-classified-color" value='${range['color']}'> 
+                   
+                    <input type="number" value='${range['opacity']}' class="map-cells-option-classified-border-opacity" min="0" max="100" step="1">
+                    
+                    <input type="number" value='${range['fillOpacity']}' class="map-cells-option-classified-fill-opacity" min="0" max="100" step="1">
+                    
+                    <input type="number" value='${range['size']}' class="map-cells-option-classified-size" min="0" max="100" step="1">
+                    <img class ='map-cells-option-classified-delete' src="/npsmart/images/icon-close.png">
+                </div>
+                
+                `
+                break;
+
+            case lastItem:
+                newRangesOptions += `
+                    <div class ='map-cells-option-classified'  value='${i}'>
+                        <input type ='text' value = '${range['min']}' class="map-cells-option-classified-range-min">
+                        <span> ~ </span>
+                        <div class='map-cells-option-classified-range-set'>
+                            <input type ='text' value = '${range['max']}' class="map-cells-option-classified-range-max">
+                            <button class= 'map-cells-set-inf-value' value ='positive'> + </button>
+                        </div>                                    
+                        <input type="color" class="map-cells-option-classified-color" value='${range['color']}'> 
+                        
+                        <input type="number" value='${range['opacity']}' class="map-cells-option-classified-border-opacity" min="0" max="100" step="1">
+                       
+                        <input type="number" value='${range['fillOpacity']}' class="map-cells-option-classified-fill-opacity" min="0" max="100" step="1">
+                        
+                        <input type="number" value='${range['size']}' class="map-cells-option-classified-size" min="0" max="100" step="1">
+                        <img class ='map-cells-option-classified-delete' src="/npsmart/images/icon-close.png">
+                    </div> 
+                `
+
+                break;
+
+            default:
+                newRangesOptions += `
+                    <div class ='map-cells-option-classified'  value='${i}'>
+                        <input type ='text' value = '${range['min']}' class="map-cells-option-classified-range-min">
+                        <span> ~ </span>
+                        <input type ='text' value = '${range['max']}' class="map-cells-option-classified-range-max">                              
+                        <input type="color" class="map-cells-option-classified-color" value='${range['color']}'> 
+                        
+                        <input type="number" value='${range['opacity']}' class="map-cells-option-classified-border-opacity" min="0" max="100" step="1">
+                       
+                        <input type="number" value='${range['fillOpacity']}' class="map-cells-option-classified-fill-opacity" min="0" max="100" step="1">
+                      
+                        <input type="number" value='${range['size']}' class="map-cells-option-classified-size" min="0" max="100" step="1">
+                        <img class ='map-cells-option-classified-delete' src="/npsmart/images/icon-close.png">
+                    </div> 
+                `
+                break;
+        }
+        i++
+    })
+
+
+
+    // for (let i = 0; i < ranges.length; i++) {
+    //     switch (i) {
+    //         case 0:
+    //             newRangesOptions += `
+    //             <div class ='map-cells-option-classified'  value='${i}'>
+    //                 <div class='map-cells-option-classified-range-set'>
+    //                     <input type ='text' value ='${ranges[i]['min']}' class="map-cells-option-classified-range-min">
+    //                     <button class= 'map-cells-set-inf-value' value ='negative'>-∞</button>
+    //                 </div>
+    //                 <span> ~ </span>
+    //                 <input type ='text' value ='${ranges[i]['max']}'  class="map-cells-option-classified-range-max">
+
+    //                 <input type="color" class="map-cells-option-classified-color" value='${ranges[i]['color']}'> 
+
+    //                 <input type="number" value='${ranges[i]['opacity']}' class="map-cells-option-classified-border-opacity" min="0" max="100" step="1">
+
+    //                 <input type="number" value='${ranges[i]['fillOpacity']}' class="map-cells-option-classified-fill-opacity" min="0" max="100" step="1">
+
+    //                 <input type="number" value='${ranges[i]['size']}' class="map-cells-option-classified-size" min="0" max="100" step="1">
+    //                 <img class ='map-cells-option-classified-delete' src="/npsmart/images/icon-close.png">
+    //             </div>
+
+    //             `
+    //             break;
+
+    //         case ranges.length - 1:
+    //             newRangesOptions += `
+    //                 <div class ='map-cells-option-classified'  value='${i}'>
+    //                     <input type ='text' value = '${ranges[i]['min']}' class="map-cells-option-classified-range-min">
+    //                     <span> ~ </span>
+    //                     <div class='map-cells-option-classified-range-set'>
+    //                         <input type ='text' value = '${ranges[i]['max']}' class="map-cells-option-classified-range-max">
+    //                         <button class= 'map-cells-set-inf-value' value ='positive'>+∞</button>
+    //                     </div>                                    
+    //                     <input type="color" class="map-cells-option-classified-color" value='${ranges[i]['color']}'> 
+
+    //                     <input type="number" value='${ranges[i]['opacity']}' class="map-cells-option-classified-border-opacity" min="0" max="100" step="1">
+
+    //                     <input type="number" value='${ranges[i]['fillOpacity']}' class="map-cells-option-classified-fill-opacity" min="0" max="100" step="1">
+
+    //                     <input type="number" value='${ranges[i]['size']}' class="map-cells-option-classified-size" min="0" max="100" step="1">
+    //                     <img class ='map-cells-option-classified-delete' src="/npsmart/images/icon-close.png">
+    //                 </div> 
+    //             `
+
+    //             break;
+
+    //         default:
+    //             newRangesOptions += `
+    //                 <div class ='map-cells-option-classified'  value='${i}'>
+    //                     <input type ='text' value = '${ranges[i]['min']}' class="map-cells-option-classified-range-min">
+    //                     <span> ~ </span>
+    //                     <input type ='text' value = '${ranges[i]['max']}' class="map-cells-option-classified-range-max">                              
+    //                     <input type="color" class="map-cells-option-classified-color" value='${ranges[i]['color']}'> 
+
+    //                     <input type="number" value='${ranges[i]['opacity']}' class="map-cells-option-classified-border-opacity" min="0" max="100" step="1">
+
+    //                     <input type="number" value='${ranges[i]['fillOpacity']}' class="map-cells-option-classified-fill-opacity" min="0" max="100" step="1">
+
+    //                     <input type="number" value='${ranges[i]['size']}' class="map-cells-option-classified-size" min="0" max="100" step="1">
+    //                     <img class ='map-cells-option-classified-delete' src="/npsmart/images/icon-close.png">
+    //                 </div> 
+    //             `
+    //             break;
+    //     }
+    // }
+    let divClassifiedContents = document.querySelector('.map-cells-classified-content')
+    divClassifiedContents.innerHTML = newRangesOptions
+
+    document.querySelectorAll('.map-cells-option-classified-delete').forEach(element => {
+        element.addEventListener('click', function () {
+            let closestOptionDivValue = parseInt(this.closest('.map-cells-option-classified').getAttribute('value'))
+
+            ranges.splice(closestOptionDivValue, 1);
+            setRangeDivs(ranges)
+
+        })
+    })
+
+    document.querySelectorAll('.map-cells-set-inf-value').forEach(element => {
+        element.addEventListener('click', function () {
+            let closestOptionDivValue = parseInt(this.closest('.map-cells-option-classified').getAttribute('value'))
+
+            switch (element.getAttribute('value')) {
+                case 'positive':
+                    document.querySelector('.map-cells-option-classified-range-set .map-cells-option-classified-range-max').value = '+inf'
+                    ranges[closestOptionDivValue]['max'] = '+inf'
+                    break;
+                case 'negative':
+                    document.querySelector('.map-cells-option-classified-range-set .map-cells-option-classified-range-min').value = '-inf'
+                    ranges[closestOptionDivValue]['min'] = '-inf'
+                    break;
+                default:
+                    break;
+            }
+        })
+    })
+
+    divClassifiedContents.querySelectorAll(`input`).forEach(element => {
+        element.addEventListener('input', function () {
+            let closestOptionDivValue = parseInt(this.closest('.map-cells-option-classified').getAttribute('value'))
+            switch (this.className) {
+                case 'map-cells-option-classified-range-min':
+                    ranges[closestOptionDivValue]['min'] = this.value
+                    break;
+                case 'map-cells-option-classified-range-max':
+                    ranges[closestOptionDivValue]['max'] = this.value
+                    break;
+                case 'map-cells-option-classified-border-opacity':
+                    ranges[closestOptionDivValue]['opacity'] = this.value
+                    break;
+                case 'map-cells-option-classified-fill-opacity':
+                    ranges[closestOptionDivValue]['fillOpacity'] = this.value
+                    break;
+                case 'map-cells-option-classified-size':
+                    ranges[closestOptionDivValue]['size'] = this.value
+                    break;
+                case 'map-cells-option-classified-color':
+                    ranges[closestOptionDivValue]['color'] = this.value
+                    break;
+                default:
+                    break;
+            }
+
+
+        })
+    })
+}
+
+const createEditScreenLayerContent = (divEditScreenLayer, info, mapCellsInstancy) => {
+
+    let titleName = (info.layer === 'newLayer') ? info.name : info.layer;
+    var formSymbolStyles = {
+        form: mapCellsInstancy.files[titleName].info.form ?? 'circle',
+        size: mapCellsInstancy.files[titleName].info.size ?? 10,
+        color: mapCellsInstancy.files[titleName].info.color,
+        opacity: mapCellsInstancy.files[titleName].info.opacity ?? 1,
+        fillOpacity: mapCellsInstancy.files[titleName].info.fillOpacity ?? 0.5,
+    }
+
+    let initialScreen;
+    let inicialSelectScreenValue;
+    if (mapCellsInstancy.files[titleName].info.classifyType != undefined) {
+        initialScreen = categorizedSymbols(mapCellsInstancy.files[titleName].info.color, formSymbolStyles.size, formSymbolStyles.opacity, formSymbolStyles.fillOpacity, mapCellsInstancy.files[titleName].info.headerTypes, mapCellsInstancy.files[titleName].info.columnRef,mapCellsInstancy.files[titleName].info)
+        inicialSelectScreenValue = 'categorized'
+    } else {
+        initialScreen = SingleSymbol(mapCellsInstancy.files[titleName].info.color, formSymbolStyles.size, formSymbolStyles.opacity, formSymbolStyles.fillOpacity, mapCellsInstancy.files[titleName].info)
+        inicialSelectScreenValue = 'singleSymbol'
+    }
+
+    let initialLabelValue = '';
+
+    if(mapCellsInstancy.files[titleName].info.labelHeader != undefined){
+        initialLabelValue = mapCellsInstancy.files[titleName].info.labelHeader
+    }
+
+    let labelHeaders = ``
+    for(let key in mapCellsInstancy.files[titleName].info.headerTypes){
+        labelHeaders += `
+            <label><input type="checkbox" value="${key}">${key}</option></label>
+        `
+    }
+
+
+
+
+    // let virtual_select_init = {
+    //     ele: `#${element.id}`,
+    //     placeholder: `Select ${element.getAttribute('select')}`,
+    //     maxWidth: "80%",
+    //     multiple: true,
+    //     search: true,
+    //     options: [],
+    // }
+
+    // <div class='map-cells-select-main-edit-label-select '>
+    //     <select value = '${initialLabelValue}'>
+    //         ${labelHeaders}
+    //     </select>
+    // </div>
+    
+    let mainContent = `
+            <div class = 'map-cells-select-main-edit-screen-select'>
+            <span>Label Headers</span>
+            <div class="multi-select">
+                <div class="select-btn">Selecione opções</div>
+                <div class="select-content">
+                    <label><input type="checkbox" id="selectAll"> Selecionar tudo</label>
+                    ${labelHeaders}
+                </div>
+            </div>
+            <br>
+            <span>Properties</span>
+                <select value = '${inicialSelectScreenValue}'>
+                    <option value="singleSymbol">Single symbol</option>
+                    <option value="categorized">Categorized</option>
+                </select>
+            </div>   
+            <div class = 'map-cells-select-main-edit-screen-content'>
+                ${initialScreen}
+            </div>
+            `
+
+    divEditScreenLayer.innerHTML += `
+            <div class = 'map-cells-close-edit-screen'> 
+                    <span>Layer properties - ${titleName} - NPGIS</span>
+                    <img class = 'map-cells-close-edit-screen-icon' src="/npsmart/images/icon-close.png">
+            </div>
+            <div class = 'map-cells-main-edit-screen'>
+                ${mainContent}
+            </div>
+            <div class='map-cells-confirmation-edit-screen'> 
+                <button id='map-cells-confirmation-edit-cancel'>Cancel</button>
+                <button id='map-cells-confirmation-edit-set'>Apply</button>
+            </div>
+        `
+
+    // --------------- caixinha de labels
+    const select = document.querySelector('.multi-select');
+    const btn = select.querySelector('.select-btn');
+    const checkboxes = select.querySelectorAll('input[type="checkbox"]:not(#selectAll)');
+    const selectAll = document.querySelector('#selectAll');
+    
+    btn.addEventListener('click', () => {
+        select.classList.toggle('open');
+    });
+    
+    document.addEventListener('click', (e) => {
+        if (!select.contains(e.target)) {
+            select.classList.remove('open');
+        }
+    });
+    
+    function updateLabel() {
+        const selected = Array.from(checkboxes).filter(cb => cb.checked).length;
+    
+        if (selected === 0) btn.textContent = "Select headers";
+        else if (selected === 1) btn.textContent = "1 option selected";
+        else btn.textContent = `${selected} options selected`;
+    
+        selectAll.checked = selected === checkboxes.length;
+    }
+    
+    selectAll.addEventListener('change', () => {
+        checkboxes.forEach(cb => cb.checked = selectAll.checked);
+        updateLabel();
+    });
+    
+    checkboxes.forEach(cb => {
+        if(mapCellsInstancy.files[titleName].info.labelHeader !== undefined){
+            cb.checked = mapCellsInstancy.files[titleName].info.labelHeader.includes(cb.value);
+            updateLabel();
+        }
+        cb.addEventListener('change', updateLabel);
+    });
+
+    // -----------
+
+    document.querySelector('.map-cells-select-main-edit-screen-select select').value = inicialSelectScreenValue
+    setFormSymbolStyle(formSymbolStyles)
+
+    let mapInfo = mapCellsInstancy.files[titleName].info
+    var ranges;
+    if (mapInfo.classifyType == "range") {
+        setRangeDivs(mapInfo.categories);
+        ranges = mapInfo.categories
+        document.querySelector('.map-cells-add-range').style.display = 'inline'
+        document.querySelector('.map-cells-add-range').removeEventListener('click', function () {
+            addRange()
+        })
+        document.querySelector('.map-cells-add-range').addEventListener('click', function () {
+            addRange()
+        })
+        document.querySelector('.map-cells-select-classify-value').value = mapInfo.columnRef
+        document.querySelector('.map-cells-select-classify-type').value = 'range'
+    } else if (mapInfo.classifyType == "distinct") {
+        ranges = []
+        setDistinctDivs(mapInfo)
+        document.querySelector('.map-cells-select-classify-value').value = mapInfo.columnRef
+        document.querySelector('.map-cells-select-classify-type').value = "distinct"
+    } else {
+        ranges = []
+    }
+
+
+
+
+
+    function addRange() {
+        let lastItem = ranges[ranges.length - 1]
+        let lastMax = ranges[ranges.length - 2].max
+        ranges[ranges.length - 1] = {
+            min: lastMax,
+            max: lastMax,
+            color: colorHexa(),
+            size: 10,
+            opacity: 100,
+            fillOpacity: 50,
+        }
+        ranges[ranges.length] = lastItem
+
+
+        setRangeDivs(ranges)
+
+        return ranges
+    }
+
+    function addEventsSingleSymbol() {
+        try {
+            document.querySelector('.map-cells-symbol-select-forms-options div select').value = mapCellsInstancy.files[titleName].info.z
+            document.querySelector('.map-cells-symbol-select-color input').addEventListener('input', function () {
+                formSymbolStyles.color = this.value
+                setFormSymbolStyle(formSymbolStyles)
+            })
+            document.querySelector('.map-cells-symbol-select-fill-opacity input').addEventListener('input', function () {
+                formSymbolStyles.fillOpacity = this.value / 100
+                setFormSymbolStyle(formSymbolStyles)
+            })
+            document.querySelector('.map-cells-symbol-select-border-opacity input').addEventListener('input', function () {
+                formSymbolStyles.opacity = this.value / 100
+                setFormSymbolStyle(formSymbolStyles)
+            })
+            document.querySelector('.map-cells-symbol-select-size #numberInput').addEventListener('input', function () {
+                formSymbolStyles.size = this.value
+                setFormSymbolStyle(formSymbolStyles)
+            })
+        } catch (error) {
+
+        }
+
+
+        document.querySelectorAll('.map-cells-item-representation').forEach(element => {
+            element.addEventListener('click', function () {
+                $('.map-cells-item-representation').css('border-color', '#DDD')
+                $(this).css('border-color', '#00F')
+                let newClassName = this.querySelector('[class^="map-cells-format-"]').className
+                formSymbolStyles.form = newClassName.replace('map-cells-format-', '')
+                setFormSymbolStyle(formSymbolStyles)
+            })
+        })
+    }
+
+    function addEventsCategorizedSymbol() {
+        document.querySelector('.map-cells-symbol-select-forms-options div select').value = mapCellsInstancy.files[titleName].info.z
+
+        document.querySelector('.map-cells-set-all').addEventListener('click', function () {
+            let classifyType = document.querySelector('.map-cells-select-classify-type').value
+            let borderValue = document.querySelector('.map-cells-set-all-border').value;
+            let fillValue = document.querySelector('.map-cells-set-all-fill').value;
+            let sizeValue = document.querySelector(".map-cells-set-all-size").value;
+            switch (classifyType) {
+                case 'range':
+                    mapCellsInstancy.files[titleName].info.categories.forEach(element => {
+                        element.fillOpacity = (fillValue != '') ? fillValue : element.fillOpacity
+                        element.opacity = (borderValue != '') ? borderValue : element.opacity
+                        element.size = (sizeValue != '') ? sizeValue : element.size
+                    })
+                    setRangeDivs(mapCellsInstancy.files[titleName].info.categories)
+
+                    break;
+                case 'distinct':
+                    if (borderValue != '') {
+                        document.querySelectorAll('.map-cells-option-classified-border-opacity').forEach(element => {
+                            element.value = borderValue
+                        })
+
+                    }
+                    if (fillValue != '') {
+                        document.querySelectorAll('.map-cells-option-classified-fill-opacity').forEach(element => {
+                            element.value = fillValue
+                        })
+
+                    }
+                    if (sizeValue != '') {
+                        document.querySelectorAll('.map-cells-option-classified-size').forEach(element => {
+                            element.value = sizeValue
+                        })
+
+                    }
+                    break;
+                default:
+                    break;
+            }
+        })
+
+        document.querySelectorAll('.map-cells-item-representation').forEach(element => {
+            element.addEventListener('click', function () {
+                $('.map-cells-item-representation').css('border-color', '#DDD')
+                $(this).css('border-color', '#00F')
+                let newClassName = this.querySelector('[class^="map-cells-format-"]').className
+                formSymbolStyles.form = newClassName.replace('map-cells-format-', '')
+                setFormSymbolStyle(formSymbolStyles)
+            })
+        })
+
+        function updateClassifyOptions() {
+            let selectClassifyValue = document.querySelector('.map-cells-select-classify-value');
+            let selectedOption = selectClassifyValue.options[selectClassifyValue.selectedIndex];
+            let type = selectedOption.getAttribute('type');
+            let optionsTypes = '';
+
+            if (type === 'TEXT') {
+                optionsTypes = '<option value="distinct">Distinct</option>';
+            } else {
+                optionsTypes = `
+                    <option value="distinct">Distinct</option>
+                    <option value="range">Range</option>
+                `;
+            }
+            document.querySelector('.map-cells-select-classify-type').innerHTML = optionsTypes;
+
+        }
+
+        document.querySelector('.map-cells-select-classify-value').addEventListener('change', function () {
+            updateClassifyOptions()
+        })
+        updateClassifyOptions()
+        if (mapInfo.classifyType == "range") {
+            document.querySelector('.map-cells-select-classify-type').value = 'range'
+        } else if (mapInfo.classifyType == "distinct") {
+            ranges = []
+            document.querySelector('.map-cells-select-classify-type').value = "distinct"
+        }
+
+
+        document.querySelector('#map-cells-classify-button').addEventListener('click', function () {
+
+            $.ajax({
+                url: "/npsmart/map/get_data_to_classify",
+                method: 'POST',
+                data: {
+                    table: titleName,
+                    category: document.querySelector('.map-cells-select-classify-type').value,
+                    column: document.querySelector('.map-cells-select-classify-value').value,
+                },
+                success: function (result) {
+                    let column = document.querySelector('.map-cells-select-classify-value').value
+                    let type = document.querySelector('.map-cells-select-classify-type').value
+                    result = JSON.parse(result)
+                    let classifiedOptions = ''
+                    document.querySelector('.map-cells-set-all-values').style.display = 'flex'
+                    switch (type) {
+                        case 'distinct':
+                            document.querySelector('.map-cells-add-range').style.display = 'none'
+                            classifiedOptions = `
+                                <div class= 'map-cells-option-classified-titles'>
+                                    <span>Value</span>
+                                    <span>Color</span>
+                                    <span>Border Opacity</span>
+                                    <span>Fill Opacity</span>
+                                    <span>Size (meters)</span>
+                                </div>
+                            `
+                            ranges = []
+                            for (let i = 0; i < result.length; i++) {
+
+                                classifiedOptions += `
+                                    <div class ='map-cells-option-classified' value='${result[i][column]}'>
+                                        <span>${result[i][column]}</span>  
+                                        <input type="color" class="map-cells-option-classified-color" value='${colorHexa()}'> 
+                                        
+                                        <input type="number" value='100' class="map-cells-option-classified-border-opacity" min="0" max="100" step="1">
+                                        
+                                        <input type="number" value='50' class="map-cells-option-classified-fill-opacity" min="0" max="100" step="1">
+                                      
+                                        <input type="number" value='10' class="map-cells-option-classified-size" min="0" max="100" step="1">
+                                    </div>
+                                `
+                            }
+                            break;
+                        case 'range':
+                            ranges = []
+                            let initialValue = Math.ceil((parseFloat(result[0]['min']) + parseFloat(result[0]['max'])) / 2)
+                            document.querySelector('.map-cells-add-range').style.display = 'inline'
+                            let firstColor = colorHexa()
+                            let secondColor = colorHexa()
+                            classifiedOptions += `
+                                <div class= 'map-cells-option-classified-titles'>
+                                    <span>Min</span>
+                                    <span>~</span>
+                                    <span>Max</span>
+                                    <span>Color</span>
+                                    <span>Border Opacity</span>
+                                    <span>Fill Opacity</span>
+                                    <span>Size (meters)</span>
+                                    <span></span>
+                                </div>
+                                    <div class ='map-cells-option-classified' column ='${column}'  value='${0}'>
+                                        <div class='map-cells-option-classified-range-set'>
+                                            <input type ='text' value = '-inf' class="map-cells-option-classified-range-min">
+                                            <button class= 'map-cells-set-inf-value' value ='negative'> - </button>
+                                        </div>
+                                        <span> ~ </span>
+                                        <input type ='text' value ='${initialValue}'  class="map-cells-option-classified-range-max">
+
+                                        <input type="color" class="map-cells-option-classified-color" value='${firstColor}'> 
+                                       
+                                        <input type="number" value='100' class="map-cells-option-classified-border-opacity" min="0" max="100" step="1">
+                                        
+                                        <input type="number" value='50' class="map-cells-option-classified-fill-opacity" min="0" max="100" step="1">
+                                        
+                                        <input type="number" value='10' class="map-cells-option-classified-size" min="0" max="100" step="1">
+                                        <img class ='map-cells-option-classified-delete' src="/npsmart/images/icon-close.png">
+                                    </div>
+                                    <div class ='map-cells-option-classified' column ='${column}'  value='${1}'>
+                                    
+                                        <input type ='text' value = '${initialValue}' class="map-cells-option-classified-range-min">
+                                        <span> ~ </span>
+                                        <div class='map-cells-option-classified-range-set'>
+                                            <input type ='text' value = '+inf' class="map-cells-option-classified-range-max">
+                                            <button class= 'map-cells-set-inf-value' value ='positive'> + </button>
+                                        </div>                                    
+                                        <input type="color" class="map-cells-option-classified-color" value='${secondColor}'> 
+                                        
+                                        <input type="number" value='100' class="map-cells-option-classified-border-opacity" min="0" max="100" step="1">
+                                      
+                                        <input type="number" value='50' class="map-cells-option-classified-fill-opacity" min="0" max="100" step="1">
+                                       
+                                        <input type="number" value='10' class="map-cells-option-classified-size" min="0" max="100" step="1">
+                                        <img class ='map-cells-option-classified-delete' src="/npsmart/images/icon-close.png">
+
+                                    </div>
+                            `
+                            ranges = [
+                                {
+                                    min: '-inf',
+                                    max: initialValue,
+                                    color: firstColor,
+                                    size: 10,
+                                    opacity: 100,
+                                    fillOpacity: 50,
+                                },
+                                {
+                                    min: initialValue,
+                                    max: '+inf',
+                                    color: secondColor,
+                                    size: 10,
+                                    opacity: 100,
+                                    fillOpacity: 50,
+                                }
+                            ]
+                            document.querySelector('.map-cells-add-range').removeEventListener('click', function () {
+                                addRange()
+                            })
+                            document.querySelector('.map-cells-add-range').addEventListener('click', function () {
+                                addRange()
+
+                            })
+                            mapCellsInstancy.files[titleName].info.categories = ranges
+                            break;
+                        default:
+                            break;
+                    }
+
+                    document.querySelector('.map-cells-classified-content').innerHTML = classifiedOptions
+                    if (type == 'range') {
+
+                        document.querySelectorAll('.map-cells-option-classified-delete').forEach(element => {
+                            element.addEventListener('click', function () {
+                                let closestOptionDivValue = parseInt(this.closest('.map-cells-option-classified').getAttribute('value'))
+
+                                ranges.splice(closestOptionDivValue, 1);
+                                setRangeDivs(ranges)
+
+                            })
+                        })
+
+                        document.querySelectorAll('.map-cells-set-inf-value').forEach(element => {
+                            element.addEventListener('click', function () {
+                                let closestOptionDivValue = parseInt(this.closest('.map-cells-option-classified').getAttribute('value'))
+
+                                switch (element.getAttribute('value')) {
+                                    case 'positive':
+                                        document.querySelector('.map-cells-option-classified-range-set .map-cells-option-classified-range-max').value = '+inf'
+                                        ranges[closestOptionDivValue]['max'] = '+inf'
+                                        break;
+                                    case 'negative':
+                                        document.querySelector('.map-cells-option-classified-range-set .map-cells-option-classified-range-min').value = '-inf'
+                                        ranges[closestOptionDivValue]['min'] = '-inf'
+                                        break;
+                                    default:
+                                        break;
+                                }
+                            })
+                        })
+
+                        let divClassifiedContents = document.querySelector('.map-cells-classified-content')
+
+                        divClassifiedContents.querySelectorAll(`input`).forEach(element => {
+                            element.addEventListener('input', function () {
+                                let closestOptionDivValue = parseInt(this.closest('.map-cells-option-classified').getAttribute('value'))
+                                switch (this.className) {
+                                    case 'map-cells-option-classified-range-min':
+                                        ranges[closestOptionDivValue]['min'] = this.value
+                                        break;
+                                    case 'map-cells-option-classified-range-max':
+                                        ranges[closestOptionDivValue]['max'] = this.value
+                                        break;
+                                    case 'map-cells-option-classified-border-opacity':
+                                        ranges[closestOptionDivValue]['opacity'] = this.value
+                                        break;
+                                    case 'map-cells-option-classified-fill-opacity':
+                                        ranges[closestOptionDivValue]['fillOpacity'] = this.value
+                                        break;
+                                    case 'map-cells-option-classified-size':
+                                        ranges[closestOptionDivValue]['size'] = this.value
+                                        break;
+                                    case 'map-cells-option-classified-color':
+                                        ranges[closestOptionDivValue]['color'] = this.value
+                                        break;
+                                    default:
+                                        break;
+                                }
+
+
+                            })
+                        })
+                    }
+
+
+                },
+
+                error: function (error) {
+
+                }
+            });
+        })
+
+    }
+
+
+    if (inicialSelectScreenValue == 'categorized') {
+        addEventsCategorizedSymbol()
+    } else {
+        addEventsSingleSymbol()
+
+    }
+
+
+    document.querySelector('#map-cells-confirmation-edit-set').addEventListener('click', function () {
+        let screen = document.querySelector('.map-cells-select-main-edit-screen-select select').value
+        // let labelHeader = document.querySelector('.map-cells-select-main-edit-label-select select').value
+        let labelHeader = Array.from(document.querySelectorAll('.multi-select input[type="checkbox"]:checked')).map(cb => cb.value);
+        let useAzimuthColumn = document.querySelector('.map-cells-symbol-select-forms-options-check-azimuth input').checked
+        let columnZ = document.querySelector('.map-cells-symbol-select-forms-options select').value
+        let apertureAngle = document.querySelector('.map-cells-symbol-select-forms-options input[type="number"]').value
+        mapCellsInstancy.files[titleName].info.useAzimuthColumn = useAzimuthColumn
+        mapCellsInstancy.files[titleName].info.apertureAngle = apertureAngle
+        mapCellsInstancy.files[titleName].info.z = columnZ
+        mapCellsInstancy.files[titleName].info.labelHeader = labelHeader
+        switch (screen) {
+            case 'singleSymbol':
+                
+                mapCellsInstancy.files[titleName].info.classifyType = undefined
+                mapCellsInstancy.files[titleName].info.columnRef = null
+
+                mapCellsInstancy.files[titleName].info.form = formSymbolStyles.form
+                mapCellsInstancy.files[titleName].info.size = formSymbolStyles.size
+                mapCellsInstancy.files[titleName].info.color = formSymbolStyles.color
+                mapCellsInstancy.files[titleName].info.opacity = formSymbolStyles.opacity
+                mapCellsInstancy.files[titleName].info.fillOpacity = formSymbolStyles.fillOpacity
+
+                break;
+            case 'categorized':
+                mapCellsInstancy.files[titleName].info.form = formSymbolStyles.form
+                let mapInfo = mapCellsInstancy.files[titleName].info
+                let categorizeType = document.querySelector('.map-cells-select-classify-type').value
+                mapInfo.classifyType = categorizeType
+                mapInfo.columnRef = document.querySelector('.map-cells-select-classify-value').value
+                switch (categorizeType) {
+                    case 'distinct':
+                        let optionsDivs = document.querySelectorAll('.map-cells-option-classified')
+
+                        mapInfo.categories = {}
+                        optionsDivs.forEach(element => {
+                            let value = element.getAttribute('value')
+                            let color = element.querySelector('.map-cells-option-classified-color').value;
+                            let fillOpacity = element.querySelector('.map-cells-option-classified-fill-opacity').value;
+                            let opacity = element.querySelector('.map-cells-option-classified-border-opacity').value;
+                            let size = element.querySelector('.map-cells-option-classified-size').value
+                            mapInfo.categories[value] = {}
+                            mapInfo.categories[value].color = color
+                            mapInfo.categories[value].fillOpacity = fillOpacity
+                            mapInfo.categories[value].opacity = opacity
+                            mapInfo.categories[value].size = size
+                        })
+
+                        break;
+                    case 'range':
+                        mapInfo.categories = ranges
+                        break;
+
+                    default:
+                        break;
+                }
+
+                break;
+            default:
+                break;
+        }
+
+
+        add_subtitle_file_layer(mapCellsInstancy.files)
+
+        handleZoomMoveEnd(mapCellsInstancy)
+        blockUi(false, mapCellsInstancy)
+        divEditScreenLayer.remove()
+
+    })
+
+    
+
+    document.querySelector('.map-cells-select-main-edit-screen-select select').addEventListener('change', function () {
+        switch (this.value) {
+            case 'categorized':
+                document.querySelector('.map-cells-select-main-edit-screen-content').innerHTML = categorizedSymbols(formSymbolStyles.color, formSymbolStyles.size, formSymbolStyles.opacity, formSymbolStyles.fillOpacity, mapCellsInstancy.files[titleName].info.headerTypes)
+                formSymbolStyles.size = 60
+                addEventsCategorizedSymbol()
+                break;
+            case 'singleSymbol':
+                document.querySelector('.map-cells-select-main-edit-screen-content').innerHTML = SingleSymbol(formSymbolStyles.color, formSymbolStyles.size, formSymbolStyles.opacity, formSymbolStyles.fillOpacity,mapCellsInstancy.files[titleName].info)
+                addEventsSingleSymbol()
+                break;
+            default:
+                break;
+        }
+        setFormSymbolStyle(formSymbolStyles)
+
+    })
+
+    document.querySelector('#map-cells-confirmation-edit-cancel').addEventListener('click', function () {
+        divEditScreenLayer.remove()
+        blockUi(false, mapCellsInstancy)
+    })
+    document.querySelector('.map-cells-close-edit-screen-icon').addEventListener('click', function () {
+        divEditScreenLayer.remove()
+        blockUi(false, mapCellsInstancy)
+    })
+
+}
+
+const callEditLayer = (divLayer, mapCellsInstancy) => {
+    const divMap = document.querySelector('.map-cells-main')
+    let divEditScreenLayer = document.createElement('div');
+
+    divEditScreenLayer.classList.add('map-cells-edit-screen-layer');
+    divEditScreenLayer.style.position = 'absolute';
+
+
+    const leftPosition = divMap.offsetWidth * 0.40;
+
+    divEditScreenLayer.style.left = `${leftPosition}px`;
+    divEditScreenLayer.style.top = `5%`;
+    let info = {
+        layer: divLayer.getAttribute('layer'),
+        tec: divLayer.getAttribute('tech'),
+        name: divLayer.getAttribute('layerName')
+    }
+
+    divMap.appendChild(divEditScreenLayer);
+    createEditScreenLayerContent(divEditScreenLayer, info, mapCellsInstancy)
+    blockUi(true, mapCellsInstancy)
+
+}
