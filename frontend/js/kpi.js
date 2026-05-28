@@ -6,6 +6,7 @@ import State from "./state.js";
 import API   from "./bridge.js";
 
 let _chart = null;
+let _popupChart = null;
 let _searchQuery = "";
 
 const METRIC_LABELS = {
@@ -27,10 +28,53 @@ const STATUS_COLORS = {
   unknown:  "#484F58",
 };
 
+const CELL_COLORS = [
+  "#388BFD", // Modern Blue
+  "#56d364", // Soft Emerald Green
+  "#ab7df6", // Light Violet
+  "#ff7b72", // Coral Red/Pink
+  "#ff9b72", // Warm Orange
+  "#f692cc", // Pastel Pink
+  "#00d2ff", // Neon Cyan
+  "#f1e05a", // Bright Amber
+];
+
+function hexToRgba(hex, alpha) {
+  const r = parseInt(hex.slice(1, 3), 16);
+  const g = parseInt(hex.slice(3, 5), 16);
+  const b = parseInt(hex.slice(5, 7), 16);
+  return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+}
+
 // ── Inicialização ─────────────────────────────────────────────────
 
 export function initKpi() {
   _initChart();
+  _initPopupChart();
+
+  const popupModal = document.getElementById("chart-popup-modal");
+  const popupCloseBtn = document.getElementById("popup-chart-close");
+  const expandBtn = document.getElementById("expand-chart-btn");
+  const reopenBtn = document.getElementById("reopen-chart-btn");
+
+  if (expandBtn) {
+    expandBtn.addEventListener("click", () => {
+      _openPopup();
+    });
+  }
+
+  if (reopenBtn) {
+    reopenBtn.addEventListener("click", () => {
+      _openPopup();
+    });
+  }
+
+  if (popupCloseBtn && popupModal) {
+    popupCloseBtn.addEventListener("click", _closePopup);
+    popupModal.addEventListener("click", e => {
+      if (e.target === popupModal) _closePopup();
+    });
+  }
 
   State.on("change:sites",          _renderSiteList);
   State.on("change:vips",           () => _renderSiteList(State.sites || []));
@@ -202,8 +246,8 @@ async function _populateCellSelector(siteId) {
       const tech = cell.tech ? ` (${cell.tech})` : "";
       sel.innerHTML += `<option value="${_esc(cell.id)}">${_esc(label)}${_esc(tech)}</option>`;
     });
-    sel.value = "__all__";
-    State.set("selectedCell", "__all__");
+    sel.value = "__media__";
+    State.set("selectedCell", "__media__");
   } else if (cells && cells.length === 1) {
     // Site com célula única: não faz sentido exibir seletor
     sel.innerHTML = `<option value="${_esc(cells[0].id)}">${_esc(cells[0].label || cells[0].id)}</option>`;
@@ -232,6 +276,93 @@ async function _onSiteSelected(siteId) {
 }
 
 // ── Gráfico ───────────────────────────────────────────────────────
+
+function _openPopup() {
+  const modal = document.getElementById("chart-popup-modal");
+  if (!modal) return;
+  modal.classList.remove("hidden");
+  _refreshChart();
+}
+
+function _closePopup() {
+  const modal = document.getElementById("chart-popup-modal");
+  if (modal) modal.classList.add("hidden");
+}
+
+function _updateChartInstance(chart, labels, datasets, legendDisplay, annotations) {
+  if (!chart) return;
+  chart.data.labels = labels;
+  chart.data.datasets = datasets;
+  chart.options.plugins.legend.display = legendDisplay;
+  chart.options.plugins.annotation.annotations = annotations;
+  chart.update("none");
+}
+
+function _initPopupChart() {
+  const ctx = document.getElementById("popup-kpi-chart");
+  if (!ctx) return;
+
+  Chart.defaults.color = "#8B949E";
+  Chart.defaults.font.family = "'Segoe UI', sans-serif";
+  Chart.defaults.font.size = 11;
+
+  _popupChart = new Chart(ctx, {
+    type: "line",
+    data: {
+      labels: [],
+      datasets: [],
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      animation: { duration: 300 },
+      interaction: { mode: "index", intersect: false },
+      scales: {
+        x: {
+          grid:   { color: "#21262D" },
+          ticks: {
+            maxTicksLimit: 8,
+            callback: (_, i, ticks) => {
+              const lbl = _popupChart?.data.labels[i];
+              if (!lbl) return "";
+              return new Date(lbl).toLocaleTimeString("pt-BR", { hour:"2-digit", minute:"2-digit" });
+            },
+          },
+        },
+        y: {
+          grid:   { color: "#21262D" },
+          ticks:  { maxTicksLimit: 5 },
+        },
+      },
+      plugins: {
+        legend: {
+          display: false,
+          position: "top",
+          labels: {
+            boxWidth: 8,
+            boxHeight: 8,
+            usePointStyle: true,
+            pointStyle: "circle",
+            padding: 10,
+            font: {
+              size: 11,
+              weight: "bold"
+            }
+          }
+        },
+        tooltip: {
+          callbacks: {
+            title: items => {
+              const lbl = items[0]?.label;
+              return lbl ? new Date(lbl).toLocaleTimeString("pt-BR") : "";
+            },
+          },
+        },
+        annotation: { annotations: {} },
+      },
+    },
+  });
+}
 
 function _initChart() {
   const ctx = document.getElementById("kpi-chart");
@@ -280,7 +411,21 @@ function _initChart() {
         },
       },
       plugins: {
-        legend: { display: false },
+        legend: {
+          display: false,
+          position: "top",
+          labels: {
+            boxWidth: 8,
+            boxHeight: 8,
+            usePointStyle: true,
+            pointStyle: "circle",
+            padding: 10,
+            font: {
+              size: 11,
+              weight: "bold"
+            }
+          }
+        },
         tooltip: {
           callbacks: {
             title: items => {
@@ -320,39 +465,80 @@ async function _refreshChart() {
 
   let labels = data.labels;
   let values = data.values;
+  let cellsData = data.cells_data;
   let gaps = data.gaps;
 
   if (mode === "historical" && historicalTimestamp) {
     const maxTime = new Date(historicalTimestamp).getTime();
     const minTime = timeWindow > 0 ? maxTime - (timeWindow * 60 * 1000) : 0;
 
-    const filteredLabels = [];
-    const filteredValues = [];
-
+    const filteredIndices = [];
     for (let i = 0; i < labels.length; i++) {
       const tsTime = new Date(labels[i]).getTime();
       if (tsTime <= maxTime && tsTime >= minTime) {
-        filteredLabels.push(labels[i]);
-        filteredValues.push(values[i]);
+        filteredIndices.push(i);
       }
     }
 
-    labels = filteredLabels;
-    values = filteredValues;
+    labels = filteredIndices.map(idx => labels[idx]);
+    values = filteredIndices.map(idx => values[idx]);
+
+    if (cellsData) {
+      const newCellsData = {};
+      Object.keys(cellsData).forEach(cid => {
+        newCellsData[cid] = filteredIndices.map(idx => cellsData[cid][idx]);
+      });
+      cellsData = newCellsData;
+    }
+
     gaps = _detectGapsJS(labels, 90);
   }
-
-  // Insere nulls nos gaps para quebrar a linha
-  const adjustedValues = _applyGaps(values, gaps);
-
-  _chart.data.labels = labels;
-  _chart.data.datasets[0].data = adjustedValues;
 
   const cellLabel = cellId === "__all__"   ? "Site completo" :
                     cellId === "__media__" ? "Média das células" :
                     cellId;
-  _chart.data.datasets[0].label =
-    `${METRIC_LABELS[selectedMetric] || selectedMetric} — ${cellLabel}`;
+
+  let datasets = [];
+  let legendDisplay = false;
+
+  if (cellId === "__all__" && cellsData && Object.keys(cellsData).length > 0) {
+    const cellIds = Object.keys(cellsData).sort();
+
+    cellIds.forEach((cid, index) => {
+      const color = CELL_COLORS[index % CELL_COLORS.length];
+      const cellValues = cellsData[cid];
+      const adjustedCellValues = _applyGaps(cellValues, gaps);
+
+      datasets.push({
+        label: cid,
+        data: adjustedCellValues,
+        borderColor:     color,
+        backgroundColor: hexToRgba(color, 0.02),
+        borderWidth:     2,
+        pointRadius:     0,
+        pointHoverRadius:4,
+        tension:         0.3,
+        fill:            false,
+        spanGaps:        false,
+      });
+    });
+    legendDisplay = datasets.length > 1;
+  } else {
+    const adjustedValues = _applyGaps(values, gaps);
+    datasets.push({
+      label: `${METRIC_LABELS[selectedMetric] || selectedMetric} — ${cellLabel}`,
+      data: adjustedValues,
+      borderColor:     "#388BFD",
+      backgroundColor: "rgba(56,139,253,0.08)",
+      borderWidth:     2,
+      pointRadius:     0,
+      pointHoverRadius:4,
+      tension:         0.3,
+      fill:            true,
+      spanGaps:        false,
+    });
+    legendDisplay = false;
+  }
 
   // Linhas de threshold
   const annotations = {};
@@ -385,8 +571,42 @@ async function _refreshChart() {
     };
   });
 
-  _chart.options.plugins.annotation.annotations = annotations;
-  _chart.update("none");
+  // UI Updates and Toggles
+  const popupModal = document.getElementById("chart-popup-modal");
+  const isPopupOpen = popupModal && !popupModal.classList.contains("hidden");
+
+  if (popupModal) {
+    const site = State.sites?.find(s => s.id === selectedSite);
+    const siteName = site?.name ?? selectedSite;
+    const metricLabel = METRIC_LABELS[selectedMetric] || selectedMetric;
+    const titleEl = document.getElementById("popup-chart-title");
+    if (titleEl) {
+      titleEl.textContent = `Visualização Detalhada — ${siteName} — ${metricLabel} (${cellLabel})`;
+    }
+  }
+
+  if (cellId === "__all__") {
+    // Show placeholder, hide main chart canvas
+    document.getElementById("kpi-chart")?.classList.add("hidden");
+    document.getElementById("chart-placeholder")?.classList.remove("hidden");
+
+    // Auto-open popup if closed
+    if (popupModal && popupModal.classList.contains("hidden")) {
+      popupModal.classList.remove("hidden");
+    }
+
+    _updateChartInstance(_popupChart, labels, datasets, legendDisplay, annotations);
+  } else {
+    // Hide placeholder, show main chart canvas
+    document.getElementById("kpi-chart")?.classList.remove("hidden");
+    document.getElementById("chart-placeholder")?.classList.add("hidden");
+
+    _updateChartInstance(_chart, labels, datasets, legendDisplay, annotations);
+
+    if (isPopupOpen) {
+      _updateChartInstance(_popupChart, labels, datasets, legendDisplay, annotations);
+    }
+  }
 }
 
 // ── Helpers ───────────────────────────────────────────────────────

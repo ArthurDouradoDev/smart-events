@@ -118,19 +118,57 @@ const _mock = {
   ]),
   get_kpi_series: (event_id, site_id, metric, minutes, cell_id=null) => {
     const n = Math.floor(minutes) || 60;
-    const labels = [], values = [];
+    const labels = [];
     const now = Date.now();
     for (let i = n; i >= 0; i--) {
       labels.push(new Date(now - i * 60000).toISOString());
-      values.push(+(40 + Math.sin(i * 0.3) * 20 + Math.random() * 8).toFixed(1));
     }
-    // Simula um gap no meio
     const gapIdx = Math.floor(n / 2);
-    return {
-      ok: true, labels, values,
-      gaps: [{ from_idx: gapIdx, to_idx: gapIdx + 3, seconds: 180 }],
-      thresholds: { warning: 80, critical: 95 },
-    };
+    const gaps = [{ from_idx: gapIdx, to_idx: gapIdx + 3, seconds: 180 }];
+
+    if (!cell_id || cell_id === "__all__") {
+      const cells_data = {};
+      const numCells = 3;
+      const values = Array(n + 1).fill(0);
+
+      for (let c = 1; c <= numCells; c++) {
+        const cid = `${site_id}-Cell${c}`;
+        const cvals = [];
+        const offset = 30 + c * 10;
+        const speed = 0.2 + c * 0.05;
+        for (let i = 0; i <= n; i++) {
+          const val = +(offset + Math.sin((n - i) * speed) * 15 + Math.random() * 5).toFixed(1);
+          cvals.push(val);
+          // Agregação simulada
+          if (metric === "accessibility" || metric === "accessibility") {
+            values[i] = values[i] === 0 ? val : Math.min(values[i], val);
+          } else if (metric.includes("throughput")) {
+            values[i] += val;
+          } else {
+            values[i] = Math.max(values[i], val);
+          }
+        }
+        cells_data[cid] = cvals;
+      }
+
+      for (let i = 0; i <= n; i++) {
+        values[i] = +values[i].toFixed(1);
+      }
+
+      return {
+        ok: true, labels, values, cells_data, gaps,
+        thresholds: { warning: 80, critical: 95 },
+      };
+    } else {
+      const values = [];
+      for (let i = n; i >= 0; i--) {
+        values.push(+(40 + Math.sin(i * 0.3) * 20 + Math.random() * 8).toFixed(1));
+      }
+      return {
+        ok: true, labels, values, gaps,
+        thresholds: { warning: 80, critical: 95 },
+      };
+    }
   },
   get_alerts: (event_id, timestamp=null) => ([
     { id:1, severity:"CRITICAL", site_id:"ERB-07", cell_id:"ERB-07-A2", message:"Utilização crítica: 91% em ERB-07", timestamp:new Date().toISOString() },

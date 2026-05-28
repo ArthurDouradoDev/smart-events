@@ -291,6 +291,19 @@ class Api:
             values = [r["value"] for r in aggregated]
             gaps = self._detect_gaps(labels, max_gap_seconds=90)
 
+            cells_data = {}
+            if cell_id == "__all__":
+                # Obter todas as cell_ids únicas presentes
+                cell_ids = sorted(list({r["cell_id"] for r in rows if r.get("cell_id")}))
+                # Mapear (cell_id, timestamp) -> value
+                cell_ts_vals = {}
+                for r in rows:
+                    if r.get("cell_id") and r.get("timestamp"):
+                        cell_ts_vals[(r["cell_id"], r["timestamp"])] = r["value"]
+                # Alinhar valores de cada célula com os timestamps ordenados em labels
+                for cid in cell_ids:
+                    cells_data[cid] = [cell_ts_vals.get((cid, ts)) for ts in labels]
+
             config = db.get_event(event_id) or _active_event
             thresholds = config.get("thresholds", {}) if config else {}
 
@@ -305,6 +318,7 @@ class Api:
                 "ok":         True,
                 "labels":     labels,
                 "values":     values,
+                "cells_data": cells_data,
                 "gaps":       gaps,
                 "thresholds": {
                     "warning":  warning_th,

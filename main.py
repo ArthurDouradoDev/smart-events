@@ -249,6 +249,7 @@ def main():
 
     def _on_loaded():
         logger.info("Interface carregada")
+        window.maximize()
         if mock_mode:
             window.evaluate_js("window.__MOCK_MODE__ = true;")
 

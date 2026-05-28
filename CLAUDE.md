@@ -169,6 +169,12 @@ Silenciamento via `db.silence_alert(alert_key)`. A key segue o padrão `{tipo}_{
 - **Detalhes no Popup**: Ao clicar em qualquer VIP no painel (esteja ele no evento ou fora), o popup de detalhes do VIP (`#vip-detail-modal`) exibe o nome do último site conectado / site atual (`serving_site_name`) e a data e hora de seu último registro (`last_timestamp`).
 - **Destaque na Lista de Sites (KPI Panel)**: Um emoji de coroa (`👑`) é adicionado à direita do nome do site na lista de sites caso haja algum VIP ativo conectado àquele site. A lista reage e atualiza as coroas dinamicamente quando o estado dos VIPs muda.
 
+### 10. Visualização de Células Individuais no Gráfico do Site Completo (Multi-Cell Chart Comparison & Popup View)
+- **Modo Site Completo**: Quando o seletor de célula está em `Site completo` (`cell_id = "__all__"`), o gráfico de multi-células é exibido automaticamente em um popup premium que cobre 80% da tela (esta é a única forma de visualização de todo o site completo para melhor leitura). O contêiner de gráfico principal exibe um placeholder informando que o gráfico está no popup com um botão para reabri-lo.
+- **Botão de Expandir**: Adicionado no canto superior direito do painel de gráficos (`#expand-chart-btn`), permite abrir esse mesmo popup de 80% da tela para visualizar de forma mais detalhada qualquer gráfico de célula individual (sem afetar a visualização do painel principal).
+- **Backend API (`get_kpi_series`)**: Retorna o dicionário `cells_data` mapeando `cell_id -> list[float]` alinhado aos `labels` temporais (timestamps).
+- **Legenda e Interação**: A legenda do Chart.js é exibida apenas no modo expandido/popup para identificar as células por cor. O tooltip de hover está configurado com `mode: "index"` e `intersect: false`, permitindo ver os valores comparativos de todas as células para qualquer instante.
+
 ---
 
 ## Modos de execução

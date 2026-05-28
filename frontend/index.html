@@ -219,9 +219,21 @@
           <button class="time-tab active" data-window="60">60 min</button>
           <button class="time-tab" data-window="0">Evento</button>
         </div>
+        <button id="expand-chart-btn" class="icon-btn" title="Expandir Gráfico">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <polyline points="15 3 21 3 21 9"></polyline>
+            <polyline points="9 21 3 21 3 15"></polyline>
+            <line x1="21" y1="3" x2="14" y2="10"></line>
+            <line x1="3" y1="21" x2="10" y2="14"></line>
+          </svg>
+        </button>
       </div>
       <div id="chart-container">
         <canvas id="kpi-chart"></canvas>
+        <div id="chart-placeholder" class="hidden">
+          <span class="placeholder-text">Gráfico do Site Completo exibido no popup</span>
+          <button id="reopen-chart-btn" class="btn btn-ghost btn-sm">Abrir Popup</button>
+        </div>
       </div>
     </div>
   </div>
@@ -349,6 +361,21 @@
       </div>
       <div id="vip-modal-no-data" class="hidden" style="text-align:center;color:var(--text-secondary);font-size:12px;padding:20px 0;">
         Sem medições coletadas para este VIP.
+      </div>
+    </div>
+  </div>
+
+  <!-- ── POPUP GRÁFICO EXPANDIDO ─────────────────────────────────── -->
+  <div id="chart-popup-modal" class="modal hidden">
+    <div class="modal-box popup-chart-box">
+      <div class="popup-chart-header">
+        <div style="display:flex;align-items:center;gap:10px;flex:1;">
+          <h3 id="popup-chart-title" class="modal-title" style="margin:0;font-size:14px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">Gráfico Detalhado</h3>
+        </div>
+        <button id="popup-chart-close" class="icon-btn">&#10005;</button>
+      </div>
+      <div id="popup-chart-container">
+        <canvas id="popup-kpi-chart"></canvas>
       </div>
     </div>
   </div>
