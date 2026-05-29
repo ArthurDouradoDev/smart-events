@@ -716,8 +716,11 @@
             </div>
             <div class="form-group-grid">
               <div class="form-group">
-                <label for="oss-region">Regional (Region):</label>
-                <input type="text" id="oss-region" value="SP" placeholder="Ex: SP, RJ, CO">
+                <label for="oss-region">OSS:</label>
+                <select id="oss-region">
+                  <option value="SP">SP</option>
+                  <option value="RJ">RJ</option>
+                </select>
               </div>
               <div class="form-group">
                 <label for="oss-folder">Pasta de Importação CSV:</label>
@@ -882,9 +885,18 @@
             </div>
           </div>
 
-          <div class="form-group">
-            <label for="vip-task-id-input">Task ID (Signaling Trace iManager):</label>
-            <input type="number" id="vip-task-id-input" placeholder="Ex: 1925 (opcional)" min="1">
+          <div class="form-group-grid">
+            <div class="form-group">
+              <label for="vip-oss-select">OSS:</label>
+              <select id="vip-oss-select">
+                <option value="SP">SP</option>
+                <option value="RJ">RJ</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label for="vip-task-id-input">Task ID (Signaling Trace iManager):</label>
+              <input type="number" id="vip-task-id-input" placeholder="Ex: 1925 (opcional)" min="1">
+            </div>
           </div>
 
           <div class="form-group">
@@ -1683,17 +1695,19 @@
       vips.sort((a, b) => (a.name || '').localeCompare(b.name || ''));
       vipsList.innerHTML = vips.map(vip => {
         const role   = vip.role    ? escapeHTML(vip.role)  : '—';
+        const oss    = vip.oss     ? escapeHTML(vip.oss)   : '—';
         const taskId = vip.task_id ? vip.task_id           : '—';
         const notes  = vip.notes   ? escapeHTML(vip.notes) : '';
         return `
           <div class="vip-card">
             <div style="display:flex; flex-direction:column; gap:2px; flex:1; min-width:0;">
-              <span class="vip-name">${escapeHTML(vip.name)}</span>
-              <div class="vip-detail">
-                <span><strong>Cargo:</strong> ${role}</span>
-                <span><strong>Task ID:</strong> ${taskId}</span>
-              </div>
-              ${notes ? `<div style="font-size:12px; color:var(--text-muted); margin-top:3px;">${notes}</div>` : ''}
+               <span class="vip-name">${escapeHTML(vip.name)}</span>
+               <div class="vip-detail">
+                 <span><strong>OSS:</strong> ${oss}</span>
+                 <span><strong>Cargo:</strong> ${role}</span>
+                 <span><strong>Task ID:</strong> ${taskId}</span>
+               </div>
+               ${notes ? `<div style="font-size:12px; color:var(--text-muted); margin-top:3px;">${notes}</div>` : ''}
             </div>
             <div style="display:flex; gap:6px; flex-shrink:0;">
               <button class="event-action-btn edit-btn" title="Editar VIP" onclick="editVip('${escapeHTML(vip.id)}')">
@@ -1724,6 +1738,7 @@
       const payload = {
         id, name,
         role:    vipRoleInput.value.trim()  || null,
+        oss:     document.getElementById('vip-oss-select').value,
         task_id: taskIdRaw ? parseInt(taskIdRaw, 10) : null,
         notes:   vipNotesInput.value.trim() || null
       };
@@ -1782,6 +1797,7 @@
       vipNameInput.value   = vip.name    || '';
       vipIdInput.value     = vip.id      || '';
       vipRoleInput.value   = vip.role    || '';
+      document.getElementById('vip-oss-select').value = vip.oss || 'SP';
       vipTaskIdInput.value = vip.task_id || '';
       vipNotesInput.value  = vip.notes   || '';
     }
@@ -1800,6 +1816,7 @@
       vipNameInput.value   = '';
       vipIdInput.value     = '';
       vipRoleInput.value   = '';
+      document.getElementById('vip-oss-select').value = 'SP';
       vipTaskIdInput.value = '';
       vipNotesInput.value  = '';
       vipFeedbackMsg.className   = 'feedback';

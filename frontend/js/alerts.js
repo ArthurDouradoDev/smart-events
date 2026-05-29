@@ -1,24 +1,21 @@
 /**
- * alerts.js — Toasts e drawer de alertas.
+ * alerts.js — Drawer de alertas e download de logs.
  */
 
 import State from "./state.js";
 import API   from "./bridge.js";
 
-const TOAST_DURATION_MS = { WARNING: 10000, CRITICAL: 0 }; // 0 = não some
-
-let _shownIds = new Set();
-
 // ── Inicialização ─────────────────────────────────────────────────
 
 export function initAlerts() {
   State.on("change:alerts", _renderDrawer);
-  State.on("change:alerts", _renderToasts);
   State.on("change:alerts", _updateBadge);
 
   document.getElementById("alert-btn").addEventListener("click", _toggleDrawer);
   document.getElementById("alert-drawer-close")?.addEventListener("click", _closeDrawer);
-  document.getElementById("alert-clear-all-btn")?.addEventListener("click", _clearAllAlerts);
+  document.getElementById("alert-mark-read-btn")?.addEventListener("click", _markAllAsRead);
+  document.getElementById("alert-delete-all-btn")?.addEventListener("click", _deleteAllAlerts);
+  document.getElementById("alert-download-btn")?.addEventListener("click", _downloadAlertsLog);
 }
 
 // ── Badge do header ───────────────────────────────────────────────
@@ -30,62 +27,22 @@ function _updateBadge(alerts) {
   badge.classList.toggle("hidden", count === 0);
 }
 
-// ── Toasts ────────────────────────────────────────────────────────
-
-function _renderToasts(alerts) {
-  if (State.mode === "historical") return;
-  const newAlerts = alerts.filter(a => !_shownIds.has(a.id) && !a.acknowledged);
-  newAlerts.forEach(alert => {
-    _shownIds.add(alert.id);
-    
-    // Ignora alertas de severidade WARNING (Atenção) para exibição em Toasts
-    if (alert.severity === "WARNING") return;
-    
-    const msg = (alert.message || "").toLowerCase();
-    const isVipAlert = msg.includes("vip") || msg.includes("rsrp") || msg.includes("rsrq");
-    const isAvailAlert = msg.includes("disponibilidade") || msg.includes("availability") || msg.includes("indisponibilidade") || msg.includes("offline");
-    
-    if (isVipAlert || isAvailAlert) {
-      _showToast(alert);
-    }
-  });
-}
-
-function _showToast(alert) {
-  const container = document.getElementById("toast-container");
-
-  const toast = document.createElement("div");
-  toast.className = `toast ${alert.severity.toLowerCase()}`;
-  toast.innerHTML = `
-    <div class="toast-body">
-      <div class="toast-title">${_severityLabel(alert.severity)} ${_esc(alert.site_id)}</div>
-      <div class="toast-msg">${_esc(alert.message)}</div>
-    </div>
-    <button class="toast-close" aria-label="Fechar">&#10005;</button>`;
-
-  toast.querySelector(".toast-close").addEventListener("click", () => toast.remove());
-  container.appendChild(toast);
-
-  const duration = TOAST_DURATION_MS[alert.severity.toUpperCase()];
-  if (duration > 0) setTimeout(() => toast.remove(), duration);
-}
-
 // ── Drawer ────────────────────────────────────────────────────────
 
 function _renderDrawer(alerts) {
   const list = document.getElementById("alert-list");
   if (!list) return;
 
-  const clearBtn = document.getElementById("alert-clear-all-btn");
+  const markReadBtn = document.getElementById("alert-mark-read-btn");
+  const deleteBtn = document.getElementById("alert-delete-all-btn");
+  const downloadBtn = document.getElementById("alert-download-btn");
   const activeCount = alerts.filter(a => !a.acknowledged).length;
   
-  if (clearBtn) {
-    if (State.mode === "historical" || activeCount === 0) {
-      clearBtn.classList.add("hidden");
-    } else {
-      clearBtn.classList.remove("hidden");
-    }
-  }
+  const hideButtons = State.mode === "historical" || activeCount === 0;
+  
+  if (markReadBtn) markReadBtn.classList.toggle("hidden", hideButtons);
+  if (deleteBtn) deleteBtn.classList.toggle("hidden", hideButtons);
+  if (downloadBtn) downloadBtn.classList.toggle("hidden", alerts.length === 0);
 
   if (!alerts.length) {
     list.innerHTML = `<div style="padding:16px;color:#484F58;font-size:12px">Nenhum alerta ativo.</div>`;
@@ -101,15 +58,17 @@ function _renderDrawer(alerts) {
     item.className = `alert-item ${alert.severity.toLowerCase()}`;
     item.innerHTML = `
       <div class="alert-item-body">
+        <div class="alert-item-title">${_severityLabel(alert.severity)} ${_esc(alert.site_id)}</div>
         <div class="alert-item-msg">${_esc(alert.message)}</div>
         <div class="alert-item-time">${_formatTime(alert.timestamp)}</div>
       </div>
-      ${State.mode === "historical" ? "" : `<button class="alert-ack" data-id="${alert.id}">OK</button>`}`;
+      ${State.mode === "historical" || alert.acknowledged ? "" : `<button class="alert-ack" data-id="${alert.id}">OK</button>`}`;
 
-    if (State.mode !== "historical") {
+    if (State.mode !== "historical" && !alert.acknowledged) {
       item.querySelector(".alert-ack").addEventListener("click", async () => {
         await API.acknowledgeAlert(alert.id);
-        State.set("alerts", State.alerts.filter(a => a.id !== alert.id));
+        const updated = State.alerts.map(a => a.id === alert.id ? {...a, acknowledged: true} : a);
+        State.set("alerts", updated);
       });
     }
 
@@ -124,18 +83,51 @@ function _closeDrawer() {
   document.getElementById("alert-drawer").classList.add("hidden");
 }
 
-async function _clearAllAlerts() {
+async function _markAllAsRead() {
   const eventId = State.eventId;
   if (!eventId) return;
 
-  if (confirm("Deseja realmente limpar todos os alertas ativos deste evento?")) {
+  if (confirm("Deseja realmente marcar todos os alertas ativos como lidos?")) {
     try {
       await API.acknowledgeAllAlerts(eventId);
+      const updated = State.alerts.map(a => ({...a, acknowledged: true}));
+      State.set("alerts", updated);
+    } catch (err) {
+      console.error("Erro ao marcar alertas como lidos:", err);
+      alert("Erro ao marcar alertas como lidos.");
+    }
+  }
+}
+
+async function _deleteAllAlerts() {
+  const eventId = State.eventId;
+  if (!eventId) return;
+
+  if (confirm("Deseja realmente excluir permanentemente todos os alertas deste evento?")) {
+    try {
+      await API.deleteAllAlerts(eventId);
       State.set("alerts", []);
     } catch (err) {
-      console.error("Erro ao limpar alertas:", err);
-      alert("Erro ao limpar alertas.");
+      console.error("Erro ao excluir alertas:", err);
+      alert("Erro ao excluir alertas.");
     }
+  }
+}
+
+async function _downloadAlertsLog() {
+  const eventId = State.eventId;
+  if (!eventId) return;
+
+  try {
+    const res = await API.downloadAlertsLog(eventId);
+    if (res && res.ok) {
+      alert(`Logs de alertas baixados com sucesso em:\n${res.path}`);
+    } else {
+      alert(`Erro ao baixar logs: ${res ? res.error : "Erro desconhecido"}`);
+    }
+  } catch (err) {
+    console.error("Erro ao baixar logs de alertas:", err);
+    alert("Erro ao baixar logs de alertas.");
   }
 }
 

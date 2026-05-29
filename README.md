@@ -19,10 +19,10 @@ A plataforma foi construída em duas partes principais: um **Cliente Desktop Por
   └── Servidor Central (FastAPI): Eventos, VIPs e delimitação área ──┘
 ```
 
-1. **OSS/Trace/HTTP REST**: Dados de telemetria coletados por arquivos CSV locais (Fase 1) ou consultados diretamente no iManager do cliente via chamadas HTTP REST com tratamento automático de expiração e renovação de sessão via script Playwright em background (Fase 2).
+1. **OSS/Trace/HTTP REST**: Dados de telemetria coletados por arquivos CSV locais (Fase 1) ou consultados diretamente no iManager do cliente via chamadas HTTP REST com tratamento automático de expiração e renovação de sessão via script Playwright em background (Fase 2). Suporta conexões a múltiplos iManagers regionais (SP e RJ) com isolamento automático de arquivos de sessão (`session_*.json`) baseado no campo `oss.region` ou override de URL.
 2. **Collector & Scheduler**: Duas threads em segundo plano no cliente. A thread de KPI faz requisições a cada 120s e a de VIP/Trace faz a cada 60s.
 
-3. **SQLite**: Banco local central (`smart_events.db`) para metadados globais e bancos locais dinâmicos por evento (`smart_events_<event_id>.db`) que armazenam as séries temporais de métricas e alarmes de forma isolada.
+3. **SQLite**: Banco local central (`smart_events.db`) para metadados globais (como o cadastro global de VIPs com a respectiva regional/OSS) e bancos locais dinâmicos por evento (`smart_events_<event_id>.db`) que armazenam as séries temporais de métricas e alarmes de forma isolada.
 4. **Api & PyWebView**: Ponte Python-JS segura que gerencia dados (sanitizando informações confidenciais de IMSI) e renderiza a janela nativa.
 5. **JS Frontend**: Interface moderna e offline construída sem bundlers (Vanilla JS + ES Modules + CSS Custom Properties).
 
@@ -59,7 +59,7 @@ SmartEvents/
 │       ├── map.js           # Integração com Leaflet e plotagem geométrica de pétalas/setores via SVG
 │       ├── vip.js           # Painel direito com status de sinal e localização dos VIPs
 │       ├── kpi.js           # Painel inferior com tabelas de sites e gráficos temporais via Chart.js
-│       └── alerts.js        # Gerenciamento de gaveta de alarmes e exibição de alertas popup (Toasts)
+│       └── alerts.js        # Gerenciamento do painel de alertas, ações de leitura/exclusão e download de logs
 │
 ├── events/
 │   └── sample_event.json    # JSON modelo de cadastro/configuração de evento
@@ -100,7 +100,7 @@ SmartEvents/
 - **Acompanhamento e Destaque de VIPs**: Painel direito exibindo status de sinal (RSRP/RSRQ), indicação de presença na área do evento (`in_event`) e barra visual de intensidade. Se o VIP estiver conectado a um site do evento (`serving_site`), o card dele ganha destaque visual premium dourado com uma coroa (`👑`), o site correspondente no mapa Leaflet ganha um badge "V" dourado e a listagem de presença de VIPs é inclusa no popup do mapa. Ao clicar em um VIP (dentro ou fora do evento), abre-se um modal de detalhes com seu histórico em gráfico RSRP e informações de sua conexão mais recente, como o nome do último site conectado / site atual (com suporte a mapeamento de IDs de células compostas e decodificação de identidades globais LTE/NR) e a data/hora do último registro. O clique em um card de VIP também centraliza e aproxima (zoom) o mapa no site conectado, abrindo seu respectivo popup e selecionando-o na lista de sites. Além disso, se houver um VIP ativo conectado a um site do evento, um emoji de coroa (`👑`) é exibido ao lado do nome do site na lista inferior (KPI Panel).
 - **Gráfico de KPIs Reativo com Seleção de Célula e Popup de Site Completo**: Exibição em linha temporal (Chart.js) das principais métricas das ERBs do site selecionado. Ao selecionar a métrica de "Site completo" (com curvas individuais para cada célula), o gráfico é exibido automaticamente de forma expandida em um popup premium que cobre 80% da tela (sendo esta a única forma de visualização do site completo para melhor leitura). Além disso, um botão de expansão no canto superior direito do painel de gráficos permite exibir qualquer gráfico de célula individual nesse mesmo popup. Exibe linhas de threshold (limiares de alerta) e realce de períodos sem coleta de dados (gaps de tempo > 90 segundos).
 - **Valores Contextuais e Participação (Share) na Lista de Sites**: A listagem de sites adapta sua coluna de valores e cabeçalho dependendo da métrica escolhida. Para métricas de volume (como usuários ou tráfego), os sites são automaticamente ordenados pela sua participação percentual (share %) em relação ao total do evento. Para métricas de cobertura (RSRP/RSRQ) ou throughput, exibe as médias ou piores valores de células de forma contextualizada.
-- **Tratamento de Alertas**: Gaveta lateral de alarmes com opção de confirmação (acknowledge) ou silenciamento por chave única (para evitar spam visual).
+- **Tratamento de Alertas**: Painel lateral de alertas (sem notificações toast intrusivas) com suporte para confirmação individual, marcação em lote como lido (acknowledge), exclusão permanente do banco de dados (lixeira) e download consolidado dos logs em formato `.log` diretamente na pasta Downloads.
 - **Exclusão Segura de Histórico**: O indicador interativo de gravação ("REC X MB") ativa um fluxo com modal de dupla confirmação para apagar medições locais antigas do evento ativo, seguido por uma rotina de `VACUUM` para reclamar espaço físico no SQLite.
 
 ### 🌐 Servidor Central de Sincronização
@@ -110,7 +110,7 @@ SmartEvents/
   - **Desenho Manual**: Permite clicar no mapa para definir vértices de polígonos irregulares personalizados.
   - Contador de vértices do polígono.
 - **Importador de Sites inteligente**: Upload e processamento automático de planilhas de ERBs nos formatos Excel (`.xlsx`, `.xls`), CSV, TSV e texto plano, normalizando aliases de colunas (`enodebid`, `cellid`, `latitude`, `longitude`, `azimuth`) e agrupando células sob seus respectivos sites.
-- **Cadastro Global de VIPs**: Gerenciamento de VIPs (nome, cargo, task_id do trace) centralizado, facilitando a atribuição a múltiplos eventos simultâneos.
+- **Cadastro Global de VIPs**: Gerenciamento de VIPs (nome, cargo, regional/OSS, task_id do trace) centralizado, permitindo que o aplicativo filtre e rastreie VIPs automaticamente de acordo com o OSS do evento selecionado.
 
 ---
 

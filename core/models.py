@@ -32,6 +32,7 @@ class VIP:
     rsrq: Optional[float] = None
     in_event: bool = False
     status: str = "unknown"  # ok | warning | critical | unknown
+    oss: Optional[str] = None
 
 
 @dataclass

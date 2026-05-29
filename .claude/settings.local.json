@@ -31,7 +31,15 @@
       "Bash(python scratch/test_regional.py)",
       "Read(//c/Users/a50057663/Desktop/Automacoes/**)",
       "Bash(python scratch/debug_explain.py)",
-      "Bash(echo \"EXIT:$?\")"
+      "Bash(echo \"EXIT:$?\")",
+      "Bash(python -m py_compile main.py server.py api/api.py)",
+      "PowerShell(python -m py_compile main.py server.py api/api.py)",
+      "PowerShell(if \\($?\\) { \"COMPILE_OK\" })",
+      "PowerShell(python -m PyInstaller --noconfirm --clean main.spec)",
+      "PowerShell(python -m py_compile main.py)",
+      "PowerShell(python -c \"import requests, os; print\\('requests at:', os.path.dirname\\(requests.__file__\\)\\); import urllib3, certifi, idna, charset_normalizer; print\\('deps ok'\\)\")",
+      "PowerShell(python -c \"from PyInstaller.utils.hooks import collect_submodules; print\\('requests submodules:', len\\(collect_submodules\\('requests'\\)\\)\\)\")",
+      "PowerShell(if \\($?\\) { \"BUILD_DONE\" })"
     ]
   }
 }

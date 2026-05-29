@@ -77,7 +77,7 @@
     "availability_critical": 90
   },
   "oss": {
-    "base_url":      "https://10.220.50.9:31943",
+    "base_url":      "",
     "region":        "SP",
     "import_folder": ""
   },

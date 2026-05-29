@@ -30,16 +30,21 @@ def _get_requests():
     global _requests_lib
     if _requests_lib is None:
         import sys
-        from pathlib import Path
-        orig_path = list(sys.path)
-        try:
-            cwd_resolved = Path.cwd().resolve()
-            parent_resolved = Path(__file__).parent.parent.resolve()
-            sys.path = [p for p in sys.path if p and Path(p).resolve() not in (cwd_resolved, parent_resolved)]
+        if getattr(sys, "frozen", False):
+            # No .exe não há shadowing do workspace; remover _MEIPASS do sys.path quebraria o import.
             import requests as req
             _requests_lib = req
-        finally:
-            sys.path = orig_path
+        else:
+            from pathlib import Path
+            orig_path = list(sys.path)
+            try:
+                cwd_resolved = Path.cwd().resolve()
+                parent_resolved = Path(__file__).parent.parent.resolve()
+                sys.path = [p for p in sys.path if p and Path(p).resolve() not in (cwd_resolved, parent_resolved)]
+                import requests as req
+                _requests_lib = req
+            finally:
+                sys.path = orig_path
     return _requests_lib
 
 
@@ -216,6 +221,7 @@ def init_db():
             role       TEXT,
             notes      TEXT,
             task_id    INTEGER,
+            oss        TEXT,
             updated_at TEXT
         );
 
@@ -237,6 +243,13 @@ def init_db():
     # Adiciona a coluna task_id na tabela vips se ela não existir (migração)
     try:
         conn.execute("ALTER TABLE vips ADD COLUMN task_id INTEGER")
+        conn.commit()
+    except sqlite3.OperationalError:
+        pass
+
+    # Adiciona a coluna oss na tabela vips se ela não existir (migração)
+    try:
+        conn.execute("ALTER TABLE vips ADD COLUMN oss TEXT")
         conn.commit()
     except sqlite3.OperationalError:
         pass
@@ -390,6 +403,38 @@ def get_event(event_id: str) -> Optional[dict]:
         except Exception:
             pass
     return None
+
+
+def delete_event(event_id: str):
+    """Remove um evento do banco global e apaga o banco específico do evento (medições)."""
+    conn = get_conn()
+    # Remove linhas-filhas no banco global antes do evento (sites tem FK para events).
+    for tbl in ("sites", "event_vips", "kpi_measurements", "vip_measurements", "alerts"):
+        try:
+            conn.execute(f"DELETE FROM {tbl} WHERE event_id = ?", (event_id,))
+        except Exception:
+            pass
+    conn.execute("DELETE FROM events WHERE id = ?", (event_id,))
+    conn.commit()
+
+    # Fecha a conexão thread-local deste evento (se aberta neste thread) antes de apagar o arquivo.
+    attr_name = f"conn_{event_id}"
+    c = getattr(_event_local, attr_name, None)
+    if c is not None:
+        try:
+            c.close()
+        except Exception:
+            pass
+        try:
+            delattr(_event_local, attr_name)
+        except Exception:
+            pass
+    try:
+        path = get_event_db_path(event_id)
+        if path.exists():
+            path.unlink()
+    except Exception as e:
+        _db_logger.warning(f"Não foi possível remover o banco do evento {event_id}: {e}")
 
 
 # ── KPI Measurements ────────────────────────────────────────────────
@@ -671,6 +716,24 @@ def acknowledge_all_alerts(event_id: str):
     conn.commit()
 
 
+def delete_all_alerts(event_id: str):
+    """Exclui todos os alertas do evento do banco de dados."""
+    conn = get_event_conn(event_id)
+    conn.execute("DELETE FROM alerts WHERE event_id = ?", (event_id,))
+    conn.commit()
+
+
+def get_all_alerts(event_id: str) -> List[dict]:
+    """Retorna todos os alertas (ativos e reconhecidos) ordenados por timestamp."""
+    conn = get_event_conn(event_id)
+    rows = conn.execute("""
+        SELECT * FROM alerts
+        WHERE event_id = ?
+        ORDER BY timestamp DESC
+    """, (event_id,)).fetchall()
+    return [dict(r) for r in rows]
+
+
 def silence_alert(alert_key: str):
     """Silencia tipo de alerta para esta sessão."""
     conn = get_conn()
@@ -782,13 +845,15 @@ def sync_events_from_server() -> dict:
         events = response.json()
         if not isinstance(events, list):
             return {"sincronizados": 0, "erros": 1, "msg": "Resposta do servidor em formato inválido."}
-            
+
+        server_ids = set()
         for config in events:
             try:
                 # Validação básica do formato de configuração de evento
                 if not isinstance(config, dict) or "id" not in config or "name" not in config:
                     continue
-                
+                server_ids.add(config["id"])
+
                 # Preserva o status local se ele for mais avançado (ACTIVE, ENDED) do que o do JSON do servidor
                 local_event = get_event(config["id"])
                 if local_event:
@@ -796,17 +861,32 @@ def sync_events_from_server() -> dict:
                     remote_status = config.get("status", "SCHEDULED")
                     if local_status in ("ACTIVE", "ENDED") and remote_status == "SCHEDULED":
                         config["status"] = local_status
-                
+
                 save_event(config)
                 sincronizados += 1
             except Exception as e:
                 print(f"Erro ao sincronizar evento {config.get('id')}: {e}")
                 erros += 1
+
+        # Remove eventos locais que não existem mais no servidor (ex.: eventos de teste residuais).
+        # O servidor (server_data) é a fonte da verdade no modo offline embutido.
+        # SALVAGUARDA: só limpa se o servidor retornou pelo menos 1 evento — evita apagar tudo
+        # (incl. dados do evento ativo) caso o servidor responda com lista vazia transitoriamente.
+        removidos = 0
+        if server_ids:
+            try:
+                for local in get_events():
+                    if local["id"] not in server_ids:
+                        delete_event(local["id"])
+                        removidos += 1
+                        _db_logger.info(f"Evento residual removido (ausente no servidor): {local['id']}")
+            except Exception as e:
+                _db_logger.warning(f"Falha na limpeza de eventos órfãos: {e}")
     except Exception as e:
         print(f"Erro ao ler servidor central: {e}")
         return {"sincronizados": 0, "erros": 1, "msg": str(e)}
 
-    return {"sincronizados": sincronizados, "erros": erros}
+    return {"sincronizados": sincronizados, "erros": erros, "removidos": removidos}
 
 
 def export_event_to_server(config_dict: dict) -> bool:
@@ -861,15 +941,16 @@ def save_vip(vip: dict) -> dict:
             suffix += 1
 
     conn.execute("""
-        INSERT INTO vips (id, name, role, notes, task_id, updated_at)
-        VALUES (?, ?, ?, ?, ?, ?)
+        INSERT INTO vips (id, name, role, notes, task_id, oss, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(id) DO UPDATE SET
             name = excluded.name,
             role = excluded.role,
             notes = excluded.notes,
             task_id = excluded.task_id,
+            oss = excluded.oss,
             updated_at = excluded.updated_at
-    """, (vip_id, vip["name"], vip.get("role"), vip.get("notes"), vip.get("task_id"),
+    """, (vip_id, vip["name"], vip.get("role"), vip.get("notes"), vip.get("task_id"), vip.get("oss"),
           datetime.utcnow().isoformat()))
     conn.commit()
     return get_vip(vip_id)
@@ -926,22 +1007,21 @@ def unassign_vip_from_event(event_id: str, vip_id: str):
 
 
 def get_event_vips(event_id: str) -> List[dict]:
-    """Retorna TODOS os VIPs (cadastro global) com o task_id específico do evento se existir, caso contrário o task_id global."""
+    """Retorna os VIPs (cadastro global) filtrados de acordo com a regional (OSS) do evento atual."""
     conn = get_conn()
-    vips = conn.execute("SELECT * FROM vips ORDER BY name").fetchall()
     
-    e_conn = get_event_conn(event_id)
-    event_vips = {r["vip_id"]: r["task_id"] for r in e_conn.execute(
-        "SELECT vip_id, task_id FROM event_vips WHERE event_id = ?", (event_id,)
-    ).fetchall()}
+    # Busca a regional/OSS do evento
+    oss = None
+    event = get_event(event_id)
+    if event and "oss" in event and "region" in event["oss"]:
+        oss = event["oss"]["region"]
+
+    if oss:
+        vips = conn.execute("SELECT * FROM vips WHERE oss = ? ORDER BY name", (oss,)).fetchall()
+    else:
+        vips = conn.execute("SELECT * FROM vips ORDER BY name").fetchall()
     
-    out = []
-    for v in vips:
-        vip_dict = dict(v)
-        if v["id"] in event_vips:
-            vip_dict["task_id"] = event_vips[v["id"]]
-        out.append(vip_dict)
-    return out
+    return [dict(v) for v in vips]
 
 
 def _resync_event_vips_into_config(event_id: str):
@@ -967,13 +1047,23 @@ def _resync_event_vips_into_config(event_id: str):
     conn.commit()
 
 
-def sync_vips_from_server() -> dict:
+def sync_vips_from_server(oss: Optional[str] = None) -> dict:
     """Sincroniza VIPs globais e suas associações com eventos a partir do servidor central.
 
     Suporta dois formatos de resposta do servidor:
       - VIP com campo 'event_vips': [{event_id, task_id}] → associações embutidas
       - Endpoint separado GET /api/event-vips → [{event_id, vip_id, task_id}]
     """
+    if not oss:
+        try:
+            active_events = get_events(status="ACTIVE")
+            if active_events:
+                full_event = get_event(active_events[0]["id"])
+                if full_event and "oss" in full_event and "region" in full_event["oss"]:
+                    oss = full_event["oss"]["region"]
+        except Exception as e:
+            print(f"Erro ao tentar detectar regional do evento ativo: {e}")
+
     settings = get_settings()
     server_url = settings.get("server_url", "").strip()
     if not server_url:
@@ -985,7 +1075,10 @@ def sync_vips_from_server() -> dict:
     sincronizados = 0
     erros = 0
     try:
-        response = requests.get(f"{base}/api/vips", timeout=5)
+        url = f"{base}/api/vips"
+        if oss:
+            url += f"?oss={oss}"
+        response = requests.get(url, timeout=5)
         if response.status_code != 200:
             return {"sincronizados": 0, "erros": 1,
                     "msg": f"Erro do servidor (HTTP {response.status_code})"}
@@ -1014,24 +1107,6 @@ def sync_vips_from_server() -> dict:
     except Exception as e:
         print(f"Erro ao ler servidor central (vips): {e}")
         return {"sincronizados": 0, "erros": 1, "msg": str(e)}
-
-    # Tenta endpoint separado de associações (GET /api/event-vips)
-    try:
-        ev_resp = requests.get(f"{base}/api/event-vips", timeout=5)
-        if ev_resp.status_code == 200:
-            ev_vips = ev_resp.json()
-            if isinstance(ev_vips, list):
-                for assoc in ev_vips:
-                    event_id = assoc.get("event_id")
-                    vip_id   = assoc.get("vip_id")
-                    task_id  = assoc.get("task_id")
-                    if event_id and vip_id:
-                        try:
-                            assign_vip_to_event(event_id, vip_id, task_id)
-                        except Exception as e:
-                            print(f"Erro ao sincronizar associação VIP: {e}")
-    except Exception:
-        pass  # endpoint opcional — falha silenciosa se não existir
 
     return {"sincronizados": sincronizados, "erros": erros}
 

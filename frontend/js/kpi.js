@@ -449,7 +449,9 @@ function _detectGapsJS(labels, maxGapSeconds = 90) {
   return gaps;
 }
 
-async function _refreshChart() {
+async function _refreshChart(arg) {
+  // fromPoll: atualização automática do ciclo de 30s — não deve reabrir o popup que o usuário fechou.
+  const fromPoll = !!(arg && arg.fromPoll);
   if (!_chart) return;
   const { eventId, selectedSite, selectedMetric, selectedCell, timeWindow, mode, historicalTimestamp } = State;
   if (!eventId || !selectedSite) return;
@@ -586,8 +588,9 @@ async function _refreshChart() {
     document.getElementById("kpi-chart")?.classList.add("hidden");
     document.getElementById("chart-placeholder")?.classList.remove("hidden");
 
-    // Auto-open popup if closed
-    if (popupModal && popupModal.classList.contains("hidden")) {
+    // Auto-open popup if closed — exceto em atualizações automáticas do poll
+    // (não reabrir um popup que o usuário fechou de propósito).
+    if (!fromPoll && popupModal && popupModal.classList.contains("hidden")) {
       popupModal.classList.remove("hidden");
     }
 
@@ -624,5 +627,7 @@ function _esc(str) {
     .replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
 }
 
-// Exporta refreshChart para o app.js chamar após polling
-export { _refreshChart as refreshChart };
+// Exporta refreshChart para o app.js chamar após o polling (sem reabrir popup fechado).
+export function refreshChart() {
+  return _refreshChart({ fromPoll: true });
+}

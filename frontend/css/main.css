@@ -842,6 +842,9 @@ input[type="range"] {
 }
 #alert-list { flex: 1; overflow-y: auto; }
 
+#logs-drawer { width: 480px; }
+#logs-list { flex: 1; overflow-y: auto; background: var(--bg-base); }
+
 .alert-item {
   display: flex;
   align-items: flex-start;

@@ -1,6 +1,9 @@
 import json
 import logging
+import sys
+import shutil
 from pathlib import Path
+from typing import Optional
 from fastapi import FastAPI, HTTPException, Request, UploadFile, File
 from fastapi.responses import FileResponse, HTMLResponse
 from fastapi.middleware.cors import CORSMiddleware
@@ -39,15 +42,41 @@ def startup_event():
         logger.info("  - Network: (Could not detect local network IP automatically)")
     logger.info("====================================================")
 
-BASE_DIR = Path(__file__).parent
-EVENTS_DIR = BASE_DIR / "server_data" / "events"
+# Diretórios cientes do modo "frozen" (PyInstaller):
+#   RESOURCE_DIR → recursos read-only embutidos no bundle (server_frontend + semente de server_data)
+#   DATA_DIR     → diretório gravável ao lado do .exe (mesmo critério de core/database.py),
+#                  garantindo que app desktop e servidor compartilhem o MESMO server_data.
+if getattr(sys, "frozen", False):
+    RESOURCE_DIR = Path(getattr(sys, "_MEIPASS", Path(sys.executable).parent))
+    DATA_DIR = Path(sys.executable).parent
+else:
+    RESOURCE_DIR = Path(__file__).parent
+    DATA_DIR = Path(__file__).parent
+
+SERVER_DATA_DIR = DATA_DIR / "server_data"
+
+# Seed na 1ª execução: se server_data ainda não existe ao lado do .exe, copia a cópia embutida no bundle.
+def _seed_server_data():
+    bundled = RESOURCE_DIR / "server_data"
+    if SERVER_DATA_DIR.exists() and any(SERVER_DATA_DIR.iterdir()):
+        return
+    if bundled.exists() and bundled.resolve() != SERVER_DATA_DIR.resolve():
+        try:
+            shutil.copytree(bundled, SERVER_DATA_DIR, dirs_exist_ok=True)
+            logger.info(f"server_data semeado a partir de {bundled} -> {SERVER_DATA_DIR}")
+        except Exception as e:
+            logger.error(f"Falha ao semear server_data: {e}")
+
+_seed_server_data()
+
+EVENTS_DIR = SERVER_DATA_DIR / "events"
 EVENTS_DIR.mkdir(parents=True, exist_ok=True)
-VIPS_DIR = BASE_DIR / "server_data" / "vips"
+VIPS_DIR = SERVER_DATA_DIR / "vips"
 VIPS_DIR.mkdir(parents=True, exist_ok=True)
-FRONTEND_FILE = BASE_DIR / "server_frontend" / "index.html"
+FRONTEND_FILE = RESOURCE_DIR / "server_frontend" / "index.html"
 
 # Mount server_frontend folder to serve local scripts/assets
-app.mount("/static", StaticFiles(directory=str(BASE_DIR / "server_frontend")), name="static")
+app.mount("/static", StaticFiles(directory=str(RESOURCE_DIR / "server_frontend")), name="static")
 
 @app.post("/api/parse-sites")
 async def parse_sites(file: UploadFile = File(...)):
@@ -228,13 +257,15 @@ def delete_event(event_id: str):
 # ── VIPs (cadastro global) ──────────────────────────────────────────
 
 @app.get("/api/vips")
-def get_vips():
+def get_vips(oss: Optional[str] = None):
     vips = []
     for file_path in VIPS_DIR.glob("*.json"):
         try:
             with open(file_path, "r", encoding="utf-8") as f:
                 data = json.load(f)
                 if isinstance(data, dict) and "id" in data and "name" in data:
+                    if oss is not None and data.get("oss") != oss:
+                        continue
                     vips.append(data)
         except Exception as e:
             logger.error(f"Error loading vip file {file_path.name}: {e}")

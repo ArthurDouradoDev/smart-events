@@ -53,11 +53,18 @@
         </svg>
         <span id="alert-count" class="badge badge-danger hidden">0</span>
       </button>
-<button id="settings-btn" class="icon-btn" title="Configurações de Sincronização">
+<button id="server-btn" class="icon-btn" title="Abrir painel do servidor (editar eventos e VIPs)">
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-          <circle cx="12" cy="12" r="3" />
-          <path
-            d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
+          <rect x="2" y="3" width="20" height="6" rx="1" />
+          <rect x="2" y="15" width="20" height="6" rx="1" />
+          <line x1="6" y1="6" x2="6.01" y2="6" />
+          <line x1="6" y1="18" x2="6.01" y2="18" />
+        </svg>
+      </button>
+      <button id="logs-btn" class="icon-btn" title="Logs de coleta (desenvolvedor)">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <polyline points="16 18 22 12 16 6" />
+          <polyline points="8 6 2 12 8 18" />
         </svg>
       </button>
       <span id="clock" class="mono">--:--</span>
@@ -244,13 +251,51 @@
     <div class="drawer-header">
       <span class="panel-label">Alertas ativos</span>
       <div style="display: flex; align-items: center; gap: 8px;">
-        <button id="alert-clear-all-btn" class="btn btn-ghost btn-sm" style="padding: 2px 8px; font-size: 11px;">Limpar
-          Tudo</button>
+        <button id="alert-mark-read-btn" class="btn btn-ghost btn-sm" style="padding: 2px 8px; font-size: 11px;">Marcar como lido</button>
+        <button id="alert-delete-all-btn" class="icon-btn" title="Excluir Tudo">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <polyline points="3 6 5 6 21 6"></polyline>
+            <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
+            <line x1="10" y1="11" x2="10" y2="17"></line>
+            <line x1="14" y1="11" x2="14" y2="17"></line>
+          </svg>
+        </button>
+        <button id="alert-download-btn" class="icon-btn" title="Baixar Logs">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+            <polyline points="7 10 12 15 17 10"></polyline>
+            <line x1="12" y1="15" x2="12" y2="3"></line>
+          </svg>
+        </button>
         <button id="alert-drawer-close" class="icon-btn">&#10005;</button>
       </div>
     </div>
     <div id="alert-list">
       <!-- Renderizado por alerts.js -->
+    </div>
+  </div>
+
+  <!-- ── DRAWER DE LOGS DE COLETA (desenvolvedor) ───────────────── -->
+  <div id="logs-drawer" class="drawer hidden">
+    <div class="drawer-header">
+      <span class="panel-label">Logs de coleta</span>
+      <div style="display: flex; align-items: center; gap: 8px;">
+        <label style="display:flex;align-items:center;gap:4px;font-size:11px;color:#8B949E;cursor:pointer;">
+          <input type="checkbox" id="logs-autorefresh" checked style="margin:0;"> auto
+        </label>
+        <button id="logs-clear-btn" class="btn btn-ghost btn-sm" style="padding: 2px 8px; font-size: 11px;">Limpar</button>
+        <button id="logs-download-btn" class="icon-btn" title="Baixar Logs">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+            <polyline points="7 10 12 15 17 10"></polyline>
+            <line x1="12" y1="15" x2="12" y2="3"></line>
+          </svg>
+        </button>
+        <button id="logs-drawer-close" class="icon-btn">&#10005;</button>
+      </div>
+    </div>
+    <div id="logs-list">
+      <!-- Renderizado por logs.js -->
     </div>
   </div>
 
@@ -265,31 +310,6 @@
     </div>
   </div>
 
-  <!-- ── MODAL DE CONFIGURAÇÕES ─────────────────────────────────── -->
-  <div id="settings-modal" class="modal hidden">
-    <div class="modal-box">
-      <h3 class="modal-title">Configurações de Sincronização</h3>
-
-      <div class="modal-body" style="text-align: left; margin: 15px 0;">
-        <label for="server-url-input" style="display: block; font-size: 12px; color: #8B949E; margin-bottom: 6px;">
-          URL do Servidor Central de API REST:
-        </label>
-        <input type="text" id="server-url-input" placeholder="Ex: http://192.168.1.50:8000"
-          style="width: 100%; padding: 8px 12px; background: #0D1117; border: 1px solid #30363D; border-radius: 6px; color: #C9D1D9; font-size: 13px; box-sizing: border-box; margin-bottom: 12px;">
-
-        <div id="sync-status-info"
-          style="font-size: 12px; color: #8B949E; border-top: 1px solid #21262D; padding-top: 10px; margin-top: 10px;">
-          Carregando informações de sincronização...
-        </div>
-      </div>
-
-      <div class="modal-footer" style="display: flex; gap: 10px; justify-content: flex-end; margin-top: 16px;">
-        <button id="btn-sync-now" class="btn btn-ghost">Sincronizar Agora</button>
-        <button id="btn-save-settings" class="btn btn-primary">Salvar</button>
-        <button id="btn-close-settings" class="btn btn-ghost">Fechar</button>
-      </div>
-    </div>
-  </div>
 
   <!-- ── MODAL LIMPAR HISTÓRICO ─────────────────────────────────── -->
   <div id="clear-history-modal" class="modal hidden">

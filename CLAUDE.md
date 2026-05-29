@@ -49,7 +49,7 @@ frontend/
     map.js               # Leaflet + marcadores SVG de setor (fan/pétala)
     vip.js               # Renderiza painel VIP lateral
     kpi.js               # Lista de sites + Chart.js com threshold lines + gap zones
-    alerts.js            # Toasts + drawer de alertas
+    alerts.js            # Painel de alertas e download de logs
 
 server_frontend/
   index.html             # Interface web do Servidor Central para cadastrar/editar eventos e VIPs
@@ -118,20 +118,13 @@ Conexões SQLite são thread-local (`_local = threading.local()`). O scheduler r
 
 ### 4. VIPs são identificados por `task_id`, não por IMSI
 
-Cada VIP no JSON do evento tem uma `task_id` apontando para a sua Signaling Trace dedicada no iManager. O collector itera `vips_by_task` (`{task_id: nome}`) e cada chamada ao FARS já sabe a quem pertence — não há matching por IMSI nem dependência do campo `GUUserId` (que costuma vir `N/A` no payload do trace).
+Cada VIP no cadastro global de VIPs possui uma regional (`oss`) e uma `task_id` apontando para a sua Signaling Trace dedicada no iManager. O collector carrega dinamicamente todos os VIPs pertencentes ao OSS do evento ativo via `db.get_event_vips(event_id)` e itera `vips_by_task` (`{task_id: nome}`). Cada chamada ao FARS já sabe a quem pertence — não há matching por IMSI nem dependência do campo `GUUserId` (que costuma vir `N/A` no payload do trace).
 
-```json
-"vips": [
-  { "name": "Carlos Menezes", "task_id": 1925 }
-]
-```
+A classe `Api` tem `_sanitize_event()` que remove `sites` inteiros do payload antes de serializar.
 
-A classe `Api` tem `_sanitize_event()` que remove `sites` e `vips` inteiros do payload antes de serializar — portanto nem `task_id` chega ao frontend.
+---
 
-```python
-# api.py — SEMPRE usar _sanitize_event() antes de retornar ao JS
-return {"ok": True, "event": self._sanitize_event(config)}
-```
+## Modos de execução
 
 ### 5. Alertas em 3 níveis
 
@@ -148,7 +141,6 @@ Silenciamento via `db.silence_alert(alert_key)`. A key segue o padrão `{tipo}_{
 - O app desktop busca e sincroniza eventos e cadastros globais de VIPs a partir do servidor central configurado na URL `server_url` (em Settings).
 - A sincronização local (`database.py` e `api.py`) é realizada ao abrir o app e pode ser forçada manualmente no menu de configurações.
 - Regra de precedência de status: ao sincronizar um evento, se o status no banco local for `ACTIVE` ou `ENDED`, ele é preservado sobre o status `SCHEDULED` vindo do servidor central.
-- A atribuição de um VIP a um evento e a definição de seu `task_id` local são re-exportadas automaticamente de volta ao servidor central para manter a consistência com outras instâncias na rede.
 
 ### 7. Limpeza Definitiva do Histórico do Evento (Clear Event History)
 
@@ -191,7 +183,11 @@ O frontend também pode ser aberto diretamente no browser (sem Python) para dese
 
 ## Coleta de dados
 
-Duas fontes coexistem; o `build_collector()` escolhe na ordem: mock → CSV (se `oss.import_folder` existir) → HTTP (com fallback para a URL padrão `https://10.220.50.9:31943` se `base_url` estiver vazia).
+Duas fontes coexistem; o `build_collector()` escolhe na ordem: mock → CSV (se `oss.import_folder` existir) → HTTP.
+
+No caso do coletor HTTP, a `base_url` é resolvida a partir de `oss.base_url`. Se vazia, é mapeada de acordo com `oss.region` (ex: `SP` -> `https://10.220.50.9:31943`, `RJ` -> `https://10.220.30.9:31943`), tendo como fallback final a regional `SP`.
+
+Cada regional utiliza um arquivo de sessão isolado em `data/` para evitar conflito de cookies (SP usa `session.json`, outras regionais usam `session_<ip_slug>.json` como `session_10_220_30_9.json`). O script de renovação `scratch/get_session.py` aceita `--base-url` e `--session-file` dinâmicos.
 
 **HTTP (Fase 2 — em produção):** `HttpCollector` consome diretamente o iManager via REST. A sessão é renovada por `scratch/get_session.py` (Playwright, login + cookies + roarand).
 
@@ -213,7 +209,7 @@ Duas fontes coexistem; o `build_collector()` escolhe na ordem: mock → CSV (se 
 O SmartEvents divide os dados em dois tipos de bancos SQLite localizados na pasta `data/`:
 1. **Banco Central/Global (`smart_events.db`)**: Contém a lista de eventos, o cadastro global de VIPs e o silenciamento de alertas:
    - `events`            -- Configurações e metadados dos eventos
-   - `vips`              -- Cadastro global de VIPs
+   - `vips`              -- Cadastro global de VIPs (com coluna regional `oss`)
    - `silenced_alerts`   -- Chaves de alertas silenciados
 
 2. **Banco Específico do Evento (`smart_events_<event_id>.db`)**: Criado dinamicamente para cada evento para isolar medições e evitar conflitos:

@@ -23,16 +23,21 @@ from datetime import datetime
 from pathlib import Path
 from typing import List, Optional
 
-# Import requests safely without namespace package shadowing from the local workspace folder
+# Import requests safely without namespace package shadowing from the local workspace folder.
+# No executável compilado (PyInstaller) NÃO mexer no sys.path: ali Path(__file__).parent.parent
+# é o diretório de extração (_MEIPASS) e removê-lo quebraria a resolução do requests empacotado.
 import sys
-_orig_path = list(sys.path)
-try:
-    _cwd = Path.cwd().resolve()
-    _parent = Path(__file__).parent.parent.resolve()
-    sys.path = [p for p in sys.path if p and Path(p).resolve() not in (_cwd, _parent)]
+if getattr(sys, "frozen", False):
     import requests
-finally:
-    sys.path = _orig_path
+else:
+    _orig_path = list(sys.path)
+    try:
+        _cwd = Path.cwd().resolve()
+        _parent = Path(__file__).parent.parent.resolve()
+        sys.path = [p for p in sys.path if p and Path(p).resolve() not in (_cwd, _parent)]
+        import requests
+    finally:
+        sys.path = _orig_path
 
 import urllib3
 
@@ -41,6 +46,14 @@ from core import database as db
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 logger = logging.getLogger(__name__)
+
+# Mapeamento de regional para base_url do iManager.
+# oss.base_url no evento sempre tem precedência sobre este mapa.
+_REGIONAL_BASE_URLS: dict[str, str] = {
+    "SP": "https://10.220.50.9:31943",
+    "RJ": "https://10.220.30.9:31943",
+}
+_DEFAULT_BASE_URL = "https://10.220.50.9:31943"  # fallback = SP
 
 
 # ── Interface base ───────────────────────────────────────────────────
@@ -58,38 +71,32 @@ class BaseCollector(ABC):
                 if c_id:
                     self.cell_ids.add(c_id)
                     self._cell_to_site_index[c_id] = site["id"]
-        # vips_by_task mapeia task_id -> nome do VIP, com o nome resolvido pela
-        # tabela global `vips` (quando o JSON traz apenas {id, task_id}). Aceita
-        # também o formato legado {name, task_id} pra retrocompat.
+        # vips_by_task mapeia task_id -> nome do VIP, obtido por OSS do evento
         self.vips_by_task = {}
-        for v in event_config.get("vips", []):
-            task_id = v.get("task_id")
-            if task_id is None:
-                continue
-            name = v.get("name")
-            if not name and v.get("id"):
-                try:
-                    g = db.get_vip(v["id"])
-                    if g:
-                        name = g["name"]
-                except Exception:
-                    pass
-            if name:
-                self.vips_by_task[task_id] = name
+        try:
+            event_vips = db.get_event_vips(self.event_id)
+            for v in event_vips:
+                task_id = v.get("task_id")
+                name = v.get("name")
+                if task_id is not None and name:
+                    self.vips_by_task[task_id] = name
+        except Exception as e:
+            logger.error(f"Erro ao inicializar VIPs do evento {self.event_id}: {e}")
         self.thresholds = event_config.get("thresholds", {})
         self._running = False
 
     def _load_vips_by_task(self) -> dict:
-        """Lê task_ids atuais do banco, capturando task_ids adicionados após o __init__."""
+        """Lê task_ids dos VIPs do banco filtrados pelo OSS do evento atual."""
         result = {}
         try:
-            for ev in db.get_event_vips(self.event_id):
-                task_id = ev.get("task_id")
-                name = ev.get("name")
+            event_vips = db.get_event_vips(self.event_id)
+            for v in event_vips:
+                task_id = v.get("task_id")
+                name = v.get("name")
                 if task_id is not None and name:
                     result[task_id] = name
-        except Exception:
-            pass
+        except Exception as e:
+            logger.error(f"Erro ao carregar VIPs do evento {self.event_id}: {e}")
         return result
 
     def _cell_in_event(self, cell_id: str) -> bool:
@@ -289,13 +296,13 @@ class HttpCollector(BaseCollector):
     """
 
     KPI_COLUMN_MAP = {
-        "utilization_dl":    ["DL PRB USAGE", "DL PRB Usage"],
-        "traffic_volume_dl": ["Traffic Volume DL", "{BRDC} Traffic Volume DL LTE", "Traffic Volume DL LTE", "{BRDC} NR DL Traffic Volume", "NR DL Traffic Volume"],
-        "traffic_volume_ul": ["Traffic Volume UL", "{BRDC} Traffic Volume UL LTE", "Traffic Volume UL LTE", "{BRDC} NR UL Traffic Volume", "NR UL Traffic Volume"],
-        "throughput_dl":     ["DL User Throughput", "{BRDC} DL User Throughput", "{BRDC} DL User Throughput LTE", "DL User Throughput LTE", "{BRDC} NR DL User Throughput", "NR DL User Throughput"],
-        "throughput_ul":     ["UL User Throughput", "{BRDC} UL User Throughput", "{BRDC} UL User Throughput LTE", "UL User Throughput LTE", "{BRDC} NR UL User Throughput", "NR UL User Throughput"],
-        "user_count":        ["{BRDC} Usuario", "Usuario", "Active Users", "{BRDC} User PCell"],
-        "accessibility":     ["{BRDC} Acessibilidade", "Acessibilidade RRC", "ACC RRC", "Accessibility"],
+        "utilization_dl":    ["DL PRB USAGE", "DL PRB Usage", "PRB_Utilization"],
+        "traffic_volume_dl": ["Traffic Volume DL", "{BRDC} Traffic Volume DL LTE", "Traffic Volume DL LTE", "{BRDC} NR DL Traffic Volume", "NR DL Traffic Volume", "01_L.Thrp.bits.DL"],
+        "traffic_volume_ul": ["Traffic Volume UL", "{BRDC} Traffic Volume UL LTE", "Traffic Volume UL LTE", "{BRDC} NR UL Traffic Volume", "NR UL Traffic Volume", "01_L.Thrp.bits.UL"],
+        "throughput_dl":     ["DL User Throughput", "{BRDC} DL User Throughput", "{BRDC} DL User Throughput LTE", "DL User Throughput LTE", "{BRDC} NR DL User Throughput", "NR DL User Throughput", "Throughput_DL_User_avg"],
+        "throughput_ul":     ["UL User Throughput", "{BRDC} UL User Throughput", "{BRDC} UL User Throughput LTE", "UL User Throughput LTE", "{BRDC} NR UL User Throughput", "NR UL User Throughput", "Throughput_UL_User_avg"],
+        "user_count":        ["{BRDC} Usuario", "Usuario", "Active Users", "{BRDC} User PCell", "01_L.Traffic.User.Avg"],
+        "accessibility":     ["{BRDC} Acessibilidade", "Acessibilidade RRC", "ACC RRC", "Accessibility", "Disponibilidade"],
     }
 
     # Backoff de renovação de sessão — persiste entre instâncias (collector recriado ao
@@ -307,6 +314,7 @@ class HttpCollector(BaseCollector):
         super().__init__(event_config)
         self.base_url = base_url.rstrip("/")
         self.session_cookie = session_cookie
+        self._session_file = self._resolve_session_file(self.base_url)
         self._session_monitoring = None
         self._session_trace = None
         self._renew_lock = threading.Lock()
@@ -331,8 +339,22 @@ class HttpCollector(BaseCollector):
                             "site_id": site["id"]
                         }
 
+    @staticmethod
+    def _resolve_session_file(base_url: str) -> Path:
+        """Deriva o caminho do session file a partir da base_url."""
+        _SP_DEFAULT = "https://10.220.50.9:31943"
+        if not base_url or base_url.rstrip("/") == _SP_DEFAULT.rstrip("/"):
+            return Path(__file__).parent.parent / "data" / "session.json"
+        try:
+            import urllib.parse
+            host = urllib.parse.urlparse(base_url).hostname or base_url
+            slug = host.replace(".", "_")
+        except Exception:
+            slug = "regional"
+        return Path(__file__).parent.parent / "data" / f"session_{slug}.json"
+
     def _load_session_data(self) -> dict:
-        session_path = Path(__file__).parent.parent / "data" / "session.json"
+        session_path = self._session_file
         if session_path.exists():
             try:
                 with open(session_path, "r", encoding="utf-8") as f:
@@ -453,30 +475,38 @@ class HttpCollector(BaseCollector):
             except Exception as e:
                 logger.warning(f"Não foi possível inserir alerta de sessão expirada: {e}")
 
-            script_path = Path(__file__).parent.parent / "scratch" / "get_session.py"
-            python_exe  = Path(__file__).parent.parent / ".venv" / "Scripts" / "python.exe"
-            if not python_exe.exists():
-                python_exe = Path("python")
+            # Renovação em SUBPROCESSO isolado (um processo limpo por renovação). Evita os problemas
+            # da Sync API do Playwright entre as threads de coleta (monitoring/trace) e vazamento de
+            # processos node.exe ao longo do tempo. No .exe, o próprio executável renova via
+            # `--get-session` (Playwright + Chromium empacotados); em dev, usa o Python do venv.
+            if getattr(sys, "frozen", False):
+                renew_cmd = [sys.executable, "--get-session"]
+            else:
+                python_exe = Path(__file__).parent.parent / ".venv" / "Scripts" / "python.exe"
+                if not python_exe.exists():
+                    python_exe = Path("python")
+                script_path = Path(__file__).parent.parent / "scratch" / "get_session.py"
+                renew_cmd = [str(python_exe), str(script_path)]
 
-            logger.info(
-                f"[renew/{module}] Iniciando Playwright headless (timeout=120s) — "
-                f"script: {script_path.name}"
-            )
+            logger.info(f"[renew/{module}] Iniciando renovação de sessão via Playwright (subprocesso, timeout=120s)")
             try:
                 result = subprocess.run(
-                    [str(python_exe), str(script_path), "--headless", "--module", module],
+                    renew_cmd + [
+                        "--headless",
+                        "--module", module,
+                        "--base-url", self.base_url,
+                        "--session-file", str(self._session_file),
+                    ],
                     capture_output=True,
                     text=True,
                     timeout=120,
                     cwd=str(Path(__file__).parent.parent),
                 )
-
-                # get_session.py escreve erros no stdout (não stderr) — logamos os dois
                 stdout_tail = result.stdout.strip()[-2000:] if result.stdout.strip() else ""
-                stderr_tail = result.stderr.strip()[-500:]  if result.stderr.strip() else ""
+                stderr_tail = result.stderr.strip()[-500:] if result.stderr.strip() else ""
 
                 if result.returncode == 0:
-                    logger.info(f"[renew/{module}] Playwright renovou a sessão com sucesso.")
+                    logger.info(f"[renew/{module}] Sessão renovada com sucesso.")
                     if stdout_tail:
                         logger.debug(f"[renew/{module}] stdout:\n{stdout_tail}")
                     HttpCollector._renew_failures[module] = 0
@@ -493,13 +523,12 @@ class HttpCollector(BaseCollector):
                         datetime.utcnow() + timedelta(seconds=backoff_s)
                     )
                     logger.error(
-                        f"[renew/{module}] Playwright falhou "
+                        f"[renew/{module}] Renovação falhou "
                         f"(returncode={result.returncode}, tentativa #{failures}). "
                         f"Próxima tentativa em {backoff_s}s.\n"
                         f"  STDOUT: {stdout_tail or '(vazio)'}\n"
                         f"  STDERR: {stderr_tail or '(vazio)'}"
                     )
-
             except subprocess.TimeoutExpired:
                 failures = HttpCollector._renew_failures.get(module, 0) + 1
                 HttpCollector._renew_failures[module] = failures
@@ -508,7 +537,7 @@ class HttpCollector(BaseCollector):
                     datetime.utcnow() + timedelta(seconds=backoff_s)
                 )
                 logger.error(
-                    f"[renew/{module}] Playwright TIMEOUT após 120s "
+                    f"[renew/{module}] Renovação TIMEOUT após 120s "
                     f"(tentativa #{failures}). Próxima tentativa em {backoff_s}s."
                 )
             except Exception as e:
@@ -519,8 +548,8 @@ class HttpCollector(BaseCollector):
                     datetime.utcnow() + timedelta(seconds=backoff_s)
                 )
                 logger.error(
-                    f"[renew/{module}] Erro ao executar Playwright "
-                    f"(tentativa #{failures}): {e}"
+                    f"[renew/{module}] Erro ao executar a renovação "
+                    f"(tentativa #{failures}): {e}. Próxima tentativa em {backoff_s}s."
                 )
 
     def collect_kpis(self) -> List[dict]:
@@ -637,44 +666,56 @@ class HttpCollector(BaseCollector):
                         continue
 
                     for metric, candidates in self.KPI_COLUMN_MAP.items():
-                        val = self._find_metric_value(item, candidates)
+                        val, matched_cand = self._find_metric_value_and_candidate(item, candidates)
                         if val is not None:
                             try:
+                                float_val = float(val)
+                                
+                                # Scale RJ-specific counters
+                                if matched_cand in ("01_L.Thrp.bits.DL", "01_L.Thrp.bits.UL"):
+                                    float_val = float_val / (8.0 * 1024.0 * 1024.0)  # bits to MB
+                                elif matched_cand in ("Throughput_DL_User_avg", "Throughput_UL_User_avg"):
+                                    float_val = float_val / 1000.0  # kbps to Mbps
+                                
                                 rows.append({
                                     "site_id":   cell_info["site_id"],
                                     "cell_id":   cell_info["cell_id"],
                                     "event_id":  self.event_id,
                                     "timestamp": timestamp,
                                     "metric":    metric,
-                                    "value":     float(val),
+                                    "value":     float_val,
                                 })
                             except (ValueError, TypeError):
                                 pass
         return rows
 
-    def _find_metric_value(self, d, candidates):
+    def _find_metric_value_and_candidate(self, d, candidates):
         if not isinstance(d, dict):
-            return None
+            return None, None
 
         # Support iManager counterRes structures: {"name": "...", "value": "..."}
         if d.get("name") in candidates and "value" in d:
-            return d.get("value")
+            return d.get("value"), d.get("name")
 
         for k, v in d.items():
             if k in candidates:
-                return v
+                return v, k
         for k, v in d.items():
             if isinstance(v, dict):
-                val = self._find_metric_value(v, candidates)
+                val, cand = self._find_metric_value_and_candidate(v, candidates)
                 if val is not None:
-                    return val
+                    return val, cand
             elif isinstance(v, list):
                 for item in v:
                     if isinstance(item, dict):
-                        val = self._find_metric_value(item, candidates)
+                        val, cand = self._find_metric_value_and_candidate(item, candidates)
                         if val is not None:
-                            return val
-        return None
+                            return val, cand
+        return None, None
+
+    def _find_metric_value(self, d, candidates):
+        val, _ = self._find_metric_value_and_candidate(d, candidates)
+        return val
 
     # Limite de mensagens RRC_MEAS_RPRT que tentamos decodificar por ciclo
     # (cada uma exige uma chamada extra ao msg-explain-info).
@@ -977,8 +1018,9 @@ class HttpCollector(BaseCollector):
                 continue
 
             decodes_used += 1
+            row_no = idx + 1  # FARS usa rowNo 1-indexado da página atual
             content_json = self._fetch_msg_explain_info(
-                session, task_id, sess_msg_id, idx + 1  # FARS usa rowNo 1-indexado
+                session, task_id, sess_msg_id, row_no
             )
             if content_json is None:
                 continue
@@ -1053,6 +1095,7 @@ class HttpCollector(BaseCollector):
                 "tabularFlag": "y",
                 "isSubscribe": "false",
                 "isSecondDecode": "false",
+                "isPlayback": "false",
             }, timeout=30)
             if resp.status_code == 200:
                 return resp.json()
@@ -1202,6 +1245,7 @@ def build_collector(event_config: dict, mock: bool = False) -> BaseCollector:
 
     base_url = oss.get("base_url", "")
     if not base_url:
-        base_url = "https://10.220.50.9:31943"
+        region = oss.get("region", "SP").upper()
+        base_url = _REGIONAL_BASE_URLS.get(region, _DEFAULT_BASE_URL)
 
     return HttpCollector(event_config, base_url)

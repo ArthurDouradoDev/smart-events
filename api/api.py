@@ -11,6 +11,7 @@ from typing import Optional
 
 from core import database as db
 from core.scheduler import scheduler
+from core.log_buffer import log_buffer
 
 logger = logging.getLogger(__name__)
 
@@ -19,6 +20,9 @@ _update_callback = None  # função JS chamada quando novos dados chegam
 
 
 class Api:
+
+    # URL do servidor FastAPI local embutido (injetada por main.py no startup).
+    _server_url: str = ""
 
     # ── Ciclo de vida do evento ──────────────────────────────────────
 
@@ -65,6 +69,13 @@ class Api:
             scheduler.set_update_callback(_notify)
             scheduler.start(config, mock=mock)
 
+            # Sincroniza os VIPs do OSS deste evento após ativá-lo
+            try:
+                oss = config.get("oss", {}).get("region")
+                db.sync_vips_from_server(oss=oss)
+            except Exception as se:
+                logger.error(f"Erro ao sincronizar VIPs ao ativar evento: {se}")
+
             return {"ok": True, "event": self._sanitize_event(config)}
         except Exception as e:
             logger.error(f"activate_event error: {e}")
@@ -101,7 +112,20 @@ class Api:
         """
         try:
             event_stats = db.sync_events_from_server()
-            vip_stats = db.sync_vips_from_server()
+            
+            # Detecta o OSS do evento ativo para filtrar a sincronização de VIPs
+            oss = None
+            global _active_event
+            if _active_event and "oss" in _active_event and "region" in _active_event["oss"]:
+                oss = _active_event["oss"]["region"]
+            else:
+                active_events = db.get_events(status="ACTIVE")
+                if active_events:
+                    full_event = db.get_event(active_events[0]["id"])
+                    if full_event and "oss" in full_event and "region" in full_event["oss"]:
+                        oss = full_event["oss"]["region"]
+
+            vip_stats = db.sync_vips_from_server(oss=oss)
             return {"ok": True, "stats": {"vips": vip_stats, "events": event_stats}}
         except Exception as e:
             logger.error(f"sync_events error: {e}")
@@ -122,6 +146,24 @@ class Api:
             stats = db.sync_events_from_server()
             return {"ok": True, "stats": stats}
         except Exception as e:
+            return {"ok": False, "error": str(e)}
+
+    def get_server_url(self) -> dict:
+        """Retorna a URL do servidor local embutido."""
+        url = self._server_url or db.get_settings().get("server_url", "")
+        return {"ok": True, "url": url}
+
+    def open_server_ui(self, path: str = "/") -> dict:
+        """Abre a página de edição do servidor local no navegador padrão."""
+        try:
+            import webbrowser
+            base = (self._server_url or db.get_settings().get("server_url", "")).rstrip("/")
+            if not base:
+                return {"ok": False, "error": "Servidor local indisponível"}
+            webbrowser.open(f"{base}{path}")
+            return {"ok": True, "url": f"{base}{path}"}
+        except Exception as e:
+            logger.error(f"open_server_ui error: {e}")
             return {"ok": False, "error": str(e)}
 
     def get_active_event(self) -> dict:
@@ -591,11 +633,108 @@ class Api:
         except Exception as e:
             return {"ok": False, "error": str(e)}
 
+    def delete_all_alerts(self, event_id: str) -> dict:
+        try:
+            db.delete_all_alerts(event_id)
+            return {"ok": True}
+        except Exception as e:
+            logger.error(f"delete_all_alerts error: {e}")
+            return {"ok": False, "error": str(e)}
+
+    def download_alerts_log(self, event_id: str) -> dict:
+        try:
+            alerts = db.get_all_alerts(event_id)
+            if not alerts:
+                return {"ok": False, "error": "Nenhum alerta disponível para download neste evento."}
+
+            import os
+            from pathlib import Path
+            downloads_dir = Path.home() / "Downloads"
+            if os.name == 'nt':
+                try:
+                    import winreg
+                    sub_key = r'SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer\Shell Folders'
+                    with winreg.OpenKey(winreg.HKEY_CURRENT_USER, sub_key) as key:
+                        downloads_dir = Path(winreg.QueryValueEx(key, '{374DE290-123F-4565-9164-39C4925E467B}')[0])
+                except Exception:
+                    pass
+
+            downloads_dir.mkdir(parents=True, exist_ok=True)
+            filename = f"smart_events_alerts_{event_id}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.log"
+            file_path = downloads_dir / filename
+
+            with open(file_path, "w", encoding="utf-8") as f:
+                for a in alerts:
+                    ack_status = "LIDO" if a.get("acknowledged") else "ATIVO"
+                    site = a.get("site_id") or "GLOBAL"
+                    cell = f"/{a.get('cell_id')}" if a.get("cell_id") else ""
+                    f.write(
+                        f"[{a.get('timestamp')}] [{a.get('severity')}] [{a.get('level')}] "
+                        f"[{site}{cell}] {a.get('message')} (status={ack_status})\n"
+                    )
+
+            return {"ok": True, "path": str(file_path)}
+        except Exception as e:
+            logger.error(f"download_alerts_log error: {e}")
+            return {"ok": False, "error": str(e)}
+
     def silence_alert(self, alert_key: str) -> dict:
         try:
             db.silence_alert(alert_key)
             return {"ok": True}
         except Exception as e:
+            return {"ok": False, "error": str(e)}
+
+    # ── Logs de coleta (painel do desenvolvedor </>) ─────────────────
+
+    @staticmethod
+    def _resolve_downloads_dir():
+        """Resolve a pasta Downloads do usuário (com fallback no Windows via registro)."""
+        import os
+        from pathlib import Path
+        downloads_dir = Path.home() / "Downloads"
+        if os.name == "nt":
+            try:
+                import winreg
+                sub_key = r"SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer\Shell Folders"
+                with winreg.OpenKey(winreg.HKEY_CURRENT_USER, sub_key) as key:
+                    downloads_dir = Path(winreg.QueryValueEx(key, "{374DE290-123F-4565-9164-39C4925E467B}")[0])
+            except Exception:
+                pass
+        downloads_dir.mkdir(parents=True, exist_ok=True)
+        return downloads_dir
+
+    def get_collection_logs(self, limit: int = 800) -> dict:
+        """Retorna os logs de coleta capturados em memória (collector, scheduler, renovação)."""
+        try:
+            return {"ok": True, "logs": log_buffer.get_records(limit)}
+        except Exception as e:
+            return {"ok": False, "error": str(e)}
+
+    def clear_collection_logs(self) -> dict:
+        """Limpa o buffer de logs de coleta."""
+        try:
+            log_buffer.clear()
+            return {"ok": True}
+        except Exception as e:
+            return {"ok": False, "error": str(e)}
+
+    def download_collection_logs(self) -> dict:
+        """Salva os logs de coleta atuais em um arquivo .log na pasta Downloads."""
+        try:
+            records = log_buffer.get_records(0)  # tudo
+            if not records:
+                return {"ok": False, "error": "Nenhum log de coleta disponível."}
+
+            downloads_dir = self._resolve_downloads_dir()
+            filename = f"smart_events_coleta_{datetime.now().strftime('%Y%m%d_%H%M%S')}.log"
+            file_path = downloads_dir / filename
+            with open(file_path, "w", encoding="utf-8") as f:
+                for r in records:
+                    f.write(f"[{r['ts']}] [{r['level']}] [{r['logger']}] {r['msg']}\n")
+            return {"ok": True, "path": str(file_path)}
+        except Exception as e:
+            logger.error(f"download_collection_logs error: {e}")
             return {"ok": False, "error": str(e)}
 
     # ── Estado da aplicação ──────────────────────────────────────────

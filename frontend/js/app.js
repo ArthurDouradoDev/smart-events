@@ -9,6 +9,7 @@ import { initMap, renderSites, renderEventPolygon, fitToEvent } from "./map.js";
 import { initVip }    from "./vip.js";
 import { initKpi, refreshChart }    from "./kpi.js";
 import { initAlerts, injectAlerts } from "./alerts.js";
+import { initLogs } from "./logs.js";
 
 const POLL_INTERVAL_MS = 30_000; // 30s: busca dados atualizados no banco local
 
@@ -24,21 +25,22 @@ async function boot() {
   initVip();
   initKpi();
   initAlerts();
+  initLogs();
 
   _setupHeaderClock();
   _setupLoadEventBtn();
   _setupHistoryBtn();
   _setupHistoricalControls();
-  _setupSettingsModal();
+  _setupServerButton();
   _setupEventDropdown();
   _setupClearHistoryModal();
 
-  // Sincroniza eventos e VIPs do servidor central ao abrir
-  try {
-    await API.syncEvents();
-  } catch (err) {
-    console.warn("Falha na sincronização inicial:", err);
-  }
+  // Mostra a tela de espera enquanto o servidor local sobe e a sincronização ocorre.
+  _enterStandbyMode();
+
+  // Sincroniza eventos e VIPs do servidor local ao abrir, com re-tentativas:
+  // no 1º arranque do .exe o servidor embutido pode levar alguns segundos para responder.
+  await _bootSync();
 
   // Verifica se há evento ativo (reabriu o programa com evento em curso)
   const { ok, event } = await API.getActiveEvent();
@@ -195,6 +197,9 @@ async function _poll() {
     } else if (sites.length) {
       State.set("selectedSite", sites[0].id);
     }
+
+    // Atualiza o gráfico de KPIs automaticamente a cada ciclo (sem reabrir popup fechado).
+    refreshChart();
   } catch (err) {
     console.error("Erro no poll:", err);
   }
@@ -382,83 +387,49 @@ async function _updateHistoricalView(index) {
 
 // ── Configurações de Sincronização ────────────────────────────────
 
-function _setupSettingsModal() {
-  const btnSettings = document.getElementById("settings-btn");
-  const modalSettings = document.getElementById("settings-modal");
-  const btnCloseSettings = document.getElementById("btn-close-settings");
-  const btnSaveSettings = document.getElementById("btn-save-settings");
-  const btnSyncNow = document.getElementById("btn-sync-now");
-  const inputServerUrl = document.getElementById("server-url-input");
-  const statusInfo = document.getElementById("sync-status-info");
-
-  if (!btnSettings || !modalSettings) return;
-
-  btnSettings.addEventListener("click", async () => {
-    modalSettings.classList.remove("hidden");
-    statusInfo.textContent = "Carregando configurações...";
+// Sincronização inicial com re-tentativas até os eventos aparecerem no banco local.
+async function _bootSync(maxAttempts = 10, delayMs = 1500) {
+  for (let i = 0; i < maxAttempts; i++) {
     try {
-      const res = await API.getSettings();
-      if (res.ok) {
-        inputServerUrl.value = res.settings.server_url || "";
-        statusInfo.innerHTML = `URL do Servidor configurada: <code style="font-family: var(--font-mono); font-size: 11px; word-break: break-all;">${res.settings.server_url || "Nenhuma"}</code>`;
-      } else {
-        statusInfo.textContent = "Erro ao carregar configurações.";
-      }
+      await API.syncEvents();
+      const events = await API.getEvents();
+      if (Array.isArray(events) && events.length > 0) return true;
     } catch (err) {
-      statusInfo.textContent = "Erro de comunicação com o backend.";
+      console.error("Falha na sincronização inicial:", err);
     }
-  });
+    await new Promise((r) => setTimeout(r, delayMs));
+  }
+  return false;
+}
 
-  btnCloseSettings.addEventListener("click", () => {
-    modalSettings.classList.add("hidden");
-  });
+// Sincroniza eventos+VIPs do servidor local e reavalia eventos agendados (com debounce).
+let _autoSyncTimer = null;
+async function _autoSync() {
+  try {
+    const res = await API.syncEvents();
+    if (res && res.ok) await _checkScheduledEvents();
+  } catch (err) {
+    console.error("Falha no auto-sync:", err);
+  }
+}
 
-  // Fecha o modal ao clicar fora da modal-box
-  modalSettings.addEventListener("click", (e) => {
-    if (e.target === modalSettings) {
-      modalSettings.classList.add("hidden");
-    }
-  });
+function _setupServerButton() {
+  const btnServer = document.getElementById("server-btn");
+  if (!btnServer) return;
 
-  btnSaveSettings.addEventListener("click", async () => {
-    const url = inputServerUrl.value.trim();
-    statusInfo.textContent = "Salvando configurações e sincronizando...";
+  // Abre a página de edição do servidor local no navegador padrão.
+  btnServer.addEventListener("click", async () => {
     try {
-      const res = await API.saveSettings({ server_url: url });
-      if (res.ok) {
-        const s = res.stats || {};
-        statusInfo.innerHTML = `<span style="color: var(--success)">Configurações salvas!</span><br>Sincronizados: ${s.sincronizados ?? 0} evento(s), erros: ${s.erros ?? 0}`;
-        await _checkScheduledEvents();
-        setTimeout(() => {
-          modalSettings.classList.add("hidden");
-        }, 1500);
-      } else {
-        statusInfo.textContent = "Erro ao salvar configurações.";
-      }
+      await API.openServerUi();
     } catch (err) {
-      statusInfo.textContent = "Erro ao salvar.";
+      console.error("Falha ao abrir o painel do servidor:", err);
     }
   });
 
-  btnSyncNow.addEventListener("click", async () => {
-    statusInfo.textContent = "Sincronizando eventos...";
-    try {
-      const res = await API.syncEvents();
-      if (res.ok) {
-        const stats = res.stats || {};
-        const ev = stats.events || {};
-        const vp = stats.vips || {};
-        statusInfo.innerHTML =
-          `<span style="color: var(--success)">Sincronização concluída!</span><br>` +
-          `Eventos: ${ev.sincronizados ?? 0} sincronizado(s), erros: ${ev.erros ?? 0}<br>` +
-          `VIPs: ${vp.sincronizados ?? 0} sincronizado(s), erros: ${vp.erros ?? 0}`;
-        await _checkScheduledEvents();
-      } else {
-        statusInfo.textContent = `Erro ao sincronizar: ${res.error || "Desconhecido"}`;
-      }
-    } catch (err) {
-      statusInfo.textContent = "Erro ao sincronizar.";
-    }
+  // Ao voltar o foco para o app (ex.: depois de editar no navegador), re-sincroniza.
+  window.addEventListener("focus", () => {
+    clearTimeout(_autoSyncTimer);
+    _autoSyncTimer = setTimeout(_autoSync, 400);
   });
 }
 

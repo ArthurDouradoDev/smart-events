@@ -178,6 +178,8 @@ const _mock = {
   activate_event: (id, mock) => _mock.get_active_event(),
   acknowledge_alert: (id) => ({ ok:true }),
   acknowledge_all_alerts: (eventId) => ({ ok:true }),
+  delete_all_alerts: (eventId) => ({ ok:true }),
+  download_alerts_log: (eventId) => ({ ok:true, path: "C:\\Users\\Mock\\Downloads\\mock_alerts.log" }),
   silence_alert: (key) => ({ ok:true }),
   load_event: (path) => _mock.get_active_event(),
   open_file_dialog: () => ({ ok:true, path:"events/sample_event.json" }),
@@ -192,6 +194,27 @@ const _mock = {
   sync_events: () => ({ ok: true, stats: { vips: { sincronizados: 0, erros: 0 }, events: { sincronizados: 1, erros: 0 } } }),
   get_settings: () => ({ ok: true, settings: { server_url: "http://localhost:8000" } }),
   save_settings: (settings) => ({ ok: true, stats: { sincronizados: 1, erros: 0 } }),
+  get_server_url: () => ({ ok: true, url: "http://localhost:8000" }),
+  open_server_ui: (path = "/") => {
+    try { window.open("http://localhost:8000" + path, "_blank"); } catch (e) {}
+    return { ok: true, url: "http://localhost:8000" + path };
+  },
+  get_collection_logs: (limit = 800) => {
+    const now = Date.now();
+    const lv = ["INFO", "INFO", "WARNING", "ERROR"];
+    const logs = [];
+    for (let i = 8; i >= 0; i--) {
+      logs.push({
+        ts: new Date(now - i * 4000).toISOString().slice(0, 19).replace("T", " "),
+        level: lv[i % lv.length],
+        logger: "core.collector",
+        msg: `[mock] ciclo de coleta KPI #${100 - i} — 24 medições inseridas`,
+      });
+    }
+    return { ok: true, logs };
+  },
+  clear_collection_logs: () => ({ ok: true }),
+  download_collection_logs: () => ({ ok: true, path: "C:\\Users\\Mock\\Downloads\\smart_events_coleta.log" }),
 
   get_vip_series: (event_id, vip_name, minutes) => {
     const n = Math.min(Math.floor(minutes) || 60, 120);
@@ -265,6 +288,8 @@ const API = {
   getAlerts:        (eventId, timestamp=null) => API.call("get_alerts", eventId, timestamp),
   acknowledgeAlert: (id)                    => API.call("acknowledge_alert", id),
   acknowledgeAllAlerts: (eventId)           => API.call("acknowledge_all_alerts", eventId),
+  deleteAllAlerts: (eventId)                => API.call("delete_all_alerts", eventId),
+  downloadAlertsLog: (eventId)              => API.call("download_alerts_log", eventId),
   silenceAlert:     (key)                   => API.call("silence_alert", key),
   getAppStatus:     ()                      => API.call("get_app_status"),
   openFileDialog:   ()                      => API.call("open_file_dialog"),
@@ -272,6 +297,11 @@ const API = {
   syncEvents:       ()                       => API.call("sync_events"),
   getSettings:      ()                       => API.call("get_settings"),
   saveSettings:     (settings)               => API.call("save_settings", settings),
+  getServerUrl:     ()                       => API.call("get_server_url"),
+  openServerUi:     (path="/")               => API.call("open_server_ui", path),
+  getCollectionLogs: (limit=800)             => API.call("get_collection_logs", limit),
+  clearCollectionLogs: ()                    => API.call("clear_collection_logs"),
+  downloadCollectionLogs: ()                 => API.call("download_collection_logs"),
 
   getVipSeries:     (eventId, vipName, minutes)  => API.call("get_vip_series", eventId, vipName, minutes),
   clearEventHistory: (eventId)                  => API.call("clear_event_history", eventId),
