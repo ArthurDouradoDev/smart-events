@@ -17,8 +17,6 @@ const METRIC_LABELS = {
   throughput_ul:     "Throughput UL (Mbps)",
   user_count:        "Usuários Ativos",
   accessibility:     "Acessibilidade (%)",
-  rsrp:              "RSRP Médio (dBm)",
-  rsrq:              "RSRQ Médio (dB)",
 };
 
 const STATUS_COLORS = {
@@ -220,8 +218,6 @@ function _getMetricSuffix(metric) {
   if (metric.includes("utilization") || metric === "accessibility") return "%";
   if (metric.includes("throughput")) return " Mbps";
   if (metric.includes("traffic_volume")) return " MB";
-  if (metric === "rsrp") return " dBm";
-  if (metric === "rsrq") return " dB";
   return "";
 }
 

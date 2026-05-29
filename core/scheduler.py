@@ -92,6 +92,8 @@ class Scheduler:
             db.insert_vip_batch(data)
             self._evaluate_vip_alerts(data)
             logger.debug(f"{len(data)} medições de VIP inseridas")
+        else:
+            logger.warning("Coleta de VIPs retornou vazio — nenhuma medição inserida neste ciclo")
 
     def _evaluate_kpi_alerts(self, measurements: list):
         if not self._event_config:

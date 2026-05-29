@@ -27,7 +27,11 @@
       "Bash(Select-Object FullName)",
       "Read(//c/Users/a50057663/Desktop/Automa��es/**)",
       "PowerShell(head -30)",
-      "Bash(Remove-Item \"c:\\\\Users\\\\a50057663\\\\Desktop\\\\Automações\\\\SmartEvents\\\\frontend\\\\js\\\\vips-admin.js\")"
+      "Bash(Remove-Item \"c:\\\\Users\\\\a50057663\\\\Desktop\\\\Automações\\\\SmartEvents\\\\frontend\\\\js\\\\vips-admin.js\")",
+      "Bash(python scratch/test_regional.py)",
+      "Read(//c/Users/a50057663/Desktop/Automacoes/**)",
+      "Bash(python scratch/debug_explain.py)",
+      "Bash(echo \"EXIT:$?\")"
     ]
   }
 }

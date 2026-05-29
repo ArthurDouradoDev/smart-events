@@ -347,6 +347,11 @@ class HttpCollector(BaseCollector):
         sess.verify = False
         sess_data = self._load_session_data()
         module_data = sess_data.get(module, {})
+        if not module_data or not module_data.get("cookies"):
+            logger.warning(
+                f"[session/{module}] Seção ausente ou sem cookies no session.json — "
+                "chamadas HTTP podem falhar por falta de autenticação."
+            )
 
         # Carrega cookies
         cookies = module_data.get("cookies", [])
@@ -412,18 +417,28 @@ class HttpCollector(BaseCollector):
         roarand_before = self._load_session_data().get(module, {}).get("roarand")
 
         with self._renew_lock:
-            # Se outro thread renovou enquanto esperávamos, só recarrega sessão local
-            roarand_now = self._load_session_data().get(module, {}).get("roarand")
+            # Se outro thread renovou enquanto esperávamos, verificar se a seção
+            # deste módulo ainda está válida no arquivo gravado
+            current_data = self._load_session_data()
+            roarand_now = current_data.get(module, {}).get("roarand")
             if roarand_now and roarand_now != roarand_before:
-                logger.info(
-                    f"[renew/{module}] Sessão já renovada por outra thread. "
-                    "Recarregando sessão local sem rodar Playwright."
-                )
-                if module == "monitoring":
-                    self._session_monitoring = None
-                elif module == "trace":
-                    self._session_trace = None
-                return
+                module_data = current_data.get(module, {})
+                has_valid = bool(module_data.get("cookies")) and bool(module_data.get("roarand"))
+                if has_valid:
+                    logger.info(
+                        f"[renew/{module}] Sessão já renovada por outra thread. "
+                        "Recarregando sessão local sem rodar Playwright."
+                    )
+                    if module == "monitoring":
+                        self._session_monitoring = None
+                    elif module == "trace":
+                        self._session_trace = None
+                    return
+                else:
+                    logger.warning(
+                        f"[renew/{module}] Outra thread renovou mas a seção '{module}' está "
+                        "ausente/incompleta no session.json. Executando Playwright para este módulo."
+                    )
 
             try:
                 db.insert_alert({
