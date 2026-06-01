@@ -23,6 +23,10 @@ const State = {
   isRecording:    false,
   dbSizeMb:       0,
 
+  // ── VPN ──────────────────────────────────────────────────────────
+  vpnConnected:   true,    // status atual da conexão com a VPN
+  vpnPopupOpen:   false,   // popup de aviso aberto neste momento
+
   // ── Histórico ────────────────────────────────────────────────────
   historicalEvent:     null,
   historicalTimestamp: null,

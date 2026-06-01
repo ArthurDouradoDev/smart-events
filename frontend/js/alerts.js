@@ -56,16 +56,24 @@ function _renderDrawer(alerts) {
   }).forEach(alert => {
     const item = document.createElement("div");
     item.className = `alert-item ${alert.severity.toLowerCase()}`;
+    const showActions = State.mode !== "historical" && !alert.acknowledged;
+    const reauthBtn = (showActions && _isReauthAlert(alert))
+      ? `<button class="alert-ack alert-reauth" data-id="${alert.id}">Reautenticar</button>`
+      : "";
+    const ackBtn = showActions
+      ? `<button class="alert-ack" data-id="${alert.id}">OK</button>`
+      : "";
     item.innerHTML = `
       <div class="alert-item-body">
         <div class="alert-item-title">${_severityLabel(alert.severity)} ${_esc(alert.site_id)}</div>
         <div class="alert-item-msg">${_esc(alert.message)}</div>
         <div class="alert-item-time">${_formatTime(alert.timestamp)}</div>
       </div>
-      ${State.mode === "historical" || alert.acknowledged ? "" : `<button class="alert-ack" data-id="${alert.id}">OK</button>`}`;
+      ${reauthBtn}${ackBtn}`;
 
-    if (State.mode !== "historical" && !alert.acknowledged) {
-      item.querySelector(".alert-ack").addEventListener("click", async () => {
+    if (showActions) {
+      item.querySelector(".alert-reauth")?.addEventListener("click", (e) => _handleReauth(e.currentTarget));
+      item.querySelector(".alert-ack:not(.alert-reauth)").addEventListener("click", async () => {
         await API.acknowledgeAlert(alert.id);
         const updated = State.alerts.map(a => a.id === alert.id ? {...a, acknowledged: true} : a);
         State.set("alerts", updated);
@@ -128,6 +136,38 @@ async function _downloadAlertsLog() {
   } catch (err) {
     console.error("Erro ao baixar logs de alertas:", err);
     alert("Erro ao baixar logs de alertas.");
+  }
+}
+
+// ── Reautenticação de sessão (CAPTCHA/SSO) ────────────────────────
+
+// Identifica o alerta acionável emitido pelo collector quando a sessão do
+// iManager exige reautenticação manual (vide collector._raise_reauth_alert).
+function _isReauthAlert(alert) {
+  const msg = String(alert?.message ?? "").toLowerCase();
+  return msg.includes("reautentic") || msg.includes("captcha");
+}
+
+async function _handleReauth(btn) {
+  const original = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = "Abrindo login…";
+  try {
+    const res = await API.reauthSession();
+    if (res && res.ok) {
+      alert("Sessão reautenticada com sucesso.\nA coleta será retomada no próximo ciclo.");
+      // Marca os alertas de reauth como lidos localmente (o backend já retomou a coleta).
+      const updated = State.alerts.map(a => _isReauthAlert(a) ? { ...a, acknowledged: true } : a);
+      State.set("alerts", updated);
+    } else {
+      alert(`Reautenticação não concluída.\n${res ? (res.error || "") : "Erro desconhecido."}`);
+    }
+  } catch (err) {
+    console.error("Erro na reautenticação:", err);
+    alert("Erro ao reautenticar sessão.");
+  } finally {
+    btn.disabled = false;
+    btn.textContent = original;
   }
 }
 

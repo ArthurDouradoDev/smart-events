@@ -46,6 +46,17 @@
         <span class="rec-dot"></span>
         <span id="rec-size">REC 0 MB</span>
       </div>
+      <button id="vpn-status-icon" class="icon-btn vpn-disconnected hidden"
+        title="VPN desconectada — clique para verificar">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+          stroke-linecap="round" stroke-linejoin="round">
+          <path d="M5 12.55a11 11 0 0 1 14.08 0" />
+          <path d="M1.42 9a16 16 0 0 1 21.16 0" />
+          <path d="M8.53 16.11a6 6 0 0 1 6.95 0" />
+          <line x1="12" y1="20" x2="12.01" y2="20" />
+          <line class="wifi-slash" x1="2" y1="2" x2="22" y2="22" />
+        </svg>
+      </button>
       <button id="alert-btn" class="icon-btn" title="Alertas">
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
           <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9" />
@@ -138,7 +149,15 @@
       <aside id="vip-panel">
         <div class="panel-header">
           <span class="panel-label">VIPs</span>
-          <span id="vip-summary" class="panel-meta"></span>
+          <div class="panel-header-right">
+            <span id="vip-summary" class="panel-meta"></span>
+            <button id="vip-refresh-btn" class="icon-btn" title="Atualizar VIPs agora">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M23 4v6h-6"></path>
+                <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"></path>
+              </svg>
+            </button>
+          </div>
         </div>
         <div id="vip-list">
           <!-- Renderizado por vip.js -->
@@ -310,6 +329,21 @@
     </div>
   </div>
 
+
+  <!-- ── MODAL VPN DESCONECTADA ─────────────────────────────────── -->
+  <div id="vpn-modal" class="modal hidden" style="z-index: 2020;">
+    <div class="modal-box" style="border: 1px solid var(--danger);">
+      <h3 class="modal-title" style="color: var(--danger);">VPN desconectada</h3>
+      <div class="modal-body" style="text-align: left; margin: 15px 0; color: var(--text-secondary); line-height: 1.5;">
+        <p>Não foi possível alcançar a rede do OSS (<span id="vpn-target" class="mono"></span>).</p>
+        <p style="margin-top: 10px;">Conecte-se à VPN do cliente e clique em <strong>Verificar conexão</strong>.</p>
+      </div>
+      <div class="modal-footer" style="display: flex; gap: 10px; justify-content: flex-end; margin-top: 16px;">
+        <button id="vpn-modal-close" class="btn btn-ghost">Fechar</button>
+        <button id="vpn-modal-recheck" class="btn btn-primary">Verificar conexão</button>
+      </div>
+    </div>
+  </div>
 
   <!-- ── MODAL LIMPAR HISTÓRICO ─────────────────────────────────── -->
   <div id="clear-history-modal" class="modal hidden">

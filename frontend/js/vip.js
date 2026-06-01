@@ -17,6 +17,39 @@ let _modalChart = null;
 export function initVip() {
   State.on("change:vips", render);
   _initModal();
+  _initRefresh();
+}
+
+let _refreshing = false;
+
+function _initRefresh() {
+  const btn = document.getElementById("vip-refresh-btn");
+  if (!btn) return;
+
+  btn.addEventListener("click", async () => {
+    if (_refreshing) return;
+    const eventId = State.eventId;
+    if (!eventId || State.mode !== "active") return;
+
+    _refreshing = true;
+    btn.classList.add("spinning");
+    btn.disabled = true;
+    try {
+      const res = await API.refreshVips(eventId);
+      if (res && res.ok === false && res.error) {
+        console.error("Erro ao atualizar VIPs:", res.error);
+      }
+      // Recarrega os VIPs do banco (a coleta já inseriu as novas medições).
+      const vips = await API.getVips(eventId);
+      State.set("vips", vips);
+    } catch (e) {
+      console.error("Falha ao atualizar VIPs:", e);
+    } finally {
+      _refreshing = false;
+      btn.classList.remove("spinning");
+      btn.disabled = false;
+    }
+  });
 }
 
 export function render(vips) {

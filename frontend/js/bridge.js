@@ -63,8 +63,8 @@ const _mock = {
   get_active_event: () => ({
     ok: true,
     event: {
-      id: "gp-sp-2025",
-      name: "GP São Paulo 2025",
+      id: "demo-event",
+      name: "Evento Demo",
       status: "ACTIVE",
       start_time: new Date(Date.now() - 2 * 3600 * 1000).toISOString(),
       end_time: new Date(Date.now() + 10 * 3600 * 1000).toISOString(),
@@ -75,8 +75,8 @@ const _mock = {
   }),
   get_events: () => ([
     {
-      id: "gp-sp-2025-ended",
-      name: "GP São Paulo 2025 (Histórico)",
+      id: "demo-event-ended",
+      name: "Evento Demo (Histórico)",
       status: "ENDED",
       start_time: new Date(Date.now() - 5 * 3600 * 1000).toISOString(),
       end_time: new Date(Date.now() - 1 * 3600 * 1000).toISOString(),
@@ -232,6 +232,9 @@ const _mock = {
     return { ok: true, series };
   },
   clear_event_history: (eventId) => ({ ok: true }),
+  refresh_vips: (eventId) => ({ ok: true, count: 5 }),
+  check_vpn: () => ({ ok: true, connected: true, target: "10.220.50.9" }),
+  reauth_session: () => ({ ok: true, base_url: "https://10.220.30.9:31943" }),
 };
 
 // ── Aguarda pywebview estar pronto ────────────────────────────────
@@ -285,6 +288,7 @@ const API = {
   getSiteCells:     (eventId, siteId)        => API.call("get_site_cells", eventId, siteId),
   getKpiSeries:     (eventId, siteId, m, w, cellId=null) => API.call("get_kpi_series", eventId, siteId, m, w, cellId),
   getVips:          (eventId, timestamp=null) => API.call("get_vips", eventId, timestamp),
+  refreshVips:      (eventId)                 => API.call("refresh_vips", eventId),
   getAlerts:        (eventId, timestamp=null) => API.call("get_alerts", eventId, timestamp),
   acknowledgeAlert: (id)                    => API.call("acknowledge_alert", id),
   acknowledgeAllAlerts: (eventId)           => API.call("acknowledge_all_alerts", eventId),
@@ -305,6 +309,8 @@ const API = {
 
   getVipSeries:     (eventId, vipName, minutes)  => API.call("get_vip_series", eventId, vipName, minutes),
   clearEventHistory: (eventId)                  => API.call("clear_event_history", eventId),
+  checkVpn:         ()                          => API.call("check_vpn"),
+  reauthSession:    ()                          => API.call("reauth_session"),
 };
 
 export default API;

@@ -42,6 +42,11 @@ else:
 import urllib3
 
 from core import database as db
+from core.session_renew import (
+    EXIT_SUCCESS,
+    EXIT_GENERIC_FAIL,
+    EXIT_NEEDS_INTERACTIVE,
+)
 
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
@@ -309,6 +314,17 @@ class HttpCollector(BaseCollector):
     # trocar de evento).  Chave = nome do módulo ("trace" | "monitoring").
     _renew_failures: dict = {}        # módulo → nº de falhas consecutivas
     _renew_backoff_until: dict = {}   # módulo → datetime até quando não tentar
+    # Quando a renovação headless detecta CAPTCHA/SSO (exit 2), o módulo entra em
+    # "requer reautenticação interativa": paramos de tentar renovar sozinhos e
+    # mantemos um alerta acionável até o operador reautenticar (navegador visível).
+    # Valor = snapshot do roarand no momento em que foi marcado (para detectar a
+    # reauth do operador comparando com o roarand atual do session.json).
+    _needs_interactive: dict = {}     # módulo → roarand snapshot (str) | ""
+    # Reautenticação interativa (navegador visível): trava single-flight para nunca
+    # abrir duas janelas ao mesmo tempo (threads monitoring + trace) e cooldown para
+    # não reabrir em rajada após uma tentativa cancelada/falha pelo operador.
+    _interactive_lock = threading.Lock()
+    _interactive_cooldown_until = None  # datetime | None
 
     def __init__(self, event_config: dict, base_url: str, session_cookie: str = ""):
         super().__init__(event_config)
@@ -317,8 +333,14 @@ class HttpCollector(BaseCollector):
         self._session_file = self._resolve_session_file(self.base_url)
         self._session_monitoring = None
         self._session_trace = None
+        # roarand com que cada sessão em cache foi construída — usado para detectar
+        # quando o session.json foi renovado externamente (outra thread / reauth do
+        # operador) e a sessão em cache ficou obsoleta.
+        self._session_built_roarand: dict = {}
         self._renew_lock = threading.Lock()
         self._oss_tz_offset_min = event_config.get("oss", {}).get("timezone_offset_min", -180)
+        # Regional do OSS (SP, RJ, …) — usada para escolher as credenciais por regional.
+        self._region = (event_config.get("oss", {}).get("region") or "").upper()
 
         # Build obj_no-to-cell-info mapping for KPIs.
         # _static_obj_nos: obj_nos explicitly defined in the event config (used in API payload).
@@ -385,6 +407,8 @@ class HttpCollector(BaseCollector):
         if roarand:
             sess.headers.update({"roarand": roarand})
 
+        # Memoriza com qual roarand esta sessão foi construída (detecção de obsolescência).
+        self._session_built_roarand[module] = roarand
         return sess
 
     def _get_session(self, module: str) -> requests.Session:
@@ -402,27 +426,215 @@ class HttpCollector(BaseCollector):
     def _check_session_valid(self, response: requests.Response, module: str) -> bool:
         """Verifica se a resposta indica sessão expirada."""
         if response.status_code in (401, 403):
+            self._log_session_invalid(module, response, "HTTP 401/403")
             return False
         ct = response.headers.get("Content-Type", "")
         if "text/html" in ct:
             body_lower = response.text[:2000].lower()
             if any(k in body_lower for k in ["login", "sso", "authentication", "session"]):
+                self._log_session_invalid(module, response, "redirecionamento HTML (SSO/CAPTCHA)")
                 return False
         return True
 
-    def _renew_session(self, module: str):
-        """
-        Renova a sessão via Playwright em modo headless.
+    def _log_session_invalid(self, module: str, response: requests.Response, reason: str):
+        """Diagnóstico: registra status/URL/trecho do corpo quando a sessão é
+        considerada inválida, para distinguir SSO-redirect × CAPTCHA × CSRF inválido
+        em campo, sem precisar de novo build."""
+        try:
+            snippet = (response.text or "")[:200].replace("\n", " ")
+        except Exception:
+            snippet = "(corpo indisponível)"
+        logger.warning(
+            f"[session/{module}] inválida — {reason}. "
+            f"status={response.status_code} url={getattr(response, 'url', '?')} "
+            f"body[:200]={snippet!r}"
+        )
 
-        Melhorias em relação à versão anterior:
-        - Backoff exponencial: 60 s → 120 s → 180 s → … → 300 s entre tentativas
-          após falhas consecutivas, para não travar a thread em loop infinito.
-        - Detecção de renovação por outra thread: se o roarand mudou enquanto
-          esperávamos o lock, apenas recarrega a sessão local sem rodar Playwright.
-        - Log completo de stdout E stderr: o get_session.py escreve erros no stdout,
-          então só logar stderr deixava a causa invisível.
+    # ── Helpers de estado de renovação ──────────────────────────────────
+    def _invalidate_session(self, module: str):
+        """Descarta a requests.Session em cache para forçar releitura do session.json."""
+        if module == "monitoring":
+            self._session_monitoring = None
+        elif module == "trace":
+            self._session_trace = None
+
+    def _clear_interactive_state(self, module: str):
+        HttpCollector._needs_interactive.pop(module, None)
+
+    @classmethod
+    def reset_interactive_state(cls, module: Optional[str] = None):
+        """Limpa o estado 'requer reauth interativa' (chamado após uma reauth bem-sucedida)."""
+        if module is None:
+            cls._needs_interactive.clear()
+            cls._renew_failures.clear()
+            cls._renew_backoff_until.clear()
+            cls._interactive_cooldown_until = None
+        else:
+            cls._needs_interactive.pop(module, None)
+            cls._renew_failures.pop(module, None)
+            cls._renew_backoff_until.pop(module, None)
+
+    @staticmethod
+    def _build_renew_cmd() -> list:
+        """Comando-base para rodar o renovador (subprocesso). No .exe usa `--get-session`;
+        em dev usa o Python do venv + scratch/get_session.py."""
+        root = Path(__file__).parent.parent
+        if getattr(sys, "frozen", False):
+            return [sys.executable, "--get-session"]
+        python_exe = root / ".venv" / "Scripts" / "python.exe"
+        if not python_exe.exists():
+            python_exe = Path("python")
+        return [str(python_exe), str(root / "scratch" / "get_session.py")]
+
+    @classmethod
+    def run_interactive_reauth(cls, base_url: str, session_file, region: str = "",
+                              respect_cooldown: bool = False) -> dict:
+        """Abre o navegador VISÍVEL (single-flight) para o operador concluir o login +
+        CAPTCHA, captura a sessão e a grava. Retorna {'ok':bool,...}.
+
+        - single-flight: nunca abre duas janelas simultâneas (monitoring + trace).
+        - respect_cooldown=True (auto-open): pula se houve falha/cancelamento recente.
+        - region: regional do OSS, escolhe as credenciais por regional (SP, RJ, …).
         """
         from datetime import timedelta
+        if respect_cooldown:
+            cd = cls._interactive_cooldown_until
+            if cd and datetime.utcnow() < cd:
+                return {"ok": False, "error": "cooldown", "skipped": True}
+        if not cls._interactive_lock.acquire(blocking=False):
+            return {"ok": False, "error": "Reautenticação já em andamento.", "in_progress": True}
+        try:
+            base_url = (base_url or "").rstrip("/")
+            cmd = cls._build_renew_cmd() + [
+                "--module", "both",            # sem --headless → navegador visível
+                "--base-url", base_url,
+                "--session-file", str(session_file),
+                "--region", region or "",
+            ]
+            logger.info(f"[reauth] Abrindo navegador visível para reautenticação ({base_url})...")
+            result = subprocess.run(
+                cmd, capture_output=True, text=True, timeout=320,
+                cwd=str(Path(__file__).parent.parent),
+            )
+            if result.returncode == EXIT_SUCCESS:
+                cls.reset_interactive_state()
+                logger.info("[reauth] Reautenticação interativa concluída com sucesso. Coleta retomada.")
+                return {"ok": True, "base_url": base_url}
+            tail = ((result.stdout or "")[-400:] + " " + (result.stderr or "")[-400:]).strip()
+            cls._interactive_cooldown_until = datetime.utcnow() + timedelta(minutes=5)
+            logger.error(f"[reauth] Reautenticação não concluída (rc={result.returncode}): {tail}")
+            return {
+                "ok": False,
+                "error": "Reautenticação não concluída. Confira usuário/senha e o código (CAPTCHA).",
+                "detail": tail,
+            }
+        except subprocess.TimeoutExpired:
+            cls._interactive_cooldown_until = datetime.utcnow() + timedelta(minutes=5)
+            return {"ok": False, "error": "Tempo limite de reautenticação excedido (5 min)."}
+        except Exception as e:
+            cls._interactive_cooldown_until = datetime.utcnow() + timedelta(minutes=5)
+            logger.error(f"[reauth] erro ao executar reautenticação: {e}")
+            return {"ok": False, "error": str(e)}
+        finally:
+            cls._interactive_lock.release()
+
+    def _spawn_interactive_reauth(self):
+        """Dispara a reauth interativa em uma thread separada (não bloqueia a coleta).
+        Abre o navegador automaticamente quando o CAPTCHA é detectado; o single-flight
+        e o cooldown garantem que não abra janelas em excesso."""
+        if HttpCollector._interactive_lock.locked():
+            return
+        cd = HttpCollector._interactive_cooldown_until
+        if cd and datetime.utcnow() < cd:
+            return
+        base_url, session_file, region = self.base_url, self._session_file, self._region
+
+        def _worker():
+            res = HttpCollector.run_interactive_reauth(
+                base_url, session_file, region=region, respect_cooldown=True)
+            if res.get("ok"):
+                # Descarta as sessões em cache desta instância para releitura imediata.
+                self._invalidate_session("monitoring")
+                self._invalidate_session("trace")
+
+        threading.Thread(target=_worker, name="interactive-reauth", daemon=True).start()
+
+    def _engage_backoff(self, module: str) -> int:
+        """Incrementa o contador de falhas e arma o backoff (60→300s). Retorna o backoff em s."""
+        from datetime import timedelta
+        failures = HttpCollector._renew_failures.get(module, 0) + 1
+        HttpCollector._renew_failures[module] = failures
+        backoff_s = min(300, 60 * failures)
+        HttpCollector._renew_backoff_until[module] = datetime.utcnow() + timedelta(seconds=backoff_s)
+        return backoff_s
+
+    def _oss_region_label(self) -> str:
+        oss = self.event.get("oss", {}) if isinstance(self.event, dict) else {}
+        region = (oss.get("region") or "").upper()
+        if region:
+            return region
+        try:
+            import urllib.parse
+            return urllib.parse.urlparse(self.base_url).hostname or self.base_url
+        except Exception:
+            return self.base_url
+
+    def _raise_reauth_alert(self, module: str):
+        """Emite UM alerta persistente e acionável pedindo reautenticação manual.
+        O alerta é por-regional (login/sessão é compartilhado entre os módulos), então
+        trace e monitoring não geram alertas duplicados."""
+        region = self._oss_region_label()
+        msg = (f"Sessão do iManager ({region}) bloqueada por CAPTCHA/SSO — "
+               f"reautenticação manual necessária. Clique para reautenticar.")
+        try:
+            active = db.get_active_alerts(self.event_id)
+            if not any(a.get("message") == msg for a in active):
+                db.insert_alert({
+                    "event_id":  self.event_id,
+                    "level":     "GLOBAL",
+                    "severity":  "CRITICAL",
+                    "site_id":   "GLOBAL",
+                    "cell_id":   "",
+                    "message":   msg,
+                    "timestamp": datetime.utcnow().strftime('%Y-%m-%dT%H:%M:%SZ'),
+                })
+        except Exception as e:
+            logger.warning(f"Não foi possível inserir alerta de reauth: {e}")
+
+    def _renew_session(self, module: str) -> bool:
+        """
+        Renova a sessão via Playwright (subprocesso headless). Retorna True somente
+        quando a renovação foi EFETIVA (sessão autenticada gravada); False caso
+        contrário (backoff ativo, CAPTCHA/SSO exigindo reauth, ou falha).
+
+        - Backoff exponencial (60→300s) após falhas consecutivas, evitando loop.
+        - exit 2 (EXIT_NEEDS_INTERACTIVE): login bloqueado por CAPTCHA/SSO. Marca o módulo
+          como 'requer reauth interativa', emite UM alerta acionável e para de tentar
+          renovar sozinho até o operador reautenticar (api.reauth_session) — isto elimina
+          o loop infinito de renovações que nunca autenticavam.
+        - Detecção de reauth do operador / de renovação por outra thread: se o roarand do
+          session.json mudou, recarrega a sessão sem rodar Playwright.
+        """
+        # ── Já aguardando reauth interativa? Só sai disso quando o operador reautentica ──
+        if module in HttpCollector._needs_interactive:
+            roarand_marked = HttpCollector._needs_interactive.get(module) or ""
+            module_data = self._load_session_data().get(module, {}) or {}
+            roarand_now = module_data.get("roarand") or ""
+            if roarand_now and roarand_now != roarand_marked and module_data.get("cookies"):
+                logger.info(
+                    f"[renew/{module}] Reautenticação interativa detectada (roarand mudou). "
+                    "Recarregando sessão e retomando a coleta."
+                )
+                HttpCollector._renew_failures.pop(module, None)
+                HttpCollector._renew_backoff_until.pop(module, None)
+                self._clear_interactive_state(module)
+                self._invalidate_session(module)
+                return True
+            # Continua bloqueado: mantém o alerta acionável e reabre o navegador
+            # automaticamente (single-flight + cooldown), sem rodar Playwright headless.
+            self._raise_reauth_alert(module)
+            self._spawn_interactive_reauth()
+            return False
 
         # ── Backoff: se falhou recentemente, pula esta tentativa ─────────
         now = datetime.utcnow()
@@ -433,7 +645,22 @@ class HttpCollector(BaseCollector):
                 f"[renew/{module}] Backoff ativo — pulando renovação por mais {remaining}s "
                 f"({HttpCollector._renew_failures.get(module, 0)} falha(s) consecutiva(s))."
             )
-            return
+            return False
+
+        # ── Sessão em cache obsoleta? Se o session.json já tem um roarand diferente do
+        #    que a sessão em cache usou, alguém renovou (outra thread OU a reauth interativa
+        #    do operador): basta recarregar do arquivo, sem rodar Playwright (evita reabrir
+        #    o navegador logo após um login bem-sucedido). ──────────────────────────────
+        _mod_data = self._load_session_data().get(module, {}) or {}
+        _file_roarand = _mod_data.get("roarand")
+        if (_file_roarand and _file_roarand != self._session_built_roarand.get(module)
+                and _mod_data.get("cookies")):
+            logger.info(
+                f"[renew/{module}] session.json mais novo que a sessão em cache "
+                "(renovado externamente) — recarregando sem Playwright."
+            )
+            self._invalidate_session(module)
+            return True
 
         # ── Captura roarand ANTES do lock para detectar renovação concorrente ──
         roarand_before = self._load_session_data().get(module, {}).get("roarand")
@@ -451,11 +678,8 @@ class HttpCollector(BaseCollector):
                         f"[renew/{module}] Sessão já renovada por outra thread. "
                         "Recarregando sessão local sem rodar Playwright."
                     )
-                    if module == "monitoring":
-                        self._session_monitoring = None
-                    elif module == "trace":
-                        self._session_trace = None
-                    return
+                    self._invalidate_session(module)
+                    return True
                 else:
                     logger.warning(
                         f"[renew/{module}] Outra thread renovou mas a seção '{module}' está "
@@ -496,6 +720,7 @@ class HttpCollector(BaseCollector):
                         "--module", module,
                         "--base-url", self.base_url,
                         "--session-file", str(self._session_file),
+                        "--region", self._region,
                     ],
                     capture_output=True,
                     text=True,
@@ -505,52 +730,58 @@ class HttpCollector(BaseCollector):
                 stdout_tail = result.stdout.strip()[-2000:] if result.stdout.strip() else ""
                 stderr_tail = result.stderr.strip()[-500:] if result.stderr.strip() else ""
 
-                if result.returncode == 0:
-                    logger.info(f"[renew/{module}] Sessão renovada com sucesso.")
+                if result.returncode == EXIT_SUCCESS:
+                    logger.info(f"[renew/{module}] Sessão renovada e autenticada com sucesso.")
                     if stdout_tail:
                         logger.debug(f"[renew/{module}] stdout:\n{stdout_tail}")
                     HttpCollector._renew_failures[module] = 0
                     HttpCollector._renew_backoff_until.pop(module, None)
-                    if module == "monitoring":
-                        self._session_monitoring = None
-                    elif module == "trace":
-                        self._session_trace = None
-                else:
-                    failures = HttpCollector._renew_failures.get(module, 0) + 1
-                    HttpCollector._renew_failures[module] = failures
-                    backoff_s = min(300, 60 * failures)   # 60 → 120 → 180 → 300 s
-                    HttpCollector._renew_backoff_until[module] = (
-                        datetime.utcnow() + timedelta(seconds=backoff_s)
-                    )
+                    self._clear_interactive_state(module)
+                    self._invalidate_session(module)
+                    return True
+
+                if result.returncode == EXIT_NEEDS_INTERACTIVE:
+                    # CAPTCHA/SSO: renovação headless é impossível. Marca o módulo, emite
+                    # alerta acionável e ABRE o navegador visível automaticamente para o
+                    # operador logar (single-flight evita janela duplicada monitoring+trace).
+                    snapshot = (self._load_session_data().get(module, {}) or {}).get("roarand") or ""
+                    HttpCollector._needs_interactive[module] = snapshot
                     logger.error(
-                        f"[renew/{module}] Renovação falhou "
-                        f"(returncode={result.returncode}, tentativa #{failures}). "
-                        f"Próxima tentativa em {backoff_s}s.\n"
-                        f"  STDOUT: {stdout_tail or '(vazio)'}\n"
-                        f"  STDERR: {stderr_tail or '(vazio)'}"
+                        f"[renew/{module}] Login bloqueado por CAPTCHA/SSO — abrindo navegador "
+                        f"para reautenticação interativa. Coleta deste módulo pausada até logar.\n"
+                        f"  STDOUT: {stdout_tail or '(vazio)'}\n  STDERR: {stderr_tail or '(vazio)'}"
                     )
-            except subprocess.TimeoutExpired:
-                failures = HttpCollector._renew_failures.get(module, 0) + 1
-                HttpCollector._renew_failures[module] = failures
-                backoff_s = min(300, 60 * failures)
-                HttpCollector._renew_backoff_until[module] = (
-                    datetime.utcnow() + timedelta(seconds=backoff_s)
+                    self._raise_reauth_alert(module)
+                    self._spawn_interactive_reauth()
+                    return False
+
+                # Falha genérica (EXIT_GENERIC_FAIL ou returncode inesperado)
+                backoff_s = self._engage_backoff(module)
+                failures = HttpCollector._renew_failures.get(module, 0)
+                logger.error(
+                    f"[renew/{module}] Renovação falhou "
+                    f"(returncode={result.returncode}, tentativa #{failures}). "
+                    f"Próxima tentativa em {backoff_s}s.\n"
+                    f"  STDOUT: {stdout_tail or '(vazio)'}\n"
+                    f"  STDERR: {stderr_tail or '(vazio)'}"
                 )
+                return False
+            except subprocess.TimeoutExpired:
+                backoff_s = self._engage_backoff(module)
+                failures = HttpCollector._renew_failures.get(module, 0)
                 logger.error(
                     f"[renew/{module}] Renovação TIMEOUT após 120s "
                     f"(tentativa #{failures}). Próxima tentativa em {backoff_s}s."
                 )
+                return False
             except Exception as e:
-                failures = HttpCollector._renew_failures.get(module, 0) + 1
-                HttpCollector._renew_failures[module] = failures
-                backoff_s = min(300, 60 * failures)
-                HttpCollector._renew_backoff_until[module] = (
-                    datetime.utcnow() + timedelta(seconds=backoff_s)
-                )
+                backoff_s = self._engage_backoff(module)
+                failures = HttpCollector._renew_failures.get(module, 0)
                 logger.error(
                     f"[renew/{module}] Erro ao executar a renovação "
                     f"(tentativa #{failures}): {e}. Próxima tentativa em {backoff_s}s."
                 )
+                return False
 
     def collect_kpis(self) -> List[dict]:
         integration = self.event.get("integration", {})
@@ -576,6 +807,7 @@ class HttpCollector(BaseCollector):
 
         url = f"{self.base_url}/rest/oss/access/pm/v1/monitor/task/result?nocache={now_ms}"
         retries = 2
+        renewed_this_call = False
         for attempt in range(retries):
             s = self._get_session("monitoring")
             try:
@@ -587,10 +819,19 @@ class HttpCollector(BaseCollector):
                 return self._parse_kpi_response(data)
             except SessionExpiredError as e:
                 logger.warning(f"Erro de sessão no collect_kpis: {e}")
+                if renewed_this_call:
+                    # Já renovamos nesta chamada e a sessão renovada AINDA é inválida.
+                    # Não renovar de novo (evita loop): engata backoff e para por aqui.
+                    self._engage_backoff("monitoring")
+                    logger.error("Sessão monitoring renovada mas ainda inválida — pausando coleta de KPIs (backoff).")
+                    return []
                 if attempt < retries - 1:
-                    logger.warning(f"Sessão do módulo monitoring expirada. Iniciando renovação automática via Playwright...")
-                    self._renew_session("monitoring")
-                    continue
+                    logger.warning("Sessão do módulo monitoring expirada. Iniciando renovação automática...")
+                    if self._renew_session("monitoring"):
+                        renewed_this_call = True
+                        continue
+                    # Renovação não efetiva (backoff/CAPTCHA): não adianta retentar agora.
+                    return []
                 return []
             except (requests.exceptions.ConnectTimeout, requests.exceptions.ConnectionError, requests.exceptions.Timeout) as e:
                 logger.error(f"Erro de conexão ao consultar KPIs: {e}")
@@ -617,8 +858,12 @@ class HttpCollector(BaseCollector):
 
     def _parse_kpi_response(self, response_json: dict) -> List[dict]:
         rows = []
+        # Acumuladores para um único log-resumo da coleta (em vez de logar item a item).
+        mapped_now: list = []   # células mapeadas dinamicamente neste ciclo
+        objs_seen = 0           # objetos retornados pela task de monitoring
         data_list = response_json.get("data", [])
         if not data_list:
+            logger.info("Monitoring: nenhuma medição retornada neste ciclo.")
             return rows
 
         for task_data in data_list:
@@ -635,6 +880,7 @@ class HttpCollector(BaseCollector):
                     timestamp = datetime.utcnow().strftime('%Y-%m-%dT%H:%M:%SZ')
 
                 for item in items_to_process:
+                    objs_seen += 1
                     obj_data = item.get("obj") or {}
                     obj_no = item.get("objNo") or obj_data.get("objNo") or (item.get("obj", {}).get("objNo") if isinstance(item.get("obj"), dict) else None)
                     if not obj_no:
@@ -659,7 +905,7 @@ class HttpCollector(BaseCollector):
                                         "site_id": s_id
                                     }
                                     self._obj_to_cell[obj_no_int] = cell_info
-                                    logger.info(f"Mapeado dinamicamente objNo {obj_no_int} ({obj_name}) -> Celula {c_id}")
+                                    mapped_now.append(c_id)
                                     break
 
                     if not cell_info:
@@ -687,6 +933,15 @@ class HttpCollector(BaseCollector):
                                 })
                             except (ValueError, TypeError):
                                 pass
+
+        # Log-resumo único do ciclo de monitoring (em vez de logar item a item).
+        msg = (
+            f"Monitoring: {len(rows)} medições coletadas de {objs_seen} objeto(s); "
+            f"{len(self._obj_to_cell)}/{len(self.cell_ids)} células do evento mapeadas"
+        )
+        if mapped_now:
+            msg += f" (+{len(mapped_now)} mapeada(s) dinamicamente neste ciclo)"
+        logger.info(msg + ".")
         return rows
 
     def _find_metric_value_and_candidate(self, d, candidates):
@@ -750,8 +1005,10 @@ class HttpCollector(BaseCollector):
             return []
 
         measurements = []
+        stop_collection = False
         for task_id, vip_name in self.vips_by_task.items():
             retries = 2
+            renewed_this_call = False
             for attempt in range(retries):
                 s = self._get_session("trace")
                 try:
@@ -855,10 +1112,20 @@ class HttpCollector(BaseCollector):
                     break
                 except SessionExpiredError as e:
                     logger.warning(f"Erro de sessão no collect_vips: {e}")
+                    if renewed_this_call:
+                        # Sessão trace renovada mas AINDA inválida → não renovar de novo (evita loop).
+                        self._engage_backoff("trace")
+                        logger.error("Sessão trace renovada mas ainda inválida — pausando coleta de VIPs (backoff).")
+                        stop_collection = True
+                        break
                     if attempt < retries - 1:
-                        logger.warning("Renovando sessão trace via Playwright...")
-                        self._renew_session("trace")
-                        continue
+                        logger.warning("Renovando sessão trace...")
+                        if self._renew_session("trace"):
+                            renewed_this_call = True
+                            continue
+                        # Renovação não efetiva (backoff/CAPTCHA): parar a coleta deste ciclo.
+                        stop_collection = True
+                        break
                 except (requests.exceptions.ConnectTimeout, requests.exceptions.ConnectionError, requests.exceptions.Timeout) as e:
                     logger.error(f"Erro de conexão ao consultar VIP {vip_name} (taskId={task_id}): {e}")
                     try:
@@ -880,6 +1147,8 @@ class HttpCollector(BaseCollector):
                 except Exception as e:
                     logger.error(f"Erro ao consultar VIPs (taskId={task_id}): {e}")
                     break
+            if stop_collection:
+                break
 
         return measurements
 

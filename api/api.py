@@ -5,11 +5,15 @@ Todos os métodos retornam dicts/lists serializáveis para JSON.
 
 import json
 import logging
+import os
+import subprocess
 from datetime import datetime
 from pathlib import Path
 from typing import Optional
+from urllib.parse import urlparse
 
 from core import database as db
+from core.collector import _REGIONAL_BASE_URLS, _DEFAULT_BASE_URL
 from core.scheduler import scheduler
 from core.log_buffer import log_buffer
 
@@ -178,6 +182,75 @@ class Api:
                 _active_event = full_event
                 return {"ok": True, "event": self._sanitize_event(full_event)}
         return {"ok": False, "event": None}
+
+    def check_vpn(self) -> dict:
+        """Verifica a conexão com a VPN pingando o IP do OSS do evento ativo.
+
+        Resolve o alvo na mesma ordem de precedência de build_collector()
+        (oss.base_url → mapa regional → fallback SP) e confirma a conectividade
+        pela presença de "TTL=" no retorno do ping nativo do Windows.
+        """
+        try:
+            global _active_event
+            oss = (_active_event or {}).get("oss", {}) if _active_event else {}
+
+            base_url = oss.get("base_url", "")
+            if not base_url:
+                region = oss.get("region", "SP").upper()
+                base_url = _REGIONAL_BASE_URLS.get(region, _DEFAULT_BASE_URL)
+
+            target = urlparse(base_url).hostname or urlparse(_DEFAULT_BASE_URL).hostname
+
+            flags = subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0
+            result = subprocess.run(
+                ["ping", "-n", "2", target],
+                capture_output=True,
+                timeout=15,
+                creationflags=flags,
+            )
+            output = (result.stdout or b"") + (result.stderr or b"")
+            connected = b"TTL=" in output.upper()
+            return {"ok": True, "connected": connected, "target": target}
+        except Exception as e:
+            logger.error(f"check_vpn error: {e}")
+            return {"ok": False, "error": str(e)}
+
+    def reauth_session(self) -> dict:
+        """Reautenticação interativa do iManager: abre um navegador VISÍVEL para o
+        operador concluir o login (incluindo o CAPTCHA exibido em imagem), captura a
+        sessão e a grava. Necessária porque a renovação headless não resolve CAPTCHA.
+
+        OSS-agnóstico: resolve base_url/session_file a partir do OSS do evento ativo
+        (mesma precedência de check_vpn/build_collector), valendo para SP, RJ e outras.
+        """
+        global _active_event
+        try:
+            oss = (_active_event or {}).get("oss", {}) if _active_event else {}
+            base_url = oss.get("base_url", "")
+            if not base_url:
+                region = (oss.get("region") or "SP").upper()
+                base_url = _REGIONAL_BASE_URLS.get(region, _DEFAULT_BASE_URL)
+            base_url = base_url.rstrip("/")
+
+            # Resolve o session.json da regional (mesma regra do collector) e delega à
+            # rotina compartilhada (single-flight com o auto-open disparado pela coleta).
+            from core.collector import HttpCollector
+            session_file = HttpCollector._resolve_session_file(base_url)
+            region = (oss.get("region") or "").upper()
+            res = HttpCollector.run_interactive_reauth(base_url, session_file, region=region)
+            if res.get("ok"):
+                # Força o collector ativo a reler o session.json recém-gravado.
+                try:
+                    coll = scheduler._collector
+                    if hasattr(coll, "_invalidate_session"):
+                        coll._invalidate_session("monitoring")
+                        coll._invalidate_session("trace")
+                except Exception as ex:
+                    logger.warning(f"reauth_session: falha ao invalidar sessões em cache: {ex}")
+            return res
+        except Exception as e:
+            logger.error(f"reauth_session error: {e}")
+            return {"ok": False, "error": str(e)}
 
     # ── Dados do mapa / sites ────────────────────────────────────────
 
@@ -583,6 +656,20 @@ class Api:
         except Exception as e:
             logger.error(f"get_vips error: {e}")
             return []
+
+    def refresh_vips(self, event_id: str) -> dict:
+        """Força uma coleta imediata de VIPs (botão de refresh do painel VIP).
+
+        Retorna o número de medições inseridas. Requer coleta ativa.
+        """
+        try:
+            if not scheduler.is_recording:
+                return {"ok": False, "error": "Coleta não está ativa para este evento."}
+            count = scheduler.collect_vips_now()
+            return {"ok": True, "count": count}
+        except Exception as e:
+            logger.error(f"refresh_vips error: {e}")
+            return {"ok": False, "error": str(e)}
 
     def get_vip_series(self, event_id: str, vip_name: str, minutes: int = 60) -> dict:
         """Retorna série temporal de RSRP/RSRQ para um VIP específico."""

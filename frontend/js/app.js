@@ -12,9 +12,11 @@ import { initAlerts, injectAlerts } from "./alerts.js";
 import { initLogs } from "./logs.js";
 
 const POLL_INTERVAL_MS = 30_000; // 30s: busca dados atualizados no banco local
+const VPN_CHECK_INTERVAL_MS = 15 * 60 * 1000; // 15min: verifica conexão com a VPN
 
 let _pollTimer = null;
 let _eventTimer = null;
+let _vpnTimer = null;
 let _historicalTimestamps = [];
 let _historicalIndex = -1;
 
@@ -34,6 +36,7 @@ async function boot() {
   _setupServerButton();
   _setupEventDropdown();
   _setupClearHistoryModal();
+  _setupVpnMonitor();
 
   // Mostra a tela de espera enquanto o servidor local sobe e a sincronização ocorre.
   _enterStandbyMode();
@@ -503,6 +506,79 @@ function _setupClearHistoryModal() {
       alert("Erro ao processar requisição de limpeza.");
     }
   });
+}
+
+// ── Monitor de Conexão VPN ────────────────────────────────────────
+
+function _updateVpnIcon(connected) {
+  const icon = document.getElementById("vpn-status-icon");
+  if (!icon) return;
+  icon.classList.remove("hidden");
+  icon.classList.toggle("vpn-connected", connected);
+  icon.classList.toggle("vpn-disconnected", !connected);
+  icon.title = connected
+    ? "VPN conectada"
+    : "VPN desconectada — clique para verificar";
+}
+
+function _showVpnModal(target) {
+  const modal = document.getElementById("vpn-modal");
+  if (!modal) return;
+  if (target) document.getElementById("vpn-target").textContent = target;
+  modal.classList.remove("hidden");
+  State.vpnPopupOpen = true;
+}
+
+function _hideVpnModal() {
+  const modal = document.getElementById("vpn-modal");
+  if (modal) modal.classList.add("hidden");
+  State.vpnPopupOpen = false;
+}
+
+async function _checkVpn() {
+  try {
+    const res = await API.checkVpn();
+    const connected = res && res.ok ? res.connected : false;
+    State.set("vpnConnected", connected);
+    _updateVpnIcon(connected);
+    if (connected) {
+      _hideVpnModal();
+    } else {
+      // Reabre o popup automaticamente (ex.: novo ciclo de 15 min desconectado).
+      _showVpnModal(res && res.target);
+    }
+    return connected;
+  } catch (err) {
+    console.error("Erro ao verificar VPN:", err);
+    return false;
+  }
+}
+
+function _setupVpnMonitor() {
+  const icon = document.getElementById("vpn-status-icon");
+  const btnClose = document.getElementById("vpn-modal-close");
+  const btnRecheck = document.getElementById("vpn-modal-recheck");
+
+  // Fechar o popup: o ícone permanece visível (vermelho) indicando a desconexão.
+  btnClose.addEventListener("click", () => _hideVpnModal());
+
+  // Verificar conexão novamente.
+  btnRecheck.addEventListener("click", async () => {
+    const original = btnRecheck.textContent;
+    btnRecheck.disabled = true;
+    btnRecheck.textContent = "Verificando…";
+    await _checkVpn();
+    btnRecheck.disabled = false;
+    btnRecheck.textContent = original;
+  });
+
+  // Clicar no ícone do header revalida a conexão (reabrindo o popup se desconectado).
+  icon.addEventListener("click", () => _checkVpn());
+
+  // Primeira verificação imediata + ciclo periódico (todos os modos).
+  _checkVpn();
+  if (_vpnTimer) clearInterval(_vpnTimer);
+  _vpnTimer = setInterval(_checkVpn, VPN_CHECK_INTERVAL_MS);
 }
 
 // ── Dropdown de Seleção de Eventos ────────────────────────────────

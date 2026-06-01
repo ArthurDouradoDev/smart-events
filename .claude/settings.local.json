@@ -39,7 +39,28 @@
       "PowerShell(python -m py_compile main.py)",
       "PowerShell(python -c \"import requests, os; print\\('requests at:', os.path.dirname\\(requests.__file__\\)\\); import urllib3, certifi, idna, charset_normalizer; print\\('deps ok'\\)\")",
       "PowerShell(python -c \"from PyInstaller.utils.hooks import collect_submodules; print\\('requests submodules:', len\\(collect_submodules\\('requests'\\)\\)\\)\")",
-      "PowerShell(if \\($?\\) { \"BUILD_DONE\" })"
+      "PowerShell(if \\($?\\) { \"BUILD_DONE\" })",
+      "PowerShell(python -m py_compile core/scheduler.py core/collector.py api/api.py)",
+      "PowerShell(if \\($?\\) { \"OK - sintaxe valida\" })",
+      "Bash(python -c \"from api.api import Api; print\\(Api\\(\\).check_vpn\\(\\)\\)\")",
+      "Bash(python -c \"import sqlite3; c=sqlite3.connect\\('data/smart_events.db'\\); [print\\(dict\\(zip\\([d[0] for d in cur.description], r\\)\\)\\) for cur in [c.execute\\('SELECT id,name,status FROM events'\\)] for r in cur.fetchall\\(\\)]\")",
+      "PowerShell(python -c \"import sqlite3; c=sqlite3.connect\\('data/smart_events.db'\\); rows=c.execute\\('SELECT id,name,status FROM events'\\).fetchall\\(\\); [print\\(r\\) for r in rows]\")",
+      "PowerShell(python -c \"import sqlite3; c=sqlite3.connect\\('data/smart_events_evento-sp.db'\\); print\\('TABLES:', c.execute\\(\\\\\"SELECT name FROM sqlite_master WHERE type='table'\\\\\"\\).fetchall\\(\\)\\)\")",
+      "PowerShell(python scratch/_inspect_db.py)",
+      "PowerShell(python scratch/_patch_main.py)",
+      "PowerShell(git check-ignore data/smart_events.db scratch/legacy/smart_events_gp-sp-2025.db)",
+      "PowerShell(\"---\")",
+      "Bash(python -m py_compile core/session_renew.py core/collector.py)",
+      "PowerShell(python -m py_compile core/session_renew.py core/collector.py)",
+      "PowerShell(if \\($?\\) { \"OK\" })",
+      "PowerShell(python -m py_compile api/api.py)",
+      "PowerShell(python -c \"import core.collector; import core.session_renew; from core.collector import HttpCollector, EXIT_NEEDS_INTERACTIVE; print\\('import OK', EXIT_NEEDS_INTERACTIVE, hasattr\\(HttpCollector,'reset_interactive_state'\\)\\)\")",
+      "PowerShell(node --check frontend/js/alerts.js 2>&1)",
+      "PowerShell(node --check frontend/js/bridge.js 2>&1)",
+      "PowerShell(node --check frontend/js/app.js 2>&1)",
+      "PowerShell(\"checked\")",
+      "PowerShell(foreach \\($f in @\\(\"frontend/js/alerts.js\",\"frontend/js/bridge.js\",\"frontend/js/app.js\"\\)\\) { node --check $f; if \\($?\\) { \"OK $f\" } else { \"FAIL $f\" } })",
+      "PowerShell(python -m py_compile core/session_renew.py core/collector.py api/api.py main.py scratch/get_session.py; if \\($?\\) { foreach \\($f in @\\(\"frontend/js/alerts.js\",\"frontend/js/bridge.js\"\\)\\) { node --check $f } ; if \\($?\\) { python -c \"import core.collector, api.api, main; print\\('imports OK'\\)\" } })"
     ]
   }
 }

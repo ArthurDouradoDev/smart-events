@@ -14,6 +14,7 @@ logger = logging.getLogger(__name__)
 
 INTERVAL_KPI_SECONDS = 120  # OSS: ciclo de 2 minutos
 INTERVAL_VIP_SECONDS = 60   # Trace: 1 minuto por VIP
+KPI_INITIAL_DELAY_SECONDS = 5  # Atraso inicial dos KPIs para os VIPs iniciarem primeiro
 
 
 class Scheduler:
@@ -24,6 +25,9 @@ class Scheduler:
         self._on_update: Optional[Callable] = None  # callback para notificar JS
         self._event_config: Optional[dict] = None
         self._recording: bool = False
+        # Serializa coletas de VIP (ciclo agendado vs. refresh sob demanda) para
+        # não rodarem em paralelo sobre a mesma sessão HTTP do iManager.
+        self._vip_lock = threading.Lock()
 
     def set_update_callback(self, fn: Callable):
         """Define função chamada após cada coleta bem-sucedida."""
@@ -39,15 +43,18 @@ class Scheduler:
         self._stop_event.clear()
         self._recording = True
 
-        t_kpi = threading.Thread(
-            target=self._loop, args=(self._collect_kpis, INTERVAL_KPI_SECONDS),
-            daemon=True, name="kpi-collector"
-        )
+        # VIPs iniciam primeiro; os KPIs (sites) entram com um pequeno atraso
+        # inicial para garantir que a coleta de VIP arranque antes na abertura.
         t_vip = threading.Thread(
             target=self._loop, args=(self._collect_vips, INTERVAL_VIP_SECONDS),
             daemon=True, name="vip-collector"
         )
-        self._threads = [t_kpi, t_vip]
+        t_kpi = threading.Thread(
+            target=self._loop,
+            args=(self._collect_kpis, INTERVAL_KPI_SECONDS, KPI_INITIAL_DELAY_SECONDS),
+            daemon=True, name="kpi-collector"
+        )
+        self._threads = [t_vip, t_kpi]
         for t in self._threads:
             t.start()
 
@@ -65,7 +72,9 @@ class Scheduler:
     def is_recording(self) -> bool:
         return self._recording
 
-    def _loop(self, fn: Callable, interval: int):
+    def _loop(self, fn: Callable, interval: int, initial_delay: int = 0):
+        if initial_delay and self._stop_event.wait(initial_delay):
+            return
         while not self._stop_event.is_set():
             try:
                 fn()
@@ -84,16 +93,29 @@ class Scheduler:
             self._evaluate_kpi_alerts(data)
             logger.debug(f"{len(data)} medições de KPI inseridas")
 
-    def _collect_vips(self):
+    def _collect_vips(self) -> int:
         if not self._collector:
-            return
-        data = self._collector.collect_vips()
-        if data:
-            db.insert_vip_batch(data)
-            self._evaluate_vip_alerts(data)
-            logger.debug(f"{len(data)} medições de VIP inseridas")
-        else:
-            logger.warning("Coleta de VIPs retornou vazio — nenhuma medição inserida neste ciclo")
+            return 0
+        # Serializa para evitar coleta concorrente (ciclo agendado vs. refresh manual).
+        with self._vip_lock:
+            data = self._collector.collect_vips()
+            if data:
+                db.insert_vip_batch(data)
+                self._evaluate_vip_alerts(data)
+                logger.debug(f"{len(data)} medições de VIP inseridas")
+            else:
+                logger.warning("Coleta de VIPs retornou vazio — nenhuma medição inserida neste ciclo")
+            return len(data)
+
+    def collect_vips_now(self) -> int:
+        """Coleta de VIPs sob demanda (botão de refresh do painel). Retorna nº de medições."""
+        count = self._collect_vips()
+        if self._on_update:
+            try:
+                self._on_update()
+            except Exception:
+                pass
+        return count
 
     def _evaluate_kpi_alerts(self, measurements: list):
         if not self._event_config:

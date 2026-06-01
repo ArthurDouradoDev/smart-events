@@ -25,6 +25,7 @@ def main():
                         help="Módulo a renovar (trace, monitoring ou both)")
     parser.add_argument("--base-url", default="https://10.220.50.9:31943", help="URL base do iManager")
     parser.add_argument("--session-file", default=None, help="Caminho do arquivo de sessão de saída")
+    parser.add_argument("--region", default="", help="Regional do OSS (SP, RJ, …) para escolher as credenciais")
     args = parser.parse_args()
 
     return run(
@@ -32,6 +33,7 @@ def main():
         module=args.module,
         base_url=args.base_url,
         session_file=args.session_file,
+        region=args.region,
     )
 
 

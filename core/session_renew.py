@@ -21,9 +21,45 @@ from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
-# Credenciais do iManager (uso interno).
-USERNAME = "T3524545"
-PASSWORD = "41140362@del02"
+# Credenciais do iManager por regional. Cada OSS (SP, RJ, …) tem sua conta própria.
+# Precedência de resolução (ver _resolve_credentials): data/credentials.json[REGIÃO]
+# → _REGIONAL_CREDENTIALS[REGIÃO] → defaults. O arquivo externo permite trocar a conta
+# de uma regional SEM recompilar o .exe portátil.
+_DEFAULT_USERNAME = "T3524545"
+_DEFAULT_PASSWORD = "41140362@del02"
+_REGIONAL_CREDENTIALS = {
+    "SP": {"username": "T3524545", "password": "41140362@del02"},
+    # Conta dedicada da regional RJ — preencha aqui ou em data/credentials.json:
+    "RJ": {"username": "", "password": ""},
+}
+
+
+def _credentials_file() -> Path:
+    return Path(__file__).parent.parent / "data" / "credentials.json"
+
+
+def _resolve_credentials(region: str = "", base_url: str = "") -> tuple:
+    """Resolve (username, password) da regional. Precedência:
+    data/credentials.json[REGIÃO] → _REGIONAL_CREDENTIALS[REGIÃO] → defaults."""
+    region = (region or "").upper()
+    try:
+        f = _credentials_file()
+        if f.exists():
+            data = json.loads(f.read_text(encoding="utf-8"))
+            entry = data.get(region) or {}
+            if entry.get("username") and entry.get("password"):
+                return entry["username"], entry["password"]
+    except Exception as e:
+        logger.warning(f"Não foi possível ler credentials.json: {e}")
+    entry = _REGIONAL_CREDENTIALS.get(region) or {}
+    if entry.get("username") and entry.get("password"):
+        return entry["username"], entry["password"]
+    return _DEFAULT_USERNAME, _DEFAULT_PASSWORD
+
+# Códigos de saída — o collector os usa para diferenciar a causa da falha.
+EXIT_SUCCESS = 0           # sessão renovada E autenticada (sonda REST OK)
+EXIT_GENERIC_FAIL = 1      # falha genérica (erro de execução, sem tokens, etc.)
+EXIT_NEEDS_INTERACTIVE = 2 # login bloqueado por CAPTCHA/SSO — requer reauth interativa
 
 
 def _ensure_browsers_path():
@@ -47,14 +83,75 @@ def _extract_task_id_from_url(url: str):
     return None
 
 
+def _still_on_login(page) -> bool:
+    """True se a página ainda está no formulário de login do SSO (login não concluído)."""
+    try:
+        url = (page.url or "").lower()
+        if "unisso" in url or "login.action" in url:
+            return True
+    except Exception:
+        # Página possivelmente fechada/inacessível → considerar não-logado.
+        return True
+    try:
+        if page.is_visible("#username"):
+            return True
+    except Exception:
+        pass
+    return False
+
+
+def _is_auth_response(status: int, content_type: str, body: str) -> bool:
+    """Heurística (espelha collector._check_session_valid): resposta JSON = sessão
+    autenticada; redirecionamento HTML para o SSO/CAPTCHA = não-autenticada."""
+    if status in (401, 403):
+        return False
+    if "text/html" in (content_type or "").lower():
+        low = (body or "")[:2000].lower()
+        if any(k in low for k in ("login", "sso", "unisso", "authentication", "verifycode", "captcha")):
+            return False
+    return True
+
+
+def _probe_authenticated(page, base_url: str, module: str, session_data: dict) -> bool:
+    """Bate em um endpoint REST com os cookies VIVOS do navegador (page.request
+    compartilha o cookie store do contexto) para confirmar que a sessão está de
+    fato autenticada, e não presa no SSO/CAPTCHA. Retorna True só se autenticada."""
+    roarand = session_data["trace"].get("roarand") or session_data["monitoring"].get("roarand")
+    headers = {"roarand": roarand} if roarand else {}
+    # Cookies são compartilhados entre os módulos (mesmo bspsession), então uma
+    # única sonda confirma a autenticação para 'trace', 'monitoring' ou 'both'.
+    task_id = session_data["trace"].get("task_id") or session_data["monitoring"].get("task_id") or 1
+    nocache = int(time.time() * 1000)
+    probe_url = (f"{base_url}/rest/oss/access/fars/v1/traceresult/pre-check"
+                 f"?taskId={task_id}&queryType=0&nocache={nocache}")
+    try:
+        resp = page.request.get(probe_url, headers=headers, timeout=30000)
+        try:
+            ctype = resp.headers.get("content-type", "")
+        except Exception:
+            ctype = ""
+        try:
+            body = resp.text()
+        except Exception:
+            body = ""
+        return _is_auth_response(resp.status, ctype, body)
+    except Exception as e:
+        logger.warning(f"Sonda de autenticação falhou: {e}")
+        return False
+
+
 def run(headless: bool = True, module: str = "both",
         base_url: str = "https://10.220.50.9:31943",
-        session_file: str = None) -> int:
+        session_file: str = None, region: str = "") -> int:
     """
-    Renova a sessão do iManager. Retorna 0 em sucesso, 1 em falha.
+    Renova a sessão do iManager. Retorna EXIT_SUCCESS/EXIT_GENERIC_FAIL/EXIT_NEEDS_INTERACTIVE.
     `module`: 'trace' | 'monitoring' | 'both'.
+    `region`: regional do OSS (SP, RJ, …) — define quais credenciais usar.
     """
     _ensure_browsers_path()
+
+    # Credenciais da regional (conta dedicada por OSS).
+    username, password = _resolve_credentials(region, base_url)
 
     # Import tardio: só carrega o Playwright quando a renovação é de fato acionada.
     from playwright.sync_api import sync_playwright, Request
@@ -131,13 +228,16 @@ def run(headless: bool = True, module: str = "both",
         page = context.new_page()
         page.on("request", monitor_requests)
 
-        # 1. Login
+        # 1. Login — preenche as credenciais. O CAPTCHA (código exibido em imagem)
+        #    NÃO pode ser resolvido automaticamente: em headless o login não conclui
+        #    e retornamos EXIT_NEEDS_INTERACTIVE; em modo visível o operador digita o
+        #    CAPTCHA (e ajusta usuário/senha por regional, se preciso) e conclui o login.
         try:
             page.goto(login_url, timeout=30000, wait_until="load")
             page.wait_for_selector("#username", timeout=10000)
-            page.fill("#username", USERNAME)
+            page.fill("#username", username)
             page.wait_for_selector("#value", timeout=10000)
-            page.fill("#value", PASSWORD)
+            page.fill("#value", password)
             page.click("#submitDataverify")
         except Exception as e:
             logger.error(f"Falha no login: {e}")
@@ -145,9 +245,45 @@ def run(headless: bool = True, module: str = "both",
                 browser.close()
             except Exception:
                 pass
-            return 1
+            return EXIT_GENERIC_FAIL
 
-        page.wait_for_timeout(7000)
+        if headless:
+            page.wait_for_timeout(7000)
+            if _still_on_login(page):
+                logger.error(
+                    "Login bloqueado (CAPTCHA/credencial) e não resolvível em modo headless "
+                    "— requer reautenticação interativa (navegador visível)."
+                )
+                try:
+                    browser.close()
+                except Exception:
+                    pass
+                return EXIT_NEEDS_INTERACTIVE
+        else:
+            print("\n" + "*" * 60)
+            print(" REAUTENTICAÇÃO INTERATIVA DO iManager")
+            print(" -> Confira usuário/senha da regional, digite o CÓDIGO DE")
+            print("    VERIFICAÇÃO (CAPTCHA) exibido na imagem e conclua o login.")
+            print("    Aguardando o login ser concluído (até 180s)...")
+            print("*" * 60 + "\n")
+            start = time.time()
+            while time.time() - start < 180:
+                if not browser.is_connected():
+                    break
+                if not _still_on_login(page):
+                    break
+                time.sleep(1)
+            if not browser.is_connected():
+                logger.error("Janela de reautenticação fechada antes de concluir o login.")
+                return EXIT_NEEDS_INTERACTIVE
+            if _still_on_login(page):
+                logger.error("Login interativo não concluído no tempo limite (CAPTCHA não preenchido?).")
+                try:
+                    browser.close()
+                except Exception:
+                    pass
+                return EXIT_NEEDS_INTERACTIVE
+            page.wait_for_timeout(3000)
 
         # 2. Performance Monitor
         if module in ("monitoring", "both"):
@@ -180,11 +316,15 @@ def run(headless: bool = True, module: str = "both",
             session_data["trace"]["bspsession"] = global_bsp
             session_data["monitoring"]["bspsession"] = global_bsp
 
+        # roarand: prioriza o token capturado de uma requisição REST autenticada
+        # (monitor_requests). Só usa o sessionStorage como fallback quando o header
+        # não foi observado — evita enviar um CSRF que o backend REST rejeita.
         try:
             showedrand = page.evaluate("sessionStorage.getItem('u2020Showedrand')")
             if showedrand:
-                session_data["trace"]["roarand"] = showedrand
-                session_data["monitoring"]["roarand"] = showedrand
+                for _m in ("trace", "monitoring"):
+                    if not session_data[_m].get("roarand"):
+                        session_data[_m]["roarand"] = showedrand
         except Exception as e:
             logger.warning(f"Não foi possível ler token do sessionStorage: {e}")
 
@@ -207,22 +347,42 @@ def run(headless: bool = True, module: str = "both",
             except Exception:
                 pass
 
-        # Gravação final
-        trace_ok = session_data["trace"]["bspsession"] is not None and session_data["trace"]["roarand"] is not None
-        mon_ok = session_data["monitoring"]["bspsession"] is not None and session_data["monitoring"]["roarand"] is not None
-
-        if trace_ok or mon_ok:
-            session_path.write_text(json.dumps(session_data, indent=4), encoding="utf-8")
-            logger.info(f"Sessão renovada com sucesso em {session_path}")
-            if not headless:
-                print(f"[SUCESSO] Sessão salva em: {session_path.absolute()}")
-            result = 0
-        else:
+        # ── Verificação de autenticação real ────────────────────────────
+        # Sem tokens não há nem o que validar.
+        tokens_present = (
+            session_data["trace"]["bspsession"] is not None
+            and (session_data["trace"]["roarand"] is not None
+                 or session_data["monitoring"]["roarand"] is not None)
+        )
+        if not tokens_present:
             logger.error("Nenhuma sessão ou token pôde ser capturado.")
-            result = 1
+            try:
+                browser.close()
+            except Exception:
+                pass
+            return EXIT_GENERIC_FAIL
+
+        # Confirma com uma sonda REST que a sessão capturada está autenticada.
+        # Sem isto, uma sessão presa no SSO/CAPTCHA seria gravada como "sucesso" e
+        # o coletor entraria em loop infinito de renovação (bug original).
+        if not _probe_authenticated(page, base_url, module, session_data):
+            logger.error(
+                "Sessão capturada NÃO está autenticada (sonda REST devolveu SSO/HTML). "
+                "Provável CAPTCHA/login incompleto — requer reautenticação interativa."
+            )
+            try:
+                browser.close()
+            except Exception:
+                pass
+            return EXIT_NEEDS_INTERACTIVE
+
+        session_path.write_text(json.dumps(session_data, indent=4), encoding="utf-8")
+        logger.info(f"Sessão renovada e autenticada com sucesso em {session_path}")
+        if not headless:
+            print(f"[SUCESSO] Sessão salva em: {session_path.absolute()}")
 
         try:
             browser.close()
         except Exception:
             pass
-        return result
+        return EXIT_SUCCESS

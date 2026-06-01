@@ -266,6 +266,15 @@ input[type="range"] {
 .icon-btn:hover { background: var(--bg-hover); color: var(--text-primary); }
 .icon-btn .badge { position: absolute; top: 2px; right: 2px; }
 
+/* VPN conectada: ícone verde no header (sem o corte diagonal de "desconectado") */
+.icon-btn.vpn-connected { color: var(--success); }
+.icon-btn.vpn-connected:hover { background: var(--success-bg); color: var(--success); }
+.icon-btn.vpn-connected .wifi-slash { display: none; }
+
+/* VPN desconectada: ícone vermelho pulsante no header */
+.icon-btn.vpn-disconnected { color: var(--danger); animation: pulse-rec 1.4s ease infinite; }
+.icon-btn.vpn-disconnected:hover { background: var(--danger-bg); color: var(--danger); }
+
 /* ── Screens ─────────────────────────────────────────────────────── */
 .screen { display: none; }
 .screen.active { display: flex; }
@@ -455,6 +464,17 @@ input[type="range"] {
   color: var(--text-secondary);
 }
 .panel-meta { font-size: 11px; color: var(--text-muted); }
+
+.panel-header-right {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+#vip-refresh-btn { padding: 2px; line-height: 0; }
+#vip-refresh-btn svg { display: block; }
+#vip-refresh-btn.spinning svg { animation: vip-spin 0.8s linear infinite; }
+#vip-refresh-btn:disabled { opacity: 0.5; cursor: default; }
+@keyframes vip-spin { to { transform: rotate(360deg); } }
 
 #vip-list { flex: 1; overflow-y: auto; }
 
@@ -866,6 +886,15 @@ input[type="range"] {
   border: 1px solid var(--border);
 }
 .alert-ack:hover { color: var(--text-primary); background: var(--bg-hover); }
+.alert-reauth {
+  color: var(--bg-base);
+  background: var(--warning);
+  border-color: var(--warning);
+  font-weight: 600;
+  white-space: nowrap;
+}
+.alert-reauth:hover { color: var(--bg-base); background: #E0A93A; }
+.alert-reauth:disabled { opacity: 0.6; cursor: default; }
 
 /* ── Modal ───────────────────────────────────────────────────────── */
 .modal {
