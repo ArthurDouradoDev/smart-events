@@ -159,7 +159,7 @@ class BaseCollector(ABC):
         ...
 
     @abstractmethod
-    def collect_vips(self) -> List[dict]:
+    def collect_vips(self, mode: str = "express") -> List[dict]:
         """Retorna última leitura de RSRP/RSRQ de cada VIP."""
         ...
 
@@ -233,7 +233,7 @@ class CsvCollector(BaseCollector):
 
         return measurements
 
-    def collect_vips(self) -> List[dict]:
+    def collect_vips(self, mode: str = "express") -> List[dict]:
         # CSV de trace de VIPs foi descontinuado: o esquema atual identifica
         # cada VIP pelo task_id da sua task dedicada no iManager (via HTTP).
         # Se você ainda precisa importar trace de CSV, ele teria que carregar
@@ -326,6 +326,11 @@ class HttpCollector(BaseCollector):
     _interactive_lock = threading.Lock()
     _interactive_cooldown_until = None  # datetime | None
 
+    # Limites de decodificação de mensagens (RRC_MEAS_RPRT) de VIPs
+    _VIP_DECODES_EXPRESS = 3
+    _VIP_DECODES_FULL = 20
+    _VIP_MAX_WORKERS = 3
+
     def __init__(self, event_config: dict, base_url: str, session_cookie: str = ""):
         super().__init__(event_config)
         self.base_url = base_url.rstrip("/")
@@ -397,10 +402,20 @@ class HttpCollector(BaseCollector):
                 "chamadas HTTP podem falhar por falta de autenticação."
             )
 
-        # Carrega cookies
+        # Carrega cookies. Alinhamos o domínio ao host real de self.base_url (o coletor
+        # SEMPRE bate em self.base_url), garantindo que o CookieJar rígido do requests anexe
+        # os cookies mesmo se o evento usar hostname/IP diferente do capturado pelo Playwright.
+        # Preservamos o 'path' para não sobrescrever cookies homônimos de paths distintos.
+        import urllib.parse
+        host = urllib.parse.urlparse(self.base_url).hostname or ""
         cookies = module_data.get("cookies", [])
         for cookie in cookies:
-            sess.cookies.set(cookie["name"], cookie["value"], domain=cookie.get("domain", ""))
+            sess.cookies.set(
+                cookie["name"],
+                cookie["value"],
+                domain=host or cookie.get("domain", ""),
+                path=cookie.get("path", "/"),
+            )
 
         # Adiciona header CSRF (roarand)
         roarand = module_data.get("roarand")
@@ -428,6 +443,12 @@ class HttpCollector(BaseCollector):
         if response.status_code in (401, 403):
             self._log_session_invalid(module, response, "HTTP 401/403")
             return False
+            
+        url_low = (getattr(response, 'url', '') or '').lower()
+        if 'unisso' in url_low or 'login.action' in url_low:
+            self._log_session_invalid(module, response, "redirecionamento HTML (SSO/CAPTCHA via URL)")
+            return False
+            
         ct = response.headers.get("Content-Type", "")
         if "text/html" in ct:
             body_lower = response.text[:2000].lower()
@@ -977,25 +998,138 @@ class HttpCollector(BaseCollector):
     _MAX_MEAS_DECODES_PER_CYCLE = 50
     _TRACE_PAGE_SIZE = 500
 
-    def collect_vips(self) -> List[dict]:
+    def _collect_one_vip(self, task_id: int, vip_name: str, mode: str) -> List[dict]:
         """
-        Coleta resultados de trace via fluxo descoberto na UI do iManager:
-
-          1) GET /traceresult/pre-check?taskId={id}&queryType=0
-             → inicializa a sessão de query no backend FARS
-          2) GET /traceresult/query/result?startRow=0&pageSize=N&taskId={id}&msgId=1&...
-             → retorna {data.tableData[]} com payload em pares name/value
-          3) Para cada RRC_MEAS_RPRT (limitado), GET /traceresult/query/msg-explain-info
-             → traz o JSON decodificado contendo rsrpResult/rsrqResult
-
-        Como cada VIP tem sua própria task de Signaling Trace no iManager,
-        o nome do VIP é resolvido direto pelo task_id (1-para-1) — sem
-        matching por IMSI.
-
-        O endpoint /query/sort (que estava sendo usado antes) é apenas para
-        reordenar resultados de uma sessão JÁ inicializada — chamá-lo sem
-        pre-check retorna 500 "server communication linkage".
+        Executa o fluxo de coleta completo de 4 etapas para um único VIP.
+        Roda em uma thread do ThreadPoolExecutor e usa uma requests.Session exclusiva.
         """
+        s = self._build_session("trace")
+        try:
+            # 1) pre-check: inicializa a sessão de query server-side
+            pre_url = f"{self.base_url}/rest/oss/access/fars/v1/traceresult/pre-check"
+            pre_resp = s.get(pre_url, params={
+                "taskId": task_id,
+                "queryType": 0,
+                "nocache": int(time.time() * 1000),
+            }, timeout=30)
+            if not self._check_session_valid(pre_resp, "trace"):
+                raise SessionExpiredError("Sessão trace expirada no worker (pre-check)")
+            if pre_resp.status_code >= 400:
+                self._handle_trace_error(task_id, "pre-check", pre_resp)
+                return []
+            pre_data = pre_resp.json() if pre_resp.content else {}
+            if not pre_data.get("checkState", False):
+                logger.warning(f"pre-check falhou para task {task_id}: {pre_data}")
+                return []
+
+            # 2) query/result para obter sess_msg_id
+            result_url = f"{self.base_url}/rest/oss/access/fars/v1/traceresult/query/result"
+            result_resp = s.get(result_url, params={
+                "nocache": int(time.time() * 1000),
+                "startRow": 0,
+                "pageSize": 10,
+                "taskId": task_id,
+                "msgId": 1,
+                "isSetBenchMarkTime": "false",
+                "benchMarkTimeRowNo": -1,
+            }, timeout=30)
+            if not self._check_session_valid(result_resp, "trace"):
+                raise SessionExpiredError("Sessão trace expirada no worker (query/result)")
+            if result_resp.status_code >= 400:
+                self._handle_trace_error(task_id, "query/result", result_resp)
+                return []
+
+            result_data = result_resp.json() if result_resp.content else {}
+            data_block = result_data.get("data") or {}
+            if isinstance(data_block, list):
+                logger.warning(f"query/result retornou lista para task {task_id} — sem sess_msg_id")
+                return []
+            sess_msg_id = data_block.get("msgId")
+            if not sess_msg_id:
+                logger.warning(f"Sem sess_msg_id para task {task_id}: {data_block}")
+                return []
+
+            # 3) filter-by-cols — RRC_MEAS_RPRT, mais recente primeiro
+            filter_url = f"{self.base_url}/rest/oss/access/fars/v1/traceresult/query/filter-by-cols"
+            now_ms = int(time.time() * 1000)
+            _now_local = datetime.utcnow()
+            _filter_end   = _now_local.strftime('%Y-%m-%d %H:%M:%S')
+            _filter_start = "2000-01-01 00:00:00"
+            filter_payload = {
+                "colFilterDto": {
+                    "colFltExpSeq": [{
+                        "fieldId": "Message Type",
+                        "value": "RRC_MEAS_RPRT",
+                        "operator": {"op": 0}
+                    }],
+                    "signalList": [],
+                    "hasStartTime": False,
+                    "startTime": _filter_start,
+                    "hasEndTime": False,
+                    "endTime": _filter_end,
+                    "isReverse": False
+                },
+                "pageDto": {
+                    "sqlColumnName": "Time",
+                    "isAscend": False,  # mais recente primeiro
+                    "taskId": task_id,
+                    "msgId": sess_msg_id,
+                    "comparisonMsgId": -1,
+                    "startRow": 0,
+                    "pageSize": 1000,
+                    "templateName": [],
+                    "isSetBenchMarkTime": False,
+                    "benchMarkTimeRowNo": -1
+                }
+            }
+            filter_resp = s.post(
+                filter_url + f"?nocache={now_ms}",
+                json=filter_payload,
+                timeout=60
+            )
+            if not self._check_session_valid(filter_resp, "trace"):
+                raise SessionExpiredError("Sessão trace expirada no worker (filter-by-cols)")
+            if filter_resp.status_code >= 400:
+                self._handle_trace_error(task_id, "filter-by-cols", filter_resp)
+                return []
+
+            # 4) parsing + msg-explain-info para RSRP/RSRQ
+            max_decodes = self._VIP_DECODES_EXPRESS if mode == "express" else self._VIP_DECODES_FULL
+            return self._parse_filtered_trace_response(
+                filter_resp.json(), task_id, s, vip_name, sess_msg_id, max_decodes
+            )
+
+        except (requests.exceptions.ConnectTimeout, requests.exceptions.ConnectionError, requests.exceptions.Timeout) as e:
+            logger.error(f"Erro de conexão ao consultar VIP {vip_name} (taskId={task_id}): {e}")
+            try:
+                active_alerts = db.get_active_alerts(self.event_id)
+                conn_msg = f"Falha de conexão com o iManager (Trace VIP {vip_name}). Verifique a VPN."
+                if not any(a.get("message") == conn_msg for a in active_alerts):
+                    db.insert_alert({
+                        "event_id":  self.event_id,
+                        "level":     "GLOBAL",
+                        "severity":  "CRITICAL",
+                        "site_id":   "GLOBAL",
+                        "cell_id":   "",
+                        "message":   conn_msg,
+                        "timestamp": datetime.utcnow().strftime('%Y-%m-%dT%H:%M:%SZ'),
+                    })
+            except Exception as alert_ex:
+                logger.warning(f"Não foi possível inserir alerta de conexão VIP: {alert_ex}")
+            return []
+        except Exception as e:
+            if not isinstance(e, SessionExpiredError):
+                logger.error(f"Erro ao consultar VIP {vip_name} (taskId={task_id}): {e}")
+            raise
+
+    def collect_vips(self, mode: str = "express") -> List[dict]:
+        """
+        Coleta resultados de trace via fluxo paralelo com ThreadPoolExecutor.
+        Antes da execução paralela, faz um preflight sequencial para garantir e/ou renovar a sessão.
+        """
+        import time
+        start_time = time.time()
+
         self.vips_by_task = self._load_vips_by_task()
         if not self.vips_by_task:
             logger.warning(
@@ -1004,152 +1138,89 @@ class HttpCollector(BaseCollector):
             )
             return []
 
-        measurements = []
-        stop_collection = False
-        for task_id, vip_name in self.vips_by_task.items():
-            retries = 2
-            renewed_this_call = False
-            for attempt in range(retries):
-                s = self._get_session("trace")
-                try:
-                    # 1) pre-check inicializa a sessão de query server-side
-                    pre_url = f"{self.base_url}/rest/oss/access/fars/v1/traceresult/pre-check"
-                    pre_resp = s.get(pre_url, params={
-                        "taskId": task_id,
-                        "queryType": 0,
-                        "nocache": int(time.time() * 1000),
-                    }, timeout=30)
-                    if not self._check_session_valid(pre_resp, "trace"):
-                        raise SessionExpiredError("Sessão trace expirada (pre-check)")
-                    if pre_resp.status_code >= 400:
-                        self._handle_trace_error(task_id, "pre-check", pre_resp)
-                        break
-                    pre_data = pre_resp.json() if pre_resp.content else {}
-                    if not pre_data.get("checkState", False):
-                        logger.warning(
-                            f"pre-check falhou para task {task_id}: {pre_data}"
-                        )
-                        break
-
-                    # 2) query/result para obter sess_msg_id
-                    result_url = f"{self.base_url}/rest/oss/access/fars/v1/traceresult/query/result"
-                    result_resp = s.get(result_url, params={
-                        "nocache": int(time.time() * 1000),
-                        "startRow": 0,
-                        "pageSize": 10,   # mínimo para garantir sess_msg_id e sessão válida para filter-by-cols
-                        "taskId": task_id,
-                        "msgId": 1,
-                        "isSetBenchMarkTime": "false",
-                        "benchMarkTimeRowNo": -1,
-                    }, timeout=30)
-                    if not self._check_session_valid(result_resp, "trace"):
-                        raise SessionExpiredError("Sessão trace expirada (query/result)")
-                    if result_resp.status_code >= 400:
-                        self._handle_trace_error(task_id, "query/result", result_resp)
-                        break
-
-                    result_data = result_resp.json() if result_resp.content else {}
-                    data_block = result_data.get("data") or {}
-                    if isinstance(data_block, list):
-                        logger.warning(f"query/result retornou lista para task {task_id} — sem sess_msg_id")
-                        break
-                    sess_msg_id = data_block.get("msgId")
-                    if not sess_msg_id:
-                        logger.warning(f"Sem sess_msg_id para task {task_id}: {data_block}")
-                        break
-
-                    # 3) filter-by-cols — RRC_MEAS_RPRT, mais recente primeiro
-                    filter_url = f"{self.base_url}/rest/oss/access/fars/v1/traceresult/query/filter-by-cols"
-                    now_ms = int(time.time() * 1000)
-                    # O iManager desserializa startTime/endTime no servidor antes de verificar
-                    # hasStartTime/hasEndTime — enviar string vazia "" causa ROA_EXFRAME_EXCEPTION.
-                    # Usar datas placeholder que abrangem todo o histórico possível.
-                    _now_local = datetime.utcnow()
-                    _filter_end   = _now_local.strftime('%Y-%m-%d %H:%M:%S')
-                    _filter_start = "2000-01-01 00:00:00"
-                    filter_payload = {
-                        "colFilterDto": {
-                            "colFltExpSeq": [{
-                                "fieldId": "Message Type",
-                                "value": "RRC_MEAS_RPRT",
-                                "operator": {"op": 0}
-                            }],
-                            "signalList": [],
-                            "hasStartTime": False,
-                            "startTime": _filter_start,
-                            "hasEndTime": False,
-                            "endTime": _filter_end,
-                            "isReverse": False
-                        },
-                        "pageDto": {
-                            "sqlColumnName": "Time",
-                            "isAscend": False,  # mais recente primeiro
-                            "taskId": task_id,
-                            "msgId": sess_msg_id,
-                            "comparisonMsgId": -1,
-                            "startRow": 0,
-                            "pageSize": 1000,
-                            "templateName": [],
-                            "isSetBenchMarkTime": False,
-                            "benchMarkTimeRowNo": -1
-                        }
-                    }
-                    filter_resp = s.post(
-                        filter_url + f"?nocache={now_ms}",
-                        json=filter_payload,
-                        timeout=60
-                    )
-                    if not self._check_session_valid(filter_resp, "trace"):
-                        raise SessionExpiredError("Sessão trace expirada (filter-by-cols)")
-                    if filter_resp.status_code >= 400:
-                        self._handle_trace_error(task_id, "filter-by-cols", filter_resp)
-                        break
-
-                    # 4) parsing + msg-explain-info para RSRP/RSRQ
-                    measurements.extend(self._parse_filtered_trace_response(
-                        filter_resp.json(), task_id, s, vip_name, sess_msg_id
-                    ))
-                    break
-                except SessionExpiredError as e:
-                    logger.warning(f"Erro de sessão no collect_vips: {e}")
-                    if renewed_this_call:
-                        # Sessão trace renovada mas AINDA inválida → não renovar de novo (evita loop).
-                        self._engage_backoff("trace")
-                        logger.error("Sessão trace renovada mas ainda inválida — pausando coleta de VIPs (backoff).")
-                        stop_collection = True
-                        break
-                    if attempt < retries - 1:
-                        logger.warning("Renovando sessão trace...")
-                        if self._renew_session("trace"):
-                            renewed_this_call = True
-                            continue
-                        # Renovação não efetiva (backoff/CAPTCHA): parar a coleta deste ciclo.
-                        stop_collection = True
-                        break
-                except (requests.exceptions.ConnectTimeout, requests.exceptions.ConnectionError, requests.exceptions.Timeout) as e:
-                    logger.error(f"Erro de conexão ao consultar VIP {vip_name} (taskId={task_id}): {e}")
-                    try:
-                        active_alerts = db.get_active_alerts(self.event_id)
-                        conn_msg = f"Falha de conexão com o iManager (Trace VIP {vip_name}). Verifique a VPN."
-                        if not any(a.get("message") == conn_msg for a in active_alerts):
-                            db.insert_alert({
-                                "event_id":  self.event_id,
-                                "level":     "GLOBAL",
-                                "severity":  "CRITICAL",
-                                "site_id":   "GLOBAL",
-                                "cell_id":   "",
-                                "message":   conn_msg,
-                                "timestamp": datetime.utcnow().strftime('%Y-%m-%dT%H:%M:%SZ'),
-                            })
-                    except Exception as alert_ex:
-                        logger.warning(f"Não foi possível inserir alerta de conexão VIP: {alert_ex}")
-                    break
-                except Exception as e:
-                    logger.error(f"Erro ao consultar VIPs (taskId={task_id}): {e}")
-                    break
-            if stop_collection:
+        # 1) Preflight sequencial: garante que a sessão 'trace' está ativa.
+        # Tenta fazer pre-check com o primeiro task_id do pool.
+        first_task_id = list(self.vips_by_task.keys())[0]
+        preflight_ok = False
+        retries = 2
+        renewed_this_call = False
+        
+        for attempt in range(retries):
+            s = self._get_session("trace")
+            try:
+                pre_url = f"{self.base_url}/rest/oss/access/fars/v1/traceresult/pre-check"
+                pre_resp = s.get(pre_url, params={
+                    "taskId": first_task_id,
+                    "queryType": 0,
+                    "nocache": int(time.time() * 1000),
+                }, timeout=30)
+                if not self._check_session_valid(pre_resp, "trace"):
+                    raise SessionExpiredError("Sessão trace expirada no preflight")
+                preflight_ok = True
                 break
+            except SessionExpiredError as e:
+                logger.warning(f"Sessão expirada no preflight de trace: {e}")
+                if renewed_this_call:
+                    self._engage_backoff("trace")
+                    logger.error("Sessão trace renovada no preflight mas continua inválida (backoff).")
+                    break
+                if attempt < retries - 1:
+                    logger.warning("Iniciando renovação automática da sessão de trace no preflight...")
+                    if self._renew_session("trace"):
+                        renewed_this_call = True
+                        continue
+                    break
+                break
+            except Exception as e:
+                logger.warning(f"Erro inesperado no preflight de trace: {e}")
+                preflight_ok = True
+                break
+                
+        if not preflight_ok:
+            logger.error("Preflight de trace falhou. Abortando ciclo de VIPs.")
+            return []
 
+        # 2) Execução paralela com ThreadPoolExecutor
+        import concurrent.futures
+        measurements = []
+        workers = self._VIP_MAX_WORKERS
+        
+        with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as executor:
+            futures = {
+                executor.submit(self._collect_one_vip, task_id, vip_name, mode): (task_id, vip_name)
+                for task_id, vip_name in self.vips_by_task.items()
+            }
+            
+            for future in concurrent.futures.as_completed(futures):
+                task_id, vip_name = futures[future]
+                try:
+                    res = future.result()
+                    if res:
+                        measurements.extend(res)
+                except SessionExpiredError as e:
+                    logger.warning(f"Worker reportou expiração de sessão para VIP {vip_name}: {e}")
+                except Exception:
+                    pass
+
+        # Calcular contadores de log-resumo
+        elapsed = time.time() - start_time
+        total_vips = len(self.vips_by_task)
+        
+        vips_with_data = set()
+        total_meas = len(measurements)
+        in_event_count = 0
+        for m in measurements:
+            vips_with_data.add(m["vip_name"])
+            if m.get("in_event"):
+                in_event_count += 1
+                
+        num_vips_with_data = len(vips_with_data)
+        
+        logger.info(
+            f"Trace/VIP (modo={mode}): {num_vips_with_data}/{total_vips} VIPs com dados, "
+            f"{total_meas} medições, {in_event_count} no evento, em {elapsed:.2f}s."
+        )
+                    
         return measurements
 
     def _handle_trace_error(self, task_id, step: str, resp: requests.Response):
@@ -1261,12 +1332,12 @@ class HttpCollector(BaseCollector):
         return rows
 
     def _parse_filtered_trace_response(self, response_json: dict, task_id, session,
-                                       vip_name: str, sess_msg_id: int) -> List[dict]:
+                                       vip_name: str, sess_msg_id: int, max_decodes: int = None) -> List[dict]:
         """
         Parse do schema retornado por /traceresult/query/filter-by-cols.
         Como o filter-by-cols já filtrou por Message Type = RRC_MEAS_RPRT,
         não precisamos checar o tipo de mensagem no loop. A ordenação é decrescente
-        por Time (mais recente primeiro), logo os primeiros _MAX_MEAS_DECODES_PER_CYCLE
+        por Time (mais recente primeiro), logo os primeiros max_decodes
         registros serão os mais recentes.
         """
         rows = []
@@ -1279,9 +1350,12 @@ class HttpCollector(BaseCollector):
         if not table:
             return rows
 
+        if max_decodes is None:
+            max_decodes = self._MAX_MEAS_DECODES_PER_CYCLE
+
         decodes_used = 0
         for idx, item in enumerate(table):
-            if decodes_used >= self._MAX_MEAS_DECODES_PER_CYCLE:
+            if decodes_used >= max_decodes:
                 break
             if sess_msg_id is None:
                 continue
@@ -1460,7 +1534,7 @@ class MockCollector(BaseCollector):
                     })
         return rows
 
-    def collect_vips(self) -> List[dict]:
+    def collect_vips(self, mode: str = "express") -> List[dict]:
         import random
         rows = []
         now = datetime.utcnow().strftime('%Y-%m-%dT%H:%M:%SZ')
@@ -1496,7 +1570,7 @@ class NullCollector(BaseCollector):
     def collect_kpis(self) -> List[dict]:
         return []
 
-    def collect_vips(self) -> List[dict]:
+    def collect_vips(self, mode: str = "express") -> List[dict]:
         return []
 
 

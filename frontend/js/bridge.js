@@ -175,6 +175,17 @@ const _mock = {
     { id:2, severity:"WARNING",  site_id:"ERB-07", cell_id:"ERB-07",    message:"RSRP baixo para Ana Rodrigues: -97 dBm", timestamp:new Date().toISOString() },
   ]),
   get_app_status: () => ({ recording:true, db_size_mb:4.2, now:new Date().toISOString() }),
+  get_collection_status: () => {
+    const now = Date.now();
+    return {
+      ok: true,
+      recording: true,
+      kpi: { state:"ok", last_success:new Date(now - 12000).toISOString(), last_count:24, duration_s:0.84, error:null, interval_s:120 },
+      vip: { state:"ok", last_success:new Date(now - 6000).toISOString(),  last_count:30, duration_s:1.20, error:null, interval_s:60, mode:"express", vips_total:5, vips_with_data:4 },
+      session: { needs_interactive:false, region:"SP" },
+      now: new Date(now).toISOString(),
+    };
+  },
   activate_event: (id, mock) => _mock.get_active_event(),
   acknowledge_alert: (id) => ({ ok:true }),
   acknowledge_all_alerts: (eventId) => ({ ok:true }),
@@ -296,6 +307,7 @@ const API = {
   downloadAlertsLog: (eventId)              => API.call("download_alerts_log", eventId),
   silenceAlert:     (key)                   => API.call("silence_alert", key),
   getAppStatus:     ()                      => API.call("get_app_status"),
+  getCollectionStatus: ()                   => API.call("get_collection_status"),
   openFileDialog:   ()                      => API.call("open_file_dialog"),
   getEventTimestamps: (eventId)             => API.call("get_event_timestamps", eventId),
   syncEvents:       ()                       => API.call("sync_events"),

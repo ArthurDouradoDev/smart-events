@@ -833,6 +833,31 @@ class Api:
             "now":        datetime.utcnow().isoformat(),
         }
 
+    def get_collection_status(self) -> dict:
+        """Estado das coletas (KPI/VIP) + sessão, para o indicador de sincronização do header."""
+        try:
+            status = scheduler.get_status()
+            coll = scheduler._collector
+            region = getattr(coll, "_region", "") or ""
+            needs_interactive = False
+            try:
+                from core.collector import HttpCollector
+                if isinstance(coll, HttpCollector):
+                    needs_interactive = bool(HttpCollector._needs_interactive)
+            except Exception:
+                pass
+            return {
+                "ok":         True,
+                "recording":  scheduler.is_recording,
+                "kpi":        status["kpi"],
+                "vip":        status["vip"],
+                "session":    {"needs_interactive": needs_interactive, "region": region},
+                "now":        datetime.utcnow().isoformat(),
+            }
+        except Exception as e:
+            logger.error(f"get_collection_status error: {e}")
+            return {"ok": False, "error": str(e)}
+
     def open_file_dialog(self) -> dict:
         """Abre seletor de arquivo para carregar JSON de evento."""
         import webview

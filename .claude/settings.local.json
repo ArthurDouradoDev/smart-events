@@ -60,7 +60,13 @@
       "PowerShell(node --check frontend/js/app.js 2>&1)",
       "PowerShell(\"checked\")",
       "PowerShell(foreach \\($f in @\\(\"frontend/js/alerts.js\",\"frontend/js/bridge.js\",\"frontend/js/app.js\"\\)\\) { node --check $f; if \\($?\\) { \"OK $f\" } else { \"FAIL $f\" } })",
-      "PowerShell(python -m py_compile core/session_renew.py core/collector.py api/api.py main.py scratch/get_session.py; if \\($?\\) { foreach \\($f in @\\(\"frontend/js/alerts.js\",\"frontend/js/bridge.js\"\\)\\) { node --check $f } ; if \\($?\\) { python -c \"import core.collector, api.api, main; print\\('imports OK'\\)\" } })"
+      "PowerShell(python -m py_compile core/session_renew.py core/collector.py api/api.py main.py scratch/get_session.py; if \\($?\\) { foreach \\($f in @\\(\"frontend/js/alerts.js\",\"frontend/js/bridge.js\"\\)\\) { node --check $f } ; if \\($?\\) { python -c \"import core.collector, api.api, main; print\\('imports OK'\\)\" } })",
+      "PowerShell(python -m py_compile core/session_renew.py)",
+      "PowerShell(python -m py_compile core/scheduler.py api/api.py)",
+      "PowerShell(node --check frontend/js/app.js)",
+      "PowerShell(python -c \"import ast; ast.parse\\(open\\('core/session_renew.py',encoding='utf-8'\\).read\\(\\)\\); print\\('OK'\\)\")",
+      "Bash(grep -rn \"files\\\\\\\\\\\\\\\\main\\\\|files/main\\\\|main.py\" main.spec)",
+      "PowerShell(python -c \"import ast; ast.parse\\(open\\('main.py',encoding='utf-8'\\).read\\(\\)\\); ast.parse\\(open\\('core/session_renew.py',encoding='utf-8'\\).read\\(\\)\\); print\\('OK'\\)\")"
     ]
   }
 }

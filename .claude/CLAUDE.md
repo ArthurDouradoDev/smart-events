@@ -20,6 +20,7 @@ python main.py --mock --dev # Dev + DevTools aberto na janela
 - `logger = logging.getLogger(__name__)` em cada módulo.
 - Métodos da classe `Api` retornam sempre `dict` com `{"ok": bool, ...}` ou `list`.
 - Nunca levantar exceção nos métodos da `Api` — capturar e retornar `{"ok": False, "error": str(e)}`.
+- Sondas de sessão do iManager devem inspecionar a URL da resposta para detectar redirecionamentos SSO (`unisso` ou `login.action`), pois a página de login pode retornar HTTP 200 com HTML longo, inviabilizando a busca simples por palavras-chave nos primeiros 2000 caracteres do corpo.
 
 **JavaScript:**
 - ES Modules (`import/export`), sem bundler.

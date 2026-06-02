@@ -46,6 +46,13 @@
         <span class="rec-dot"></span>
         <span id="rec-size">REC 0 MB</span>
       </div>
+      <div id="sync-indicator" class="sync hidden" title="Atualizando dados…">
+        <svg class="sync-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M23 4v6h-6"></path>
+          <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"></path>
+        </svg>
+        <span id="sync-label">—</span>
+      </div>
       <button id="vpn-status-icon" class="icon-btn vpn-disconnected hidden"
         title="VPN desconectada — clique para verificar">
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
@@ -413,6 +420,19 @@
       </div>
       <div id="vip-modal-no-data" class="hidden" style="text-align:center;color:var(--text-secondary);font-size:12px;padding:20px 0;">
         Sem medições coletadas para este VIP.
+      </div>
+    </div>
+  </div>
+
+  <!-- ── POPUP STATUS DE COLETA ─────────────────────────────────── -->
+  <div id="sync-modal" class="modal hidden">
+    <div class="modal-box">
+      <div style="display:flex;align-items:center;gap:10px;margin-bottom:16px;">
+        <h3 class="modal-title" style="flex:1;margin:0;">Status de coleta</h3>
+        <button id="sync-modal-close" class="icon-btn">&#10005;</button>
+      </div>
+      <div id="sync-modal-body">
+        <!-- Renderizado por app.js -->
       </div>
     </div>
   </div>

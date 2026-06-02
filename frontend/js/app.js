@@ -13,10 +13,14 @@ import { initLogs } from "./logs.js";
 
 const POLL_INTERVAL_MS = 30_000; // 30s: busca dados atualizados no banco local
 const VPN_CHECK_INTERVAL_MS = 15 * 60 * 1000; // 15min: verifica conexão com a VPN
+const SYNC_POLL_INTERVAL_MS = 5_000; // 5s: poll leve do status de coleta (indicador no header)
 
 let _pollTimer = null;
 let _eventTimer = null;
 let _vpnTimer = null;
+let _syncTimer = null;
+let _lastSyncStatus = null;
+let _syncAuthPopupShown = false; // evita reabrir o popup a cada poll após o usuário fechá-lo
 let _historicalTimestamps = [];
 let _historicalIndex = -1;
 
@@ -37,6 +41,7 @@ async function boot() {
   _setupEventDropdown();
   _setupClearHistoryModal();
   _setupVpnMonitor();
+  _setupSyncIndicator();
 
   // Mostra a tela de espera enquanto o servidor local sobe e a sincronização ocorre.
   _enterStandbyMode();
@@ -66,6 +71,7 @@ function _enterStandbyMode() {
   document.getElementById("event-badge").classList.add("hidden");
   document.getElementById("event-timer").classList.add("hidden");
   document.getElementById("rec-indicator").classList.add("hidden");
+  _stopSyncPolling();
 }
 
 async function _enterActiveMode(event) {
@@ -114,6 +120,7 @@ async function _enterActiveMode(event) {
 
   // Inicia polling periódico
   _startPolling();
+  _startSyncPolling();
 }
 
 async function _enterHistoricalMode(event) {
@@ -125,6 +132,7 @@ async function _enterHistoricalMode(event) {
     clearInterval(_eventTimer);
     _eventTimer = null;
   }
+  _stopSyncPolling();
 
   const timestamps = await API.getEventTimestamps(event.id);
   if (!timestamps || !timestamps.length) {
@@ -743,6 +751,207 @@ async function _switchEvent(event) {
   } else if (["ENDED", "ARCHIVED"].includes(event.status)) {
     await _enterHistoricalMode(event);
   }
+}
+
+// ── Indicador de Sincronização (status de coleta) ─────────────────
+
+function _esc(s) {
+  if (s == null) return "";
+  return String(s).replace(/[&<>"']/g, c =>
+    ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+}
+
+// Interpreta um ISO sem timezone como UTC (o backend usa datetime.utcnow()).
+function _parseUtc(iso) {
+  if (!iso) return null;
+  let s = iso;
+  if (!/[zZ]$/.test(s) && !/[+-]\d{2}:\d{2}$/.test(s)) s += "Z";
+  const d = new Date(s);
+  return isNaN(d.getTime()) ? null : d;
+}
+
+function _agoLabel(date) {
+  const sec = Math.max(0, Math.round((Date.now() - date.getTime()) / 1000));
+  if (sec < 60) return `há ${sec}s`;
+  const min = Math.floor(sec / 60);
+  if (min < 60) return `há ${min}m`;
+  return `há ${Math.floor(min / 60)}h`;
+}
+
+function _setupSyncIndicator() {
+  const ind = document.getElementById("sync-indicator");
+  const modal = document.getElementById("sync-modal");
+  const closeBtn = document.getElementById("sync-modal-close");
+  if (!ind || !modal) return;
+
+  ind.addEventListener("click", () => {
+    if (_lastSyncStatus) _renderSyncModal(_lastSyncStatus);
+    modal.classList.remove("hidden");
+  });
+  closeBtn?.addEventListener("click", () => modal.classList.add("hidden"));
+  modal.addEventListener("click", (e) => {
+    if (e.target === modal) modal.classList.add("hidden");
+  });
+
+  // Delegação: o corpo do popup é re-renderizado a cada poll, então o botão
+  // "Reconectar" é tratado por delegação no container fixo.
+  document.getElementById("sync-modal-body")?.addEventListener("click", (e) => {
+    const btn = e.target.closest(".sync-reauth");
+    if (btn) _handleSyncReauth(btn);
+  });
+}
+
+async function _handleSyncReauth(btn) {
+  const original = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = "Abrindo login…";
+  try {
+    const res = await API.reauthSession();
+    if (res && res.ok) {
+      alert("Sessão reautenticada com sucesso.\nA coleta será retomada no próximo ciclo.");
+      _pollSyncStatus();
+    } else {
+      alert(`Reautenticação não concluída.\n${res ? (res.error || "") : "Erro desconhecido."}`);
+    }
+  } catch (err) {
+    console.error("Erro na reautenticação:", err);
+    alert("Erro ao reautenticar sessão.");
+  } finally {
+    btn.disabled = false;
+    btn.textContent = original;
+  }
+}
+
+function _startSyncPolling() {
+  if (_syncTimer) clearInterval(_syncTimer);
+  _pollSyncStatus();
+  _syncTimer = setInterval(_pollSyncStatus, SYNC_POLL_INTERVAL_MS);
+}
+
+function _stopSyncPolling() {
+  if (_syncTimer) {
+    clearInterval(_syncTimer);
+    _syncTimer = null;
+  }
+  document.getElementById("sync-indicator")?.classList.add("hidden");
+  document.getElementById("sync-modal")?.classList.add("hidden");
+  _syncAuthPopupShown = false;
+}
+
+async function _pollSyncStatus() {
+  if (State.mode !== "active") return;
+  try {
+    const st = await API.getCollectionStatus();
+    if (!st || !st.ok) return;
+    _lastSyncStatus = st;
+    _renderSyncIndicator(st);
+    const modal = document.getElementById("sync-modal");
+
+    // Sessão inativa (requer reautenticação): abre o popup automaticamente uma vez.
+    const needsAuth = !!(st.session && st.session.needs_interactive);
+    if (needsAuth && !_syncAuthPopupShown) {
+      _syncAuthPopupShown = true;
+      modal?.classList.remove("hidden");
+    } else if (!needsAuth) {
+      _syncAuthPopupShown = false;
+    }
+
+    if (modal && !modal.classList.contains("hidden")) _renderSyncModal(st);
+  } catch (err) {
+    console.error("Erro no poll de status de coleta:", err);
+  }
+}
+
+function _renderSyncIndicator(st) {
+  const el = document.getElementById("sync-indicator");
+  if (!el) return;
+  el.classList.remove("hidden");
+
+  const running = st.kpi.state === "running" || st.vip.state === "running";
+  const needsAuth = !!(st.session && st.session.needs_interactive);
+  const label = document.getElementById("sync-label");
+
+  el.classList.toggle("syncing", running && !needsAuth);
+  el.classList.toggle("needs-auth", needsAuth);
+
+  if (needsAuth) {
+    label.textContent = "Reautenticar";
+    el.title = "Reautenticação necessária — clique para detalhes";
+    return;
+  }
+  if (running) {
+    label.textContent = "Atualizando…";
+    el.title = "Atualizando dados…";
+    return;
+  }
+
+  const k = _parseUtc(st.kpi.last_success);
+  const v = _parseUtc(st.vip.last_success);
+  if (v && (!k || v >= k)) label.textContent = `VIP ${_agoLabel(v)}`;
+  else if (k) label.textContent = `KPI ${_agoLabel(k)}`;
+  else label.textContent = "—";
+  el.title = "Status de coleta — clique para detalhes";
+}
+
+function _stateInfo(state) {
+  switch (state) {
+    case "running": return { cls: "st-running", label: "Coletando…" };
+    case "ok":      return { cls: "st-ok",      label: "OK" };
+    case "error":   return { cls: "st-error",   label: "Erro" };
+    default:        return { cls: "st-idle",    label: "Aguardando" };
+  }
+}
+
+function _syncRow(label, valueHtml) {
+  return `<div class="sync-row"><span class="sync-row-label">${label}</span><span class="sync-row-val">${valueHtml}</span></div>`;
+}
+
+function _nextCycleText(s) {
+  const last = _parseUtc(s.last_success);
+  if (!last || !s.interval_s) return "—";
+  const rem = Math.round((last.getTime() + s.interval_s * 1000 - Date.now()) / 1000);
+  return rem <= 0 ? "agora" : `em ~${rem}s`;
+}
+
+function _syncSection(title, s, isVip) {
+  const info = _stateInfo(s.state);
+  const last = _parseUtc(s.last_success);
+  let rows = _syncRow("Status",
+    `<span class="sync-dot ${info.cls}"></span>${info.label}${last ? " · " + _agoLabel(last) : ""}`);
+  if (isVip) {
+    const modeLabel = s.mode === "full" ? "completo" : (s.mode === "express" ? "expresso" : "—");
+    rows += _syncRow("Modo", modeLabel);
+    rows += _syncRow("VIPs com dados", `${s.vips_with_data}/${s.vips_total}`);
+  }
+  const meas = `${s.last_count}${s.duration_s != null ? " · " + s.duration_s + "s" : ""}`;
+  rows += _syncRow("Medições", meas);
+  rows += _syncRow("Próximo ciclo", _nextCycleText(s));
+  if (s.error) rows += _syncRow("Erro", `<span class="sync-err">${_esc(s.error)}</span>`);
+  return `<div class="sync-section"><div class="sync-section-title">${title}</div>${rows}</div>`;
+}
+
+function _syncSessionSection(sess) {
+  if (!sess) return "";
+  const region = sess.region ? _esc(sess.region) : "—";
+  const needsAuth = !!sess.needs_interactive;
+  const stateVal = needsAuth
+    ? `<span class="sync-dot st-error"></span>Reautenticação necessária`
+    : `<span class="sync-dot st-ok"></span>OK`;
+  let html = `<div class="sync-section"><div class="sync-section-title">Sessão</div>` +
+    _syncRow("Região", region) + _syncRow("Estado", stateVal);
+  if (needsAuth) {
+    html += `<div class="sync-reauth-wrap"><button class="btn btn-primary sync-reauth">Reconectar sessão</button></div>`;
+  }
+  return html + `</div>`;
+}
+
+function _renderSyncModal(st) {
+  const body = document.getElementById("sync-modal-body");
+  if (!body) return;
+  body.innerHTML =
+    _syncSection("KPI (sites)", st.kpi, false) +
+    _syncSection("VIPs (rastreamento)", st.vip, true) +
+    _syncSessionSection(st.session);
 }
 
 // ── Init ──────────────────────────────────────────────────────────

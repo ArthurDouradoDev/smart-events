@@ -183,3 +183,62 @@ Consulte as regras de modificação rápida:
   2. Ajustar a sanitização em `api/api.py` -> `_sanitize_event()`.
   3. Atualizar `events/sample_event.json`.
 - **Mapeamento de Importação de Sites (Servidor Central)**: Modificar a estrutura de sinônimos/aliases no dicionário `col_mappings` em `server.py` (linha ~90).
+
+## Diretrizes de Desenvolvimento e Regras do Agente
+
+### Conformidade com o CLAUDE.md
+- **[Decisão 2026-06-01]** O agente deve seguir estritamente todas as diretrizes comportamentais e convenções definidas em [.claude/CLAUDE.md](file:///.claude/CLAUDE.md) em todas as sessões e interações com este projeto. Isso inclui os modos de execução, convenções de código (Python/JS), processos de design simples e cirúrgico, documentação em MEMORY.md/ERRORS.md, e a verificação contínua antes de finalizar tarefas.
+
+## Registro de Atividades / Sessões
+
+### [Sessão 2026-06-01] Correção do Navegador Playwright no Executável (.exe)
+- **O que foi feito:** 
+  - Atualização do arquivo [main.spec](file:///c:/Users/a50057663/Desktop/Automa%C3%A7%C3%B5es/SmartEvents/main.spec) para incluir a pasta do Chromium completo (`chromium-1223`) nos diretórios do Playwright empacotados (`_browser_dirs`).
+  - Execução bem-sucedida do script [build.py](file:///c:/Users/a50057663/Desktop/Automa%C3%A7%C3%B5es/SmartEvents/build.py) no ambiente virtual `.venv` para gerar o executável final em `dist/main.exe` (369.4 MB).
+  - Adicionado compromisso explícito na seção `Diretrizes de Desenvolvimento e Regras do Agente` para sempre seguir as convenções de [.claude/CLAUDE.md](file:///.claude/CLAUDE.md).
+- **Status:** Sucesso completo. O Chromium completo agora está embutido no executável, habilitando o modo visível (`headless=False`) para o fluxo de reautenticação com CAPTCHA do iManager.
+
+### [Sessão 2026-06-01] Coleta VIP Rápida com Modos Expresso/Completo e Paralelismo Cauteloso
+- **O que foi feito:**
+  - Adicionadas constantes de controle de decodes (`_VIP_DECODES_EXPRESS = 3`, `_VIP_DECODES_FULL = 20`) e limite de concorrência (`_VIP_MAX_WORKERS = 3`) em `HttpCollector`.
+  - Assinaturas de `collect_vips` e subclasses atualizadas para receber `mode: str = "express"`.
+  - Implementado preflight sequencial de sessão e fan-out paralelo de coleta de VIPs por meio de `ThreadPoolExecutor` com requests.Session individuais no `HttpCollector`.
+  - Atualizado `Scheduler` para alternar dinamicamente entre modos `express` e `full` (a cada 10 min) e forçar `express` no refresh sob demanda.
+  - Implementado o **log-resumo de VIPs** ao final de `collect_vips` no `HttpCollector` contendo contadores e tempo de processamento.
+- **Status:** Sucesso completo. O tempo de ciclo VIP foi otimizado radicalmente no modo expresso (de minutos para poucos segundos no iManager), o paralelismo foi controlado para evitar erros concorrentes no iManager FARS, e as métricas do ciclo de VIP agora são auditáveis com logs precisos.
+
+
+### [Sessão 2026-06-01] Perfil persistente do Playwright na reautenticação (corrige lentidão ~3x + captura de tokens)
+- **O que foi feito:** Em `core/session_renew.run`, troquei o navegador de perfil descartável (`p.chromium.launch()` + `new_context()`) por **perfil persistente** `p.chromium.launch_persistent_context("data/browser_profile", …)`. Isso mantém o cache de disco do Chromium quente entre execuções (a SPA pesada do iManager carregava ~3x mais devagar com cache vazio, fazendo os waits de PM/Trace expirarem antes do `roarand` ser capturado → rc=1 "Nenhuma sessão ou token"). Helper `_alive()` substitui `browser.is_connected()` (robusto a `context.browser` None); `browser.close()` → `context.close()`. O `run` agora sonda autenticação após `goto(login_url)` e pula o login (`already_auth`) se o perfil já estiver autenticado.
+- **Arquivos:** `core/session_renew.py`. Novo diretório `data/browser_profile/` (já coberto por `data/` no .gitignore).
+- **Status:** Implementado; sintaxe validada. Falta validar em runtime com VPN do cliente (observar tempo de carregamento e captura de bspsession/roarand).
+
+
+### [Sessão 2026-06-01] Status de coleta no backend + indicador de sincronização no header (plano VIP, pontos 4 e 5)
+- **O que foi feito:**
+  - `Scheduler` mantém `self._status` (sub-dicts `kpi`/`vip`) atualizado em volta de cada coleta: `state` (idle/running/ok/error), `last_success`, `last_count`, `duration_s`, `error`, `interval_s`; para VIP também `mode`, `vips_total`, `vips_with_data`. Resetado em `start()`. Novo método `Scheduler.get_status()` retorna snapshot.
+  - Novo `Api.get_collection_status()` → `{ok, recording, kpi, vip, session:{needs_interactive, region}, now}`. `needs_interactive` vem de `HttpCollector._needs_interactive`; `region` de `collector._region`. Segue convenção da Api (sempre dict).
+  - Frontend: `#sync-indicator` no header (ícone gira enquanto coleta roda, mostra "VIP há 12s"/"Reautenticar"; clique abre `#sync-modal` com KPI/VIP/sessão/próximo ciclo). `app.js` faz poll leve de 5s (`_pollSyncStatus`) só em modo ativo; `bridge.js` ganhou `getCollectionStatus()` + mock. Datas UTC naïve do backend tratadas via `_parseUtc` (anexa "Z").
+- **Status:** Implementado; sintaxe Python e JS validada. Falta validar em runtime (UI e VPN).
+
+### [Sessão 2026-06-01] Estabilidade de login: credenciais regionais, fechamento rápido pós-login e persistência de sessão
+- **Issue 1 — credenciais de SP no login do RJ:** `core/session_renew._resolve_credentials` agora só usa os defaults (conta SP) quando `region in ("", "SP")`. Para regional diferente sem conta, devolve credenciais vazias (login em branco p/ o operador) e loga aviso para configurar `data/credentials.json["RJ"]`. Nunca usar a conta de uma regional como fallback de outra.
+- **Issue 2 — navegador ficava ~80s aberto após login:** caminho `fast_capture = already_auth or not headless` pula a navegação PM/Trace e o bloco de metadados de dev (agora atrás de `SMARTEVENTS_CAPTURE_METADATA=1`); na reauth do operador captura cookies+roarand e fecha logo após a sonda final.
+- **Issue 3 (ROOT CAUSE) — pedia login a cada início:** `main.py` chamava `webview.start(storage_path=data/)` sem `private_mode=False`. O pywebview em private_mode (default True) APAGA a storage_path ao fechar → destruía o `session.json` a cada saída. Corrigido com `private_mode=False`; agora `session.json` e `data/browser_profile` persistem e o login só é refeito quando a sessão expira no servidor.
+- **Arquivos:** `core/session_renew.py`, `main.py`. **Pendente:** validar em runtime com VPN do cliente (RJ) — confirmar que (a) não preenche credenciais de SP, (b) fecha rápido após login, (c) ao reabrir o app não pede login se a sessão ainda estiver válida.
+
+### [Sessão 2026-06-02] Correção dos 3 bugs de tratamento de cookies (path / poluição regional / mismatch de domínio)
+- **Bug 1 (path descartado):** `core/session_renew.py` (bloco "4. Cookies e tokens globais") passou a gravar `path` em cada cookie; `core/collector._build_session()` passou a aplicar `path=cookie.get("path", "/")` no `sess.cookies.set(...)`. Sem isso, o `requests` assumia `path="/"` e cookies homônimos (ex.: `JSESSIONID` do SSO `/unisso` vs. da app `/`) se sobrescreviam, enviando o cookie errado e disparando loops de reauth.
+- **Bug 2 (poluição entre regionais):** o perfil do Chromium é compartilhado (`data/browser_profile`), então `context.cookies()` sem filtro vazava cookies de outros OSS no `session.json`. Solução: filtrar por **HOST** da `base_url` (`urllib.parse.urlparse(base_url).hostname`, comparando o `domain` de cada cookie sem ponto inicial). ⚠️ NÃO usar `context.cookies(urls=[base_url])`: o Playwright casa host **E path**, e a `base_url` (path raiz `/`) descarta o `bspsession` quando ele está num path não-raiz → captura vazia e `rc=1` "Nenhuma sessão ou token pôde ser capturado" no reauth interativo do RJ (regressão observada em runtime 2026-06-02 e revertida para filtro por host). Registrado em [ERRORS.md](file:///.claude/ERRORS.md). Com a lista filtrada por host, `bspsessions[0]` é sempre o correto.
+- **Bug 3 (mismatch de domínio do CookieJar):** `_build_session()` agora alinha o `domain` de cada cookie ao host real de `self.base_url` (`urllib.parse.urlparse(self.base_url).hostname`, com `import urllib.parse` local como no resto do módulo), em vez do domínio gravado. Como o coletor SEMPRE bate em `self.base_url`, isso garante que o `requests` anexe os cookies mesmo se o evento usar hostname/IP diferente do capturado pelo Playwright. Fallback para o domínio gravado se o parse falhar.
+- **Compatibilidade:** retrocompatível — `session.json` antigos sem `path` caem no default `"/"`. Estrutura do JSON inalterada (só ganha o campo `path` por cookie).
+- **Arquivos:** `core/session_renew.py`, `core/collector.py`. Origem do diagnóstico: `explicacao-coleta.md`. **Status:** implementado, `py_compile` OK nos dois módulos. **Pendente:** validar em runtime com VPN — inspecionar `data/session_*.json` (cada cookie com `path`, só host da regional) e confirmar ausência de loop de reauth.
+
+### [Sessão 2026-06-02] Correção de falso positivo na sonda REST da sessão (loop de reautenticação)
+- **O que foi feito:**
+  - Corrigido o bug em que a reautenticação manual fechava prematuramente a janela do operador sem de fato obter cookies/tokens logados devido a um falso positivo na detecção de autenticação.
+  - O problema ocorria porque a sonda REST (`_probe_authenticated` no renovador e `_check_session_valid` no coletor) recebia a página de login SSO redirecionada com status HTTP `200 OK`, mas a página HTML possuía uma tag `<head>` extremamente longa (mais de 2000 caracteres), o que empurrava as palavras-chave de login/sso para além do limite de varredura do corpo (2000 caracteres), enganando o sistema a achar que a sessão estava autenticada.
+  - Implementada verificação rígida da URL da resposta (`unisso` ou `login.action`) nas funções `_is_auth_response` em [session_renew.py](file:///c:/Users/a50057663/Desktop/Automa%C3%A7%C3%B5es/SmartEvents/core/session_renew.py) e `_check_session_valid` em [collector.py](file:///c:/Users/a50057663/Desktop/Automa%C3%A7%C3%B5es/SmartEvents/core/collector.py) para classificar o redirecionamento como não-autenticado imediatamente.
+- **Arquivos:** `core/session_renew.py`, `core/collector.py`.
+- **Status:** Sucesso completo. O operador consegue realizar o login e o CAPTCHA normalmente na janela visível e a janela só se fecha após a sonda REST detectar a real autenticação da sessão.
+

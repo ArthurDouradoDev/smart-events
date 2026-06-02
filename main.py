@@ -269,6 +269,12 @@ def main():
         debug=dev_mode,
         http_server=False,   # serve arquivos locais diretamente
         storage_path=str(Path(__file__).parent / "data"),
+        # private_mode=False: o pywebview, em private_mode (default=True), APAGA a
+        # storage_path ao fechar o app. Como a storage_path é a pasta data/, isso
+        # destruía o session.json (cookies/roarand) e o browser_profile a cada
+        # fechamento — forçando novo login a CADA início. Persistindo a sessão, o
+        # login só é refeito quando os cookies realmente expiram no servidor.
+        private_mode=False,
     )
 
 

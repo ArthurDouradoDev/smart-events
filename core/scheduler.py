@@ -5,6 +5,8 @@ Roda em thread separada para não bloquear a interface.
 
 import logging
 import threading
+import time
+from datetime import datetime
 from typing import Callable, Optional
 
 from core import database as db
@@ -14,6 +16,7 @@ logger = logging.getLogger(__name__)
 
 INTERVAL_KPI_SECONDS = 120  # OSS: ciclo de 2 minutos
 INTERVAL_VIP_SECONDS = 60   # Trace: 1 minuto por VIP
+INTERVAL_VIP_FULL_SECONDS = 600  # Ciclo completo de VIP a cada 10 minutos
 KPI_INITIAL_DELAY_SECONDS = 5  # Atraso inicial dos KPIs para os VIPs iniciarem primeiro
 
 
@@ -28,6 +31,27 @@ class Scheduler:
         # Serializa coletas de VIP (ciclo agendado vs. refresh sob demanda) para
         # não rodarem em paralelo sobre a mesma sessão HTTP do iManager.
         self._vip_lock = threading.Lock()
+        self._last_vip_full_time = 0.0  # timestamp da última coleta VIP completa
+        # Estado das coletas para o indicador de sincronização do frontend.
+        # state: "idle" | "running" | "ok" | "error".
+        self._status = {
+            "kpi": {
+                "state": "idle", "last_success": None, "last_count": 0,
+                "duration_s": None, "error": None, "interval_s": INTERVAL_KPI_SECONDS,
+            },
+            "vip": {
+                "state": "idle", "last_success": None, "last_count": 0,
+                "duration_s": None, "error": None, "interval_s": INTERVAL_VIP_SECONDS,
+                "mode": None, "vips_total": 0, "vips_with_data": 0,
+            },
+        }
+
+    def get_status(self) -> dict:
+        """Snapshot do estado das coletas (KPI/VIP) para o indicador de sincronização."""
+        return {
+            "kpi": dict(self._status["kpi"]),
+            "vip": dict(self._status["vip"]),
+        }
 
     def set_update_callback(self, fn: Callable):
         """Define função chamada após cada coleta bem-sucedida."""
@@ -42,6 +66,10 @@ class Scheduler:
         self._collector = build_collector(event_config, mock=mock)
         self._stop_event.clear()
         self._recording = True
+
+        # Zera o estado das coletas ao (re)iniciar para não exibir dados do evento anterior.
+        for k in ("kpi", "vip"):
+            self._status[k].update({"state": "idle", "error": None})
 
         # VIPs iniciam primeiro; os KPIs (sites) entram com um pequeno atraso
         # inicial para garantir que a coleta de VIP arranque antes na abertura.
@@ -87,29 +115,79 @@ class Scheduler:
     def _collect_kpis(self):
         if not self._collector:
             return
-        data = self._collector.collect_kpis()
-        if data:
-            db.insert_kpi_batch(data)
-            self._evaluate_kpi_alerts(data)
-            logger.debug(f"{len(data)} medições de KPI inseridas")
+        self._status["kpi"]["state"] = "running"
+        t0 = time.time()
+        try:
+            data = self._collector.collect_kpis()
+            if data:
+                db.insert_kpi_batch(data)
+                self._evaluate_kpi_alerts(data)
+                logger.debug(f"{len(data)} medições de KPI inseridas")
+            self._status["kpi"].update({
+                "state": "ok",
+                "last_success": datetime.utcnow().isoformat(),
+                "last_count": len(data) if data else 0,
+                "duration_s": round(time.time() - t0, 2),
+                "error": None,
+            })
+        except Exception as e:
+            self._status["kpi"].update({
+                "state": "error",
+                "duration_s": round(time.time() - t0, 2),
+                "error": str(e),
+            })
+            raise
 
-    def _collect_vips(self) -> int:
+    def _collect_vips(self, mode: str = None) -> int:
         if not self._collector:
             return 0
         # Serializa para evitar coleta concorrente (ciclo agendado vs. refresh manual).
         with self._vip_lock:
-            data = self._collector.collect_vips()
-            if data:
-                db.insert_vip_batch(data)
-                self._evaluate_vip_alerts(data)
-                logger.debug(f"{len(data)} medições de VIP inseridas")
-            else:
-                logger.warning("Coleta de VIPs retornou vazio — nenhuma medição inserida neste ciclo")
-            return len(data)
+            if mode is None:
+                now = time.time()
+                if now - self._last_vip_full_time >= INTERVAL_VIP_FULL_SECONDS:
+                    mode = "full"
+                else:
+                    mode = "express"
+
+            self._status["vip"].update({"state": "running", "mode": mode})
+            t0 = time.time()
+            try:
+                logger.info(f"Iniciando coleta de VIPs no modo: {mode}")
+                data = self._collector.collect_vips(mode=mode)
+                if data:
+                    db.insert_vip_batch(data)
+                    self._evaluate_vip_alerts(data)
+                    logger.debug(f"{len(data)} medições de VIP inseridas (modo: {mode})")
+                else:
+                    logger.warning(f"Coleta de VIPs (modo: {mode}) retornou vazio — nenhuma medição inserida neste ciclo")
+
+                if mode == "full":
+                    self._last_vip_full_time = time.time()
+
+                vips_total = len(getattr(self._collector, "vips_by_task", {}) or {})
+                vips_with_data = len({m["vip_name"] for m in data}) if data else 0
+                self._status["vip"].update({
+                    "state": "ok",
+                    "last_success": datetime.utcnow().isoformat(),
+                    "last_count": len(data),
+                    "duration_s": round(time.time() - t0, 2),
+                    "error": None,
+                    "vips_total": vips_total,
+                    "vips_with_data": vips_with_data,
+                })
+                return len(data)
+            except Exception as e:
+                self._status["vip"].update({
+                    "state": "error",
+                    "duration_s": round(time.time() - t0, 2),
+                    "error": str(e),
+                })
+                raise
 
     def collect_vips_now(self) -> int:
         """Coleta de VIPs sob demanda (botão de refresh do painel). Retorna nº de medições."""
-        count = self._collect_vips()
+        count = self._collect_vips(mode="express")
         if self._on_update:
             try:
                 self._on_update()
