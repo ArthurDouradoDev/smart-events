@@ -14,6 +14,7 @@ Para dev/testes: MockCollector gera dados sintéticos (use --mock na linha de co
 import csv
 import json
 import logging
+import os
 import re
 import subprocess
 import threading
@@ -331,6 +332,13 @@ class HttpCollector(BaseCollector):
     _VIP_DECODES_FULL = 20
     _VIP_MAX_WORKERS = 3
 
+    # Diagnóstico HTTP opt-in: quando ligado (HttpCollector.http_debug=True ou env
+    # SMARTEVENTS_HTTP_DEBUG=1), cada requisição das sessões monitoring/trace é logada
+    # (método, status, URL, presença de roarand/bspsession, content-type, body[:600]).
+    # Default DESLIGADO — não afeta o caminho de produção. Usado pelo validador standalone
+    # (tools/oss_validate.py) para expor a causa dos 404 (ver relatorio-erro-404.md, hipótese 3).
+    http_debug: bool = False
+
     def __init__(self, event_config: dict, base_url: str, session_cookie: str = ""):
         super().__init__(event_config)
         self.base_url = base_url.rstrip("/")
@@ -424,7 +432,42 @@ class HttpCollector(BaseCollector):
 
         # Memoriza com qual roarand esta sessão foi construída (detecção de obsolescência).
         self._session_built_roarand[module] = roarand
+
+        # Diagnóstico HTTP opt-in (default desligado) — instrumenta cada chamada.
+        if self._http_debug_enabled():
+            self._install_http_debug(sess, module)
         return sess
+
+    @staticmethod
+    def _http_debug_enabled() -> bool:
+        return HttpCollector.http_debug or os.environ.get("SMARTEVENTS_HTTP_DEBUG") == "1"
+
+    def _install_http_debug(self, sess: requests.Session, module: str):
+        """Anexa um response-hook que loga cada requisição desta sessão. Opt-in.
+        Expõe método/status/URL + presença de roarand/bspsession + corpo, para
+        diagnosticar os 404 do FARS/PM (ex.: CSRF/cookies dropados entre GET e POST —
+        hipótese 3 de relatorio-erro-404.md), sem duplicar a lógica de coleta."""
+        def _hook(response, *args, **kwargs):
+            try:
+                req = response.request
+                cookie_hdr = (req.headers.get("Cookie", "") or "").lower()
+                has_bsp = "bspsession" in cookie_hdr
+                has_roarand = bool(req.headers.get("roarand"))
+                ctype = response.headers.get("Content-Type", "")
+                try:
+                    body = (response.text or "")[:600].replace("\n", " ")
+                except Exception:
+                    body = "(corpo indisponível)"
+                logger.info(
+                    f"[http/{module}] {req.method} {response.status_code} {response.url} "
+                    f"roarand={'sim' if has_roarand else 'NAO'} "
+                    f"bspsession={'sim' if has_bsp else 'NAO'} "
+                    f"ctype={ctype!r} body[:600]={body!r}"
+                )
+            except Exception as e:
+                logger.warning(f"[http/{module}] hook de diagnóstico falhou: {e}")
+            return response
+        sess.hooks["response"].append(_hook)
 
     def _get_session(self, module: str) -> requests.Session:
         """Retorna a sessão ativa para o módulo, criando se necessário."""
@@ -826,7 +869,10 @@ class HttpCollector(BaseCollector):
             "objNoExecTimes": [{"preExecTime": now_ms, "objNo": obj_no} for obj_no in obj_nos] if obj_nos else []
         }]
 
-        url = f"{self.base_url}/rest/oss/access/pm/v1/monitor/task/result?nocache={now_ms}"
+        # NÃO anexar ?nocache= em POST: o proxy/WAF da regional RJ rejeita paths de POST
+        # com query string (404 com página de erro do Tomcat). O corpo já carrega timestamps
+        # frescos (preExecTime=now_ms), então não há risco de cache. Ver relatorio-erro-404.md.
+        url = f"{self.base_url}/rest/oss/access/pm/v1/monitor/task/result"
         retries = 2
         renewed_this_call = False
         for attempt in range(retries):
@@ -1051,7 +1097,6 @@ class HttpCollector(BaseCollector):
 
             # 3) filter-by-cols — RRC_MEAS_RPRT, mais recente primeiro
             filter_url = f"{self.base_url}/rest/oss/access/fars/v1/traceresult/query/filter-by-cols"
-            now_ms = int(time.time() * 1000)
             _now_local = datetime.utcnow()
             _filter_end   = _now_local.strftime('%Y-%m-%d %H:%M:%S')
             _filter_start = "2000-01-01 00:00:00"
@@ -1082,8 +1127,10 @@ class HttpCollector(BaseCollector):
                     "benchMarkTimeRowNo": -1
                 }
             }
+            # POST sem ?nocache= (ver collect_kpis): o proxy da RJ devolve 404/Tomcat
+            # quando há query string em POST. O payload já filtra por Time decrescente.
             filter_resp = s.post(
-                filter_url + f"?nocache={now_ms}",
+                filter_url,
                 json=filter_payload,
                 timeout=60
             )

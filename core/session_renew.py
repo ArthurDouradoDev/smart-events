@@ -291,10 +291,16 @@ def run(headless: bool = True, module: str = "both",
                 page.fill("#username", username)
                 page.wait_for_selector("#value", timeout=10000)
                 page.fill("#value", password)
+
                 if headless:
                     # Em headless submetemos direto (só conclui quando NÃO há CAPTCHA).
                     # No modo interativo NÃO auto-submetemos: o operador digita o CAPTCHA
                     # e clica em entrar — auto-submeter com CAPTCHA vazio só atrapalha.
+                    # NÃO usar heurística de "input visível extra = CAPTCHA": a página de
+                    # login do iManager tem campos visíveis que não são CAPTCHA, gerando
+                    # falso positivo que aborta TODA renovação headless. A detecção honesta
+                    # de CAPTCHA é o bloco pós-submit abaixo (_still_on_login após o submit),
+                    # que só dispara EXIT_NEEDS_INTERACTIVE quando o login realmente não passa.
                     page.click("#submitDataverify")
         except Exception as e:
             logger.error(f"Falha no login: {e}")
