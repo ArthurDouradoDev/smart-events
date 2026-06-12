@@ -48,6 +48,10 @@ document.addEventListener("DOMContentLoaded", () => {
   // Fallback to MOCK mode if still not ready after 1 second
   setTimeout(() => {
     if (!_ready) {
+      if (window.location.hash === "#desktop") {
+        console.log("Running in desktop app. Waiting indefinitely for pywebview...");
+        return;
+      }
       console.log("pywebview not detected. Falling back to MOCK mode.");
       _ready = true;
       MOCK = true;

@@ -425,10 +425,31 @@ class HttpCollector(BaseCollector):
                 path=cookie.get("path", "/"),
             )
 
-        # Adiciona header CSRF (roarand)
-        roarand = module_data.get("roarand")
+        # CSRF (roarand) — DOUBLE-SUBMIT COOKIE: o iManager exige que o header `roarand`
+        # ECOE o valor do COOKIE `roarand`. O servidor compara header == cookie só no POST
+        # (o GET não checa), então um header defasado passa no GET e dá 401 no POST. Por isso
+        # usamos o valor do cookie `roarand`, não o campo roarand gravado à parte (que vinha
+        # de uma requisição antiga e não casava com o cookie). Ver ERRORS.md 2026-06-11.
+        cookie_roarand = next((c["value"] for c in cookies if c.get("name") == "roarand"), None)
+        roarand = cookie_roarand or module_data.get("roarand")
         if roarand:
             sess.headers.update({"roarand": roarand})
+
+        # Headers anti-CSRF que o iManager EXIGE em POST (validação same-origin). Sem eles,
+        # o filtro CSRF rejeita o POST com 302 → /unisess/v1/auth — que o requests segue,
+        # convertendo POST→GET e perdendo o corpo, terminando num 404 enganoso (rota só-POST).
+        # Os GETs não são checados (por isso passavam), mas o navegador real envia esses
+        # headers em TODA chamada XHR same-origin. Referer difere por módulo (PM vs FARS),
+        # conforme as requisições reais capturadas em requests/result-monitoring.txt e
+        # requests/trace/filtered-request.txt.
+        _referer_path = ("/oss/access/pm/index.html" if module == "monitoring"
+                         else "/omc/farswebsite/index.html")
+        sess.headers.update({
+            "Origin": self.base_url,
+            "Referer": f"{self.base_url}{_referer_path}",
+            "Accept": "application/json, text/plain, */*",
+            "X-Requested-With": "XMLHttpRequest",
+        })
 
         # Memoriza com qual roarand esta sessão foi construída (detecção de obsolescência).
         self._session_built_roarand[module] = roarand
@@ -450,19 +471,30 @@ class HttpCollector(BaseCollector):
         def _hook(response, *args, **kwargs):
             try:
                 req = response.request
-                cookie_hdr = (req.headers.get("Cookie", "") or "").lower()
-                has_bsp = "bspsession" in cookie_hdr
-                has_roarand = bool(req.headers.get("roarand"))
+                cookie_hdr = req.headers.get("Cookie", "") or ""
+                req_roarand = (req.headers.get("roarand") or "")[:12]
+                def _bsp(s):
+                    for part in (s or "").split(";"):
+                        part = part.strip()
+                        if part.lower().startswith("bspsession="):
+                            return part.split("=", 1)[1][:14]
+                    return ""
+                req_bsp = _bsp(cookie_hdr)
+                # Set-Cookie da RESPOSTA: se o servidor rotaciona o bspsession aqui, o jar do
+                # requests atualiza e o roarand (estático) deixa de casar → 401 só no POST.
+                set_cookie = response.headers.get("Set-Cookie", "") or ""
+                resp_bsp = _bsp(set_cookie)
+                resp_roarand = (response.headers.get("roarand") or "")[:12]
                 ctype = response.headers.get("Content-Type", "")
                 try:
-                    body = (response.text or "")[:600].replace("\n", " ")
+                    body = (response.text or "")[:200].replace("\n", " ")
                 except Exception:
                     body = "(corpo indisponível)"
                 logger.info(
                     f"[http/{module}] {req.method} {response.status_code} {response.url} "
-                    f"roarand={'sim' if has_roarand else 'NAO'} "
-                    f"bspsession={'sim' if has_bsp else 'NAO'} "
-                    f"ctype={ctype!r} body[:600]={body!r}"
+                    f"req.roarand={req_roarand!r} req.bsp={req_bsp!r} "
+                    f"resp.set_bsp={resp_bsp!r} resp.roarand={resp_roarand!r} "
+                    f"ctype={ctype!r} body[:200]={body!r}"
                 )
             except Exception as e:
                 logger.warning(f"[http/{module}] hook de diagnóstico falhou: {e}")
@@ -486,7 +518,17 @@ class HttpCollector(BaseCollector):
         if response.status_code in (401, 403):
             self._log_session_invalid(module, response, "HTTP 401/403")
             return False
-            
+
+        # Redirecionamento (302) para o SSO num POST com allow_redirects=False: o filtro
+        # anti-CSRF/sessão do iManager rejeitou a requisição. Tratamos como sessão inválida
+        # (dispara renovação) em vez de seguir o redirect e cair num 404 enganoso.
+        if response.status_code in (301, 302, 303, 307, 308):
+            location = (response.headers.get("Location", "") or "").lower()
+            if any(k in location for k in ("unisso", "unisess", "login.action", "/auth")):
+                self._log_session_invalid(module, response,
+                                          f"redirecionamento {response.status_code} → SSO/auth")
+                return False
+
         url_low = (getattr(response, 'url', '') or '').lower()
         if 'unisso' in url_low or 'login.action' in url_low:
             self._log_session_invalid(module, response, "redirecionamento HTML (SSO/CAPTCHA via URL)")
@@ -869,16 +911,16 @@ class HttpCollector(BaseCollector):
             "objNoExecTimes": [{"preExecTime": now_ms, "objNo": obj_no} for obj_no in obj_nos] if obj_nos else []
         }]
 
-        # NÃO anexar ?nocache= em POST: o proxy/WAF da regional RJ rejeita paths de POST
-        # com query string (404 com página de erro do Tomcat). O corpo já carrega timestamps
-        # frescos (preExecTime=now_ms), então não há risco de cache. Ver relatorio-erro-404.md.
+        # POST sem ?nocache= (limpeza inócua — o corpo já leva preExecTime fresco). NÃO era a
+        # causa do 404/401: a causa real era CSRF (header roarand ≠ cookie roarand). Ver ERRORS.md.
         url = f"{self.base_url}/rest/oss/access/pm/v1/monitor/task/result"
         retries = 2
         renewed_this_call = False
         for attempt in range(retries):
             s = self._get_session("monitoring")
             try:
-                resp = s.post(url, json=payload, timeout=30, headers={"x-non-renewal-session": "true"})
+                resp = s.post(url, json=payload, timeout=30,
+                              headers={"x-non-renewal-session": "true"}, allow_redirects=False)
                 if not self._check_session_valid(resp, "monitoring"):
                     raise SessionExpiredError(f"Redirecionamento para SSO detectado no módulo monitoring")
                 resp.raise_for_status()
@@ -1127,12 +1169,13 @@ class HttpCollector(BaseCollector):
                     "benchMarkTimeRowNo": -1
                 }
             }
-            # POST sem ?nocache= (ver collect_kpis): o proxy da RJ devolve 404/Tomcat
-            # quando há query string em POST. O payload já filtra por Time decrescente.
+            # POST sem ?nocache= (limpeza; ver collect_kpis). allow_redirects=False para
+            # detectar 302→SSO como sessão inválida em vez de seguir o redirect → 404 enganoso.
             filter_resp = s.post(
                 filter_url,
                 json=filter_payload,
-                timeout=60
+                timeout=60,
+                allow_redirects=False,
             )
             if not self._check_session_valid(filter_resp, "trace"):
                 raise SessionExpiredError("Sessão trace expirada no worker (filter-by-cols)")

@@ -247,7 +247,7 @@ def main():
 
     window = webview.create_window(
         title="Smart Events",
-        url=str(FRONTEND),
+        url=str(FRONTEND) + "#desktop",
         js_api=api,
         width=1440,
         height=900,
