@@ -1,1 +1,0 @@
-Gere um plano de implementação. O sistema levará em consideração a regional do evento para decidir qual ip usar. Se for SP, deve ser o que já foi implementado. Se for outra, deve ser o novo ip, apresentado em @mae-api.md

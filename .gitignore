@@ -13,7 +13,7 @@ develop-eggs/
 downloads/
 eggs/
 .eggs/
-lib/
+# lib/ removido: conflitava com frontend/lib/ (Chart.js + Leaflet vendored, devem ser rastreados)
 lib64/
 parts/
 sdist/
@@ -30,7 +30,6 @@ env.bak/
 venv.bak/
 
 # --- Database / Dynamic Application Data ---
-# SmartEvents databases are dynamically generated here
 data/
 server_data/
 *.db
@@ -40,7 +39,7 @@ server_data/
 dist/
 build/
 *.manifest
-*.spec
+# *.spec removido: main.spec é o spec do PyInstaller e deve ser rastreado
 
 # --- Logs ---
 *.log
@@ -78,3 +77,10 @@ node_modules/
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
+
+# --- Configurações locais do agente (não commitar; contém permissões de máquina) ---
+.claude/settings.local.json
+
+# --- Espelhos de sites offline (muitos arquivos de assets) ---
+docs/references/npsmart/offline_site/
+docs/references/npsmart/NPSmart Tim_files/

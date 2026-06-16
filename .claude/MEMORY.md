@@ -191,6 +191,27 @@ Consulte as regras de modificação rápida:
 
 ## Registro de Atividades / Sessões
 
+### [Sessão 2026-06-12] Reorganização física do diretório (executada)
+- **Nova estrutura:** `references/` (material base: `requests/` traces HTTP, `npsmart/` páginas offline + `download_page_assets.py`, `prototipo/` standalone HTML + design brief, `get-info.md`, `sample.md`, `vpn.md`) e `to-delete/` (aguardando exclusão manual pelo operador: `build/`, `__pycache__`, `files/`, `arquivos_auxiliares/` inteiro — eram duplicatas byte-idênticas dos originais, só fins de linha diferentes —, `planos/`, `docs-historicos/`, scratch one-off, logs). Detalhes em [to-delete/LEIA-ME.md](file:///to-delete/LEIA-ME.md).
+- **Documentação consolidada em `documentacao/`:** `coleta-de-dados.md` (ex-`descricao-coleta.md`, doc canônico de coleta, com nota apontando p/ a correção CSRF de 2026-06-11), `evento-cadastro-e-petalas.md` (ex-`evento.md`), `guia-vm-servidor.md` (ex-`guiavm.md`), `ORGANIZACAO.md` reescrito. `coleta_dados.md` e `explicacao-coleta.md` foram aposentados (redundantes/superados) em `to-delete/docs-historicos/`.
+- **`scratch/` agora contém SÓ** `get_session.py` (load-bearing: invocado pelo collector em dev) e `get_session_regional.py`. `tools/oss_validate.py` mantido.
+- **Referências atualizadas:** comentário em `core/collector.py` (`requests/` → `references/requests/`), mapa de diretórios e links do `README.md`.
+- **Validação:** `py_compile` + imports (`core.*`, `api.api`) OK após as movimentações; `main.spec` não referencia nenhuma pasta movida.
+
+### [Sessão 2026-06-11] Conserto DEFINITIVO da coleta RJ (VALIDADO AO VIVO na VPN)
+- **Causa raiz única = anti-CSRF double-submit cookie.** Os POST do iManager (KPI `monitor/task/result`, Trace `filter-by-cols`) eram rejeitados porque o header `roarand` não ECOAVA o **cookie `roarand`** (o servidor compara `header == cookie` só no POST; o GET não checa — por isso GET 200 / POST 401, e antes 302→404 sem `Origin/Referer`). Toda a coleta RJ estava quebrada por isso (não era VPN, rota, task id nem nocache).
+- **Correções aplicadas (todas em `core/collector.py`):**
+  1. **`_build_session`**: header `roarand` = valor do **cookie `roarand`** da sessão (fallback p/ o campo `roarand` só se o cookie faltar). ← **a correção essencial**.
+  2. **`_build_session`**: envia `Origin`, `Referer` (PM `/oss/access/pm/index.html`, FARS `/omc/farswebsite/index.html`), `Accept`, `X-Requested-With` — sem eles o POST cai em 302→SSO (não passa nem do gate same-origin).
+  3. POSTs com `allow_redirects=False` + `_check_session_valid` trata `3xx→unisso/unisess/auth` como sessão inválida (não mascara como 404).
+  4. `?nocache=` removido dos 2 POSTs (limpeza inócua; não era a causa).
+- **`session_renew.py` NÃO foi alterado** (a heurística de CAPTCHA pré-submit que o operador tinha adicionado e quebrava o login headless foi revertida ao HEAD; o cookie `roarand` já era capturado via `context.cookies()`).
+- **Validação ao vivo (VPN RJ, `tools/oss_validate.py --kind both --region RJ`):** KPI **7291 medições / 206 células**; VIP **15 medições / 8 VIPs / 14 no evento**; todos os POST **200**. Detalhe da causa em [ERRORS.md](file:///.claude/ERRORS.md).
+- **Diagnóstico HTTP:** `core/collector.HttpCollector.http_debug=True` ou env `SMARTEVENTS_HTTP_DEBUG=1` loga método/status/URL + `req.roarand`/`req.bsp`/`resp.set_bsp` por requisição — foi como se achou o double-submit.
+- **Organização:** criado [documentacao/ORGANIZACAO.md](file:///documentacao/ORGANIZACAO.md) (Em uso / Arquivar / Excluir). Limpeza física **não executada** (operador faz manual). Nota: `scratch/get_session.py` é load-bearing em dev — não arquivar.
+
+### Registro anterior
+
 ### [Sessão 2026-06-01] Correção do Navegador Playwright no Executável (.exe)
 - **O que foi feito:** 
   - Atualização do arquivo [main.spec](file:///c:/Users/a50057663/Desktop/Automa%C3%A7%C3%B5es/SmartEvents/main.spec) para incluir a pasta do Chromium completo (`chromium-1223`) nos diretórios do Playwright empacotados (`_browser_dirs`).

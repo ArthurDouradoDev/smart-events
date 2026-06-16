@@ -440,8 +440,8 @@ class HttpCollector(BaseCollector):
         # convertendo POST→GET e perdendo o corpo, terminando num 404 enganoso (rota só-POST).
         # Os GETs não são checados (por isso passavam), mas o navegador real envia esses
         # headers em TODA chamada XHR same-origin. Referer difere por módulo (PM vs FARS),
-        # conforme as requisições reais capturadas em requests/result-monitoring.txt e
-        # requests/trace/filtered-request.txt.
+        # conforme as requisições reais capturadas em docs/references/requests/result-monitoring.txt
+        # e docs/references/requests/trace/filtered-request.txt.
         _referer_path = ("/oss/access/pm/index.html" if module == "monitoring"
                          else "/omc/farswebsite/index.html")
         sess.headers.update({

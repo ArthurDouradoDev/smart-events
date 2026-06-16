@@ -1,0 +1,830 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Smart Events — Documentação Técnica Completa</title>
+<style>
+  :root{
+    --bg-base:#0D1117; --bg-elev:#161B22; --bg-elev2:#1C2230; --bg-code:#0a0e14;
+    --border:#283040; --border-soft:#21262d;
+    --txt:#e6edf3; --txt-dim:#9aa6b2; --txt-faint:#6b7686;
+    --accent:#CF0A2C; --accent-soft:#ff3354;
+    --green:#2ea043; --orange:#d29922; --red:#f85149; --blue:#388bfd; --purple:#a371f7;
+    --mono:"Cascadia Code",Consolas,"SF Mono",Menlo,monospace;
+    --sans:"Segoe UI",system-ui,-apple-system,Roboto,sans-serif;
+    --radius:8px; --sidebar-w:300px;
+  }
+  *{box-sizing:border-box;}
+  html{scroll-behavior:smooth;}
+  body{
+    margin:0; background:var(--bg-base); color:var(--txt);
+    font-family:var(--sans); font-size:15px; line-height:1.65;
+  }
+  a{color:var(--accent-soft); text-decoration:none;}
+  a:hover{text-decoration:underline;}
+
+  /* ── Layout ── */
+  .sidebar{
+    position:fixed; top:0; left:0; width:var(--sidebar-w); height:100vh;
+    background:var(--bg-elev); border-right:1px solid var(--border);
+    overflow-y:auto; padding:24px 0; z-index:50;
+  }
+  .sidebar .brand{padding:0 24px 18px; border-bottom:1px solid var(--border-soft); margin-bottom:14px;}
+  .sidebar .brand h1{font-size:18px; margin:0 0 4px; letter-spacing:.3px;}
+  .sidebar .brand .badge{
+    display:inline-block; font-size:10px; font-weight:700; letter-spacing:1px;
+    background:var(--accent); color:#fff; padding:2px 8px; border-radius:20px; text-transform:uppercase;
+  }
+  .sidebar .brand p{margin:8px 0 0; font-size:12px; color:var(--txt-faint);}
+  .nav a{
+    display:block; padding:7px 24px 7px 24px; color:var(--txt-dim); font-size:13.5px;
+    border-left:3px solid transparent;
+  }
+  .nav a:hover{background:var(--bg-elev2); color:var(--txt); text-decoration:none;}
+  .nav a.active{color:var(--txt); border-left-color:var(--accent); background:var(--bg-elev2); font-weight:600;}
+  .nav .num{color:var(--txt-faint); font-family:var(--mono); font-size:11px; margin-right:8px;}
+
+  .content{margin-left:var(--sidebar-w); padding:56px 7vw 120px; max-width:1100px;}
+  section{margin-bottom:64px; scroll-margin-top:32px;}
+  section > h2{
+    font-size:27px; margin:0 0 6px; padding-bottom:10px;
+    border-bottom:2px solid var(--border); display:flex; align-items:baseline; gap:12px;
+  }
+  section > h2 .sn{font-family:var(--mono); font-size:16px; color:var(--accent-soft);}
+  h3{font-size:19px; margin:34px 0 10px; color:var(--txt);}
+  h4{font-size:15px; margin:22px 0 6px; color:var(--txt-dim); text-transform:uppercase; letter-spacing:.5px;}
+  p{margin:10px 0;}
+  .lead{font-size:16.5px; color:var(--txt-dim); margin-top:4px;}
+  ul,ol{padding-left:22px;} li{margin:5px 0;}
+  hr{border:0; border-top:1px solid var(--border-soft); margin:28px 0;}
+  strong{color:#fff;}
+
+  code{
+    font-family:var(--mono); font-size:13px; background:var(--bg-elev2);
+    padding:1.5px 6px; border-radius:5px; color:#ffd9a0; border:1px solid var(--border-soft);
+  }
+  pre{
+    background:var(--bg-code); border:1px solid var(--border); border-radius:var(--radius);
+    padding:16px 18px; overflow-x:auto; font-family:var(--mono); font-size:12.5px;
+    line-height:1.55; color:#c9d1d9; margin:14px 0;
+  }
+  pre code{background:none; border:none; padding:0; color:inherit; font-size:inherit;}
+  pre.ascii{color:#8fb8d8; font-size:12px;}
+
+  table{border-collapse:collapse; width:100%; margin:16px 0; font-size:13.5px;}
+  th,td{border:1px solid var(--border); padding:8px 11px; text-align:left; vertical-align:top;}
+  th{background:var(--bg-elev2); color:var(--txt); font-weight:600;}
+  td code{font-size:12px;}
+  tr:nth-child(even) td{background:rgba(255,255,255,.015);}
+
+  .callout{
+    border-left:4px solid var(--blue); background:var(--bg-elev); border-radius:0 var(--radius) var(--radius) 0;
+    padding:12px 18px; margin:16px 0;
+  }
+  .callout.warn{border-left-color:var(--orange);}
+  .callout.danger{border-left-color:var(--red);}
+  .callout.ok{border-left-color:var(--green);}
+  .callout .tag{font-size:11px; font-weight:700; text-transform:uppercase; letter-spacing:1px; color:var(--txt-faint); display:block; margin-bottom:4px;}
+
+  .grid{display:grid; grid-template-columns:repeat(auto-fit,minmax(230px,1fr)); gap:14px; margin:18px 0;}
+  .card{background:var(--bg-elev); border:1px solid var(--border); border-radius:var(--radius); padding:16px 18px;}
+  .card h4{margin-top:0; color:var(--accent-soft);}
+  .card p{font-size:13.5px; color:var(--txt-dim); margin:6px 0 0;}
+
+  .pill{display:inline-block; font-family:var(--mono); font-size:11px; padding:2px 9px; border-radius:20px; font-weight:600;}
+  .pill.get{background:rgba(46,160,67,.18); color:#5fdc7a; border:1px solid rgba(46,160,67,.4);}
+  .pill.post{background:rgba(56,139,253,.18); color:#79b8ff; border:1px solid rgba(56,139,253,.4);}
+  .pill.del{background:rgba(248,81,73,.18); color:#ff8b85; border:1px solid rgba(248,81,73,.4);}
+
+  .tree{color:var(--txt-dim);}
+  .tree .c{color:var(--txt-faint);}
+  .tree .f{color:#ffd9a0;}
+
+  footer{margin-left:var(--sidebar-w); padding:30px 7vw; border-top:1px solid var(--border); color:var(--txt-faint); font-size:13px;}
+
+  @media (max-width:900px){
+    .sidebar{transform:translateX(-100%); transition:transform .25s;}
+    .sidebar.open{transform:none;}
+    .content,footer{margin-left:0; padding-left:6vw; padding-right:6vw;}
+    .menu-btn{display:block;}
+  }
+  .menu-btn{
+    display:none; position:fixed; top:14px; right:14px; z-index:60;
+    background:var(--accent); color:#fff; border:none; border-radius:6px; padding:9px 13px; font-size:16px; cursor:pointer;
+  }
+</style>
+</head>
+<body>
+
+<button class="menu-btn" onclick="document.querySelector('.sidebar').classList.toggle('open')">☰</button>
+
+<nav class="sidebar">
+  <div class="brand">
+    <h1>Smart Events <span class="badge">Docs</span></h1>
+    <p>Documentação técnica completa · arquitetura, fluxos e bastidores</p>
+  </div>
+  <div class="nav">
+    <a href="#visao"><span class="num">01</span>Visão geral</a>
+    <a href="#executar"><span class="num">02</span>Como executar</a>
+    <a href="#arquitetura"><span class="num">03</span>Arquitetura &amp; pastas</a>
+    <a href="#dados"><span class="num">04</span>Modelo de dados</a>
+    <a href="#ponte"><span class="num">05</span>Ponte Frontend ↔ Backend</a>
+    <a href="#api"><span class="num">06</span>Classe <code>Api</code> (referência)</a>
+    <a href="#frontend"><span class="num">07</span>Frontend SPA — telas</a>
+    <a href="#bastidores"><span class="num">08</span>Conteúdo fora das telas</a>
+    <a href="#servidor"><span class="num">09</span>Servidor central (FastAPI)</a>
+    <a href="#autoria"><span class="num">10</span>UI de autoria</a>
+    <a href="#coleta"><span class="num">11</span>Fluxos de coleta (iManager)</a>
+    <a href="#sessao"><span class="num">12</span>Sessão, SSO &amp; renovação</a>
+    <a href="#sync"><span class="num">13</span>Sync app ↔ servidor</a>
+    <a href="#diagnostico"><span class="num">14</span>VPN, diagnóstico &amp; logs</a>
+    <a href="#limitacoes"><span class="num">15</span>Limitações &amp; lições</a>
+    <a href="#glossario"><span class="num">16</span>Glossário</a>
+  </div>
+</nav>
+
+<main class="content">
+
+<!-- ════════════ 01 ════════════ -->
+<section id="visao">
+  <h2><span class="sn">01</span>Visão geral</h2>
+  <p class="lead">Smart Events é um sistema de monitoramento de rede móvel (telecom) usado durante <strong>eventos</strong> — partidas, shows, comícios — em que é crítico acompanhar, em tempo real, a saúde das células de rede da área e a qualidade de sinal de pessoas específicas (<strong>VIPs</strong>).</p>
+
+  <p>O sistema responde a duas perguntas operacionais simultâneas:</p>
+  <ul>
+    <li><strong>A rede está aguentando?</strong> — utilização de PRB, tráfego, throughput, acessibilidade e número de usuários por célula/site, plotados num mapa e em gráficos.</li>
+    <li><strong>Os VIPs estão com bom sinal?</strong> — RSRP/RSRQ e célula servidora de cada VIP rastreado, com indicação se estão ou não dentro da área do evento.</li>
+  </ul>
+
+  <h3>Arquitetura em dois tiers</h3>
+  <p>O projeto se divide em duas aplicações que compartilham os mesmos arquivos de configuração:</p>
+  <div class="grid">
+    <div class="card">
+      <h4>App desktop (operador)</h4>
+      <p>Janela <strong>PyWebView</strong> (HTML/CSS/JS + backend Python). Coleta dados do iManager, persiste em SQLite local e exibe mapa, gráficos, painel de VIPs e alertas em tempo real. Cada operador roda a sua instância.</p>
+    </div>
+    <div class="card">
+      <h4>Servidor central (config)</h4>
+      <p>Servidor <strong>FastAPI</strong> que funciona como fonte única de verdade para <em>configuração</em>: cadastro de eventos e de VIPs. Inclui uma UI web de autoria (upload de planilha de sites, desenho do polígono, CRUD de VIPs).</p>
+    </div>
+  </div>
+
+  <p>Pontos importantes da divisão de responsabilidades:</p>
+  <ul>
+    <li><strong>Configuração</strong> (eventos, VIPs, limiares, polígono) é <em>sincronizada</em> via servidor central — todos os operadores enxergam a mesma definição.</li>
+    <li><strong>Medições ao vivo</strong> (KPI das células, RSRP/RSRQ dos VIPs) ficam <em>locais</em> em cada instância — não há cross-sync em tempo real desses dados.</li>
+  </ul>
+
+  <pre class="ascii">
+ ┌──────────────────────── SERVIDOR CENTRAL (FastAPI :8000) ────────────────────────┐
+ │   server.py            server_frontend/ (UI de autoria)        server_data/        │
+ │   REST /api/events    ┌───────────────────────────┐           ├── events/*.json   │
+ │   REST /api/vips      │ abas Eventos / VIPs        │           └── vips/*.json      │
+ │   POST /api/parse-sites│ upload planilha + polígono │                                │
+ └──────────▲──────────────────────────────────────────────────────────▲─────────────┘
+            │ sync de config (GET/POST eventos e VIPs)                   │
+   ┌────────┴─────────┐                                        ┌─────────┴────────┐
+   │  APP DESKTOP #1  │   ... (uma instância por operador) ... │  APP DESKTOP #N  │
+   │  PyWebView       │                                        │                  │
+   │  ┌─────────────┐ │   coleta HTTP/CSV                       │                  │
+   │  │ frontend SPA│ │◄──────────────┐                        │                  │
+   │  └─────┬───────┘ │               │                        │                  │
+   │   window.pywebview.api            │                        │                  │
+   │  ┌─────┴───────┐ │        ┌───────┴────────┐               │                  │
+   │  │ api/api.py  │ │        │   iManager OSS  │  Playwright   │                  │
+   │  │ core/*      │─┼───────►│ (PM + FARS/Trace)│◄── sessão ───│                  │
+   │  │ SQLite local│ │  HTTP  └────────────────┘   (--get-session)                │
+   │  └─────────────┘ │                                        │                  │
+   └──────────────────┘                                        └──────────────────┘
+  </pre>
+
+  <h3>Stack tecnológica</h3>
+  <table>
+    <tr><th>Camada</th><th>Tecnologia</th><th>Papel</th></tr>
+    <tr><td>GUI desktop</td><td>PyWebView ≥ 4.4.1</td><td>Janela nativa renderizando o frontend HTML/JS, expondo a API Python via <code>window.pywebview.api</code></td></tr>
+    <tr><td>Servidor central</td><td>FastAPI + Uvicorn</td><td>REST de configuração + UI de autoria; também roda embarcado no app</td></tr>
+    <tr><td>Persistência</td><td>SQLite</td><td>Banco global + um banco por evento</td></tr>
+    <tr><td>Coleta autenticada</td><td>requests + Playwright</td><td>HTTP ao iManager; renovação de sessão automatizada em navegador</td></tr>
+    <tr><td>Mapa</td><td>Leaflet</td><td>Sites como setores (azimute/banda), polígono do evento</td></tr>
+    <tr><td>Gráficos</td><td>Chart.js + plugin annotation</td><td>Séries de KPI e RSRP/RSRQ com linhas de limiar e gaps</td></tr>
+    <tr><td>Parsing de planilha</td><td>pandas</td><td>Importação de planilhas de sites (Excel/CSV)</td></tr>
+  </table>
+</section>
+
+<!-- ════════════ 02 ════════════ -->
+<section id="executar">
+  <h2><span class="sn">02</span>Como executar</h2>
+  <p>O ponto de entrada é <code>main.py</code>. Os modos de execução são selecionados por flags de linha de comando:</p>
+  <table>
+    <tr><th>Comando</th><th>Descrição</th></tr>
+    <tr><td><code>python main.py</code></td><td>Produção. Coleta dados reais do iManager (requer VPN do cliente conectada).</td></tr>
+    <tr><td><code>python main.py --mock</code></td><td>Desenvolvimento com <code>MockCollector</code> — dados sintéticos, sem dependências externas.</td></tr>
+    <tr><td><code>python main.py --dev</code></td><td>Abre o DevTools na janela e eleva o log para <code>DEBUG</code>.</td></tr>
+    <tr><td><code>python main.py --serve</code></td><td>Sobe apenas o servidor FastAPI (sem janela), em <code>0.0.0.0:8000</code>.</td></tr>
+    <tr><td><code>python main.py --get-session</code></td><td>Subprocesso de renovação de sessão (Playwright). Chamado internamente pela coleta — ver <a href="#sessao">seção 12</a>.</td></tr>
+  </table>
+  <p class="lead" style="font-size:14px">Flags combináveis, ex.: <code>python main.py --mock --dev</code>.</p>
+
+  <h3>Dependências (<code>requirements.txt</code>)</h3>
+  <pre><code>pywebview&gt;=4.4.1   # GUI desktop
+requests&gt;=2.31.0   # cliente HTTP (coleta + sync)
+schedule&gt;=1.2.1    # (presente; o scheduler usa threading)
+watchdog&gt;=3.0.0    # monitoramento da pasta de CSV (fase 1)
+playwright&gt;=1.40.0 # automação de navegador (renovação de sessão)
+fastapi&gt;=0.100.0   # servidor central
+uvicorn&gt;=0.22.0    # runner ASGI</code></pre>
+
+  <h3>Fluxo de inicialização (<code>main.py</code>)</h3>
+  <ol>
+    <li>Garante <code>stdout/stderr</code> válidos em UTF-8 (importante no <code>.exe</code> sem console) e configura logging.</li>
+    <li>Instala o <strong>buffer de logs em memória</strong> (<code>core/log_buffer.install()</code>) — alimenta o painel <code>&lt;/&gt;</code> do frontend.</li>
+    <li>No Windows, cria um <strong>Job Object</strong> com <code>KILL_ON_JOB_CLOSE</code> para que subprocessos do Playwright (e seus Chromium) sejam encerrados junto com o app — evita órfãos e o popup "<em>Failed to remove temporary directory _MEI…</em>".</li>
+    <li>Inicializa o banco SQLite (global + por evento).</li>
+    <li>Sobe o servidor FastAPI embarcado em uma thread daemon (<code>127.0.0.1:&lt;porta&gt;</code>) e injeta a URL na <code>Api._server_url</code>.</li>
+    <li>Cria a janela PyWebView (1440×900, fundo <code>#0D1117</code>) apontando para <code>frontend/index.html</code> e expõe a instância de <code>Api</code>.</li>
+  </ol>
+  <div class="callout"><span class="tag">Nota</span>O modo privado do webview fica desabilitado de propósito, para preservar cookies/perfil de sessão entre execuções.</div>
+</section>
+
+<!-- ════════════ 03 ════════════ -->
+<section id="arquitetura">
+  <h2><span class="sn">03</span>Arquitetura &amp; estrutura de pastas</h2>
+  <pre class="tree">
+SmartEvents/
+├── <span class="f">main.py</span>                 <span class="c"># entry point: PyWebView + servidor embarcado</span>
+├── <span class="f">server.py</span>               <span class="c"># servidor central FastAPI (config + UI de autoria)</span>
+├── <span class="f">requirements.txt</span>
+├── api/
+│   └── <span class="f">api.py</span>              <span class="c"># classe Api: ~40 métodos expostos ao JS</span>
+├── core/
+│   ├── <span class="f">models.py</span>           <span class="c"># dataclasses (Cell, Site, VIP, EventConfig...)</span>
+│   ├── <span class="f">database.py</span>         <span class="c"># SQLite: eventos, KPI, VIP, alertas, settings, sync</span>
+│   ├── <span class="f">collector.py</span>        <span class="c"># coleta CSV/HTTP do iManager + sessão</span>
+│   ├── <span class="f">scheduler.py</span>        <span class="c"># threads de coleta KPI/VIP + avaliação de alertas</span>
+│   ├── <span class="f">session_renew.py</span>    <span class="c"># login iManager via Playwright (SSO/CAPTCHA)</span>
+│   └── <span class="f">log_buffer.py</span>       <span class="c"># ring buffer de logs em memória</span>
+├── frontend/                <span class="c"># SPA do app desktop</span>
+│   ├── <span class="f">index.html</span>          <span class="c"># todas as telas (.screen.active)</span>
+│   ├── css/main.css
+│   ├── js/ (app, bridge, state, map, kpi, vip, alerts, logs)
+│   └── lib/ (leaflet, chart.js)
+├── server_frontend/         <span class="c"># UI de autoria do servidor central</span>
+│   └── <span class="f">index.html</span>
+├── server_data/             <span class="c"># config compartilhada (fonte de verdade)</span>
+│   ├── events/*.json
+│   └── vips/*.json
+├── data/                    <span class="c"># dados locais da instância</span>
+│   ├── smart_events.db       <span class="c"># banco GLOBAL</span>
+│   ├── smart_events_&lt;id&gt;.db   <span class="c"># banco POR EVENTO</span>
+│   ├── session.json          <span class="c"># cookies + roarand (monitoring/trace)</span>
+│   ├── settings.json         <span class="c"># server_url</span>
+│   └── credentials.json      <span class="c"># (opcional) credenciais por região</span>
+└── arquivos_auxiliares/     <span class="c"># material de apoio (design, guias, código legado)</span>
+  </pre>
+
+  <h3>Módulos <code>core/</code></h3>
+  <table>
+    <tr><th>Módulo</th><th>Responsabilidade</th></tr>
+    <tr><td><code>models.py</code></td><td>Dataclasses do domínio (ver <a href="#dados">seção 4</a>).</td></tr>
+    <tr><td><code>database.py</code></td><td>Camada SQLite: CRUD de eventos, lote de medições KPI/VIP, cadastro global de VIPs, junção <code>event_vips</code>, alertas, settings, e toda a lógica de <em>sync</em> com o servidor central.</td></tr>
+    <tr><td><code>collector.py</code></td><td><code>BaseCollector</code> e suas implementações (<code>CsvCollector</code>, <code>HttpCollector</code>, <code>MockCollector</code>) + <code>build_collector()</code>. Faz a coleta de KPI e VIP, e gerencia a sessão HTTP do iManager.</td></tr>
+    <tr><td><code>scheduler.py</code></td><td>Orquestra as threads de coleta (intervalos KPI/VIP), avalia limiares para gerar alertas e expõe o snapshot de status. Instância singleton <code>scheduler</code>.</td></tr>
+    <tr><td><code>session_renew.py</code></td><td>Automação Playwright para login no iManager (headless e interativo). Define os códigos de saída <code>EXIT_SUCCESS</code> / <code>EXIT_GENERIC_FAIL</code> / <code>EXIT_NEEDS_INTERACTIVE</code>.</td></tr>
+    <tr><td><code>log_buffer.py</code></td><td>Ring buffer em memória (~3000 entradas) que captura logs de collector/scheduler/renovação para o painel de desenvolvedor.</td></tr>
+  </table>
+</section>
+
+<!-- ════════════ 04 ════════════ -->
+<section id="dados">
+  <h2><span class="sn">04</span>Modelo de dados</h2>
+
+  <h3>Dataclasses (<code>core/models.py</code>)</h3>
+  <table>
+    <tr><th>Classe</th><th>Campos principais</th></tr>
+    <tr><td><code>Cell</code></td><td><code>id</code>, <code>azimuth</code>, <code>beamwidth=120</code>, <code>status</code>, <code>tech</code>, <code>frequency</code></td></tr>
+    <tr><td><code>Site</code></td><td><code>id</code>, <code>name</code>, <code>lat</code>, <code>lng</code>, <code>cells[]</code>, <code>is_event_site=True</code>, <code>status</code></td></tr>
+    <tr><td><code>VIP</code></td><td><code>name</code>, <code>task_id</code> (task de Signaling Trace), <code>serving_cell</code>, <code>rsrp</code>, <code>rsrq</code>, <code>in_event</code>, <code>status</code>, <code>oss</code></td></tr>
+    <tr><td><code>Thresholds</code></td><td><code>rsrp_warning=-100</code>, <code>rsrp_critical=-110</code>, <code>rsrq_warning=-12</code>, <code>rsrq_critical=-15</code>, <code>utilization_warning=80</code>, <code>utilization_critical=95</code>, <code>availability_critical=95</code></td></tr>
+    <tr><td><code>OssConfig</code></td><td><code>base_url</code>, <code>region</code>, <code>import_folder</code></td></tr>
+    <tr><td><code>EventConfig</code></td><td><code>id</code>, <code>name</code>, <code>status</code> (<code>SCHEDULED|ACTIVE|ENDED|ARCHIVED</code>), <code>start_time</code>, <code>end_time</code>, <code>polygon</code>, <code>sites[]</code>, <code>vips[]</code>, <code>thresholds</code>, <code>oss</code></td></tr>
+    <tr><td><code>KpiMeasurement</code></td><td><code>site_id</code>, <code>cell_id</code>, <code>event_id</code>, <code>timestamp</code>, <code>metric</code>, <code>value</code></td></tr>
+    <tr><td><code>VipMeasurement</code></td><td><code>vip_name</code>, <code>event_id</code>, <code>timestamp</code>, <code>serving_cell</code>, <code>rsrp</code>, <code>rsrq</code>, <code>in_event</code></td></tr>
+    <tr><td><code>Alert</code></td><td><code>id</code>, <code>event_id</code>, <code>level</code> (<code>GLOBAL|EVENT|INSTANCE</code>), <code>severity</code> (<code>WARNING|CRITICAL</code>), <code>site_id</code>, <code>cell_id</code>, <code>message</code>, <code>timestamp</code>, <code>acknowledged</code></td></tr>
+  </table>
+
+  <h3>JSON de um evento</h3>
+  <pre><code>{
+  "id": "vips-rio-tim-jun-2026",
+  "name": "VIPs Rio TIM - Jun 2026",
+  "status": "ACTIVE",
+  "start_time": "2026-05-28T00:00",
+  "end_time":   "2026-06-15T23:59",
+  "polygon": [[lat, lng], [lat, lng], ...],
+  "sites": [
+    { "id": "136785", "name": "18NLRJCE44", "lat": -22.90, "lng": -43.18,
+      "is_event_site": true,
+      "cells": [ { "id": "18NLRJCE44A", "azimuth": 20, "beamwidth": 120,
+                   "obj_no": 1234, "tech": "4G", "frequency": "2100 MHz" } ] }
+  ],
+  "vips": [ { "id": "agr-junho", "task_id": 14135 } ],
+  "thresholds": { "utilization_warning": 80, "utilization_critical": 95,
+                  "rsrp_warning": -100, "rsrp_critical": -110, ... },
+  "oss": { "base_url": "https://10.220.30.9:31943", "region": "RJ",
+           "import_folder": "C:/exports", "timezone_offset_min": -180 },
+  "integration": { "pm_task_id": 374, "collection_type": "http" }
+}</code></pre>
+
+  <h3>Tabelas SQLite — global × por evento</h3>
+  <p>Há dois níveis de banco. O <strong>global</strong> (<code>smart_events.db</code>) guarda o que é compartilhado entre eventos; cada evento tem um banco <strong>próprio</strong> (<code>smart_events_&lt;id&gt;.db</code>) para as medições volumosas.</p>
+  <table>
+    <tr><th>Tabela</th><th>Escopo</th><th>Conteúdo</th></tr>
+    <tr><td><code>events</code></td><td>global</td><td><code>id, name, status, start/end_time, polygon, config_json</code></td></tr>
+    <tr><td><code>vips</code></td><td>global</td><td>cadastro de VIPs: <code>id, name, role, notes, task_id, oss, updated_at</code></td></tr>
+    <tr><td><code>event_vips</code></td><td>global</td><td>junção N:N <code>event_id ↔ vip_id</code> + <code>task_id</code> daquele evento</td></tr>
+    <tr><td><code>vip_measurements</code></td><td>global</td><td><code>vip_name, event_id, timestamp, serving_cell, rsrp, rsrq, in_event</code> — medições de VIP são globais (a mais recente vale para qualquer evento que esteja visualizando)</td></tr>
+    <tr><td><code>kpi_measurements</code></td><td>por evento</td><td><code>site_id, cell_id, event_id, timestamp, metric, value</code></td></tr>
+    <tr><td><code>sites</code></td><td>por evento</td><td><code>id, event_id, name, lat, lng, is_event_site, cells_json</code></td></tr>
+    <tr><td><code>alerts</code></td><td>por evento</td><td><code>event_id, level, severity, site_id, cell_id, message, timestamp, acknowledged</code></td></tr>
+    <tr><td><code>settings</code></td><td>global</td><td><code>server_url</code> etc.</td></tr>
+  </table>
+  <div class="callout"><span class="tag">Detalhe sutil</span>Como as medições de VIP são <em>globais</em>, o campo <code>in_event</code> mostrado na tela é recalculado dinamicamente em <code>Api.get_vips()</code> comparando a célula servidora com os sites do evento aberto — em vez de confiar no valor gravado. Isso mantém a tela correta ao alternar entre eventos.</div>
+</section>
+
+<!-- ════════════ 05 ════════════ -->
+<section id="ponte">
+  <h2><span class="sn">05</span>A ponte Frontend ↔ Backend</h2>
+  <p>O frontend não fala HTTP com o backend Python: ele chama métodos Python diretamente através da ponte do PyWebView, <code>window.pywebview.api</code>. O wrapper fica em <code>frontend/js/bridge.js</code>.</p>
+
+  <h3>Como a ponte funciona</h3>
+  <ul>
+    <li><code>bridge.js</code> expõe o objeto <code>API</code> com métodos em camelCase que delegam para os métodos Python (snake_case) de <code>api/api.py</code>.</li>
+    <li>As chamadas que chegam antes de o PyWebView estar pronto são <strong>enfileiradas</strong> e despachadas no evento <code>pywebviewready</code>.</li>
+    <li>Se o PyWebView não responder em ~1s (ex.: abrir o <code>index.html</code> direto no navegador), o bridge entra em <strong>modo mock</strong> e devolve dados sintéticos — permite desenvolver o frontend isolado.</li>
+    <li>Todo método retorna uma <code>Promise</code>.</li>
+  </ul>
+
+  <h3>Contrato de retorno</h3>
+  <p>Por convenção do projeto (ver <code>CLAUDE.md</code>), métodos da <code>Api</code> <strong>nunca lançam exceção</strong>: capturam o erro e retornam <code>{"ok": false, "error": str}</code>. Sucesso retorna <code>{"ok": true, ...}</code> ou diretamente uma <code>list</code>.</p>
+
+  <pre><code>// frontend/js/bridge.js (forma)
+const API = {
+  async call(method, ...args){ /* enfileira ou chama window.pywebview.api[method] */ },
+  getActiveEvent(){ return this.call('get_active_event'); },
+  getSites(eventId, ts, metric){ return this.call('get_sites', eventId, ts, metric); },
+  getKpiSeries(eventId, siteId, metric, minutes, cellId){ ... },
+  ...
+};</code></pre>
+</section>
+
+<!-- ════════════ 06 ════════════ -->
+<section id="api">
+  <h2><span class="sn">06</span>A classe <code>Api</code> (referência de métodos)</h2>
+  <p>Definida em <code>api/api.py</code>. Estado relevante: <code>_active_event</code> (evento ativo em memória), <code>_update_callback</code> (callback JS para novos dados) e <code>_server_url</code> (injetada pelo <code>main.py</code>).</p>
+
+  <h3>Ciclo de vida do evento</h3>
+  <table>
+    <tr><th>Método</th><th>O que faz</th><th>Retorno</th></tr>
+    <tr><td><code>load_event(json_path)</code></td><td>Lê o JSON do evento, salva no banco e exporta ao servidor central.</td><td><code>{ok, event}</code></td></tr>
+    <tr><td><code>activate_event(event_id, mock=False)</code></td><td>Marca <code>ACTIVE</code>, inicia o <code>scheduler</code> e sincroniza VIPs do OSS do evento.</td><td><code>{ok, event}</code></td></tr>
+    <tr><td><code>end_event(event_id)</code></td><td>Para o scheduler e marca <code>ENDED</code>.</td><td><code>{ok}</code></td></tr>
+    <tr><td><code>get_events()</code></td><td>Lista todos os eventos salvos (metadados sanitizados).</td><td><code>list</code></td></tr>
+    <tr><td><code>get_active_event()</code></td><td>Retorna o evento ativo (memória ou banco).</td><td><code>{ok, event}</code></td></tr>
+  </table>
+
+  <h3>Settings &amp; sincronização</h3>
+  <table>
+    <tr><th>Método</th><th>O que faz</th><th>Retorno</th></tr>
+    <tr><td><code>get_settings()</code> / <code>save_settings(settings)</code></td><td>Lê/grava settings; salvar força sync de eventos.</td><td><code>{ok, settings|stats}</code></td></tr>
+    <tr><td><code>get_server_url()</code></td><td>URL do servidor embarcado.</td><td><code>{ok, url}</code></td></tr>
+    <tr><td><code>open_server_ui(path="/")</code></td><td>Abre a UI de autoria no navegador padrão.</td><td><code>{ok, url}</code></td></tr>
+    <tr><td><code>sync_events()</code></td><td>Sincroniza eventos e, em seguida, VIPs (filtrando pelo OSS do evento ativo).</td><td><code>{ok, stats}</code></td></tr>
+  </table>
+
+  <h3>Mapa / sites &amp; gráficos de KPI</h3>
+  <table>
+    <tr><th>Método</th><th>O que faz</th><th>Retorno</th></tr>
+    <tr><td><code>get_sites(event_id, timestamp=None, metric="utilization_dl")</code></td><td>Sites com status (calculado contra limiares de utilização) e o valor da métrica selecionada para a lista.</td><td><code>list</code> de sites</td></tr>
+    <tr><td><code>get_site_cells(event_id, site_id)</code></td><td>Células de um site (popula o seletor do gráfico).</td><td><code>list</code> <code>{id,label,tech,freq}</code></td></tr>
+    <tr><td><code>get_kpi_series(event_id, site_id, metric, minutes=60, cell_id="__all__")</code></td><td>Série temporal agregada por timestamp, com <code>cells_data</code> por célula (quando <code>__all__</code>), gaps e limiares.</td><td><code>{ok, labels, values, cells_data, gaps, thresholds}</code></td></tr>
+  </table>
+
+  <h3>VIPs — cadastro global</h3>
+  <table>
+    <tr><th>Método</th><th>O que faz</th></tr>
+    <tr><td><code>list_vips()</code></td><td>Lista o cadastro global de VIPs.</td></tr>
+    <tr><td><code>create_vip(name, role=None, notes=None)</code></td><td>Cria VIP (id = slug do nome) e exporta ao servidor.</td></tr>
+    <tr><td><code>update_vip(vip_id, name, role, notes)</code></td><td>Atualiza VIP e re-exporta.</td></tr>
+    <tr><td><code>delete_vip(vip_id)</code></td><td>Remove em cascata (sai de <code>event_vips</code>) e do servidor.</td></tr>
+  </table>
+
+  <h3>VIPs — associação ao evento</h3>
+  <table>
+    <tr><th>Método</th><th>O que faz</th></tr>
+    <tr><td><code>get_event_vips(event_id)</code></td><td>VIPs atribuídos ao evento (metadados globais + <code>task_id</code>).</td></tr>
+    <tr><td><code>assign_vip_to_event(event_id, vip_id, task_id=None)</code></td><td>Associa VIP ao evento e re-exporta o evento.</td></tr>
+    <tr><td><code>unassign_vip_from_event(event_id, vip_id)</code></td><td>Remove o vínculo (não apaga o VIP global).</td></tr>
+  </table>
+
+  <h3>VIPs — medições em tempo real</h3>
+  <table>
+    <tr><th>Método</th><th>O que faz</th><th>Retorno</th></tr>
+    <tr><td><code>get_vips(event_id, timestamp=None)</code></td><td>Status atual de cada VIP. <code>in_event</code> e <code>serving_site</code> resolvidos dinamicamente; status por RSRP vs. limiares.</td><td><code>list</code> ordenada (in_event primeiro)</td></tr>
+    <tr><td><code>refresh_vips(event_id)</code></td><td>Força coleta imediata de VIPs (botão "Atualizar VIPs"). Requer coleta ativa.</td><td><code>{ok, count}</code></td></tr>
+    <tr><td><code>get_vip_series(event_id, vip_name, minutes=60)</code></td><td>Série RSRP/RSRQ de um VIP (modal de detalhe).</td><td><code>{ok, series}</code></td></tr>
+  </table>
+
+  <h3>Alertas</h3>
+  <table>
+    <tr><th>Método</th><th>O que faz</th></tr>
+    <tr><td><code>get_alerts(event_id, timestamp=None)</code></td><td>Alertas ativos (não reconhecidos).</td></tr>
+    <tr><td><code>get_event_timestamps(event_id)</code></td><td>Todos os timestamps de medição (KPI+VIP) — usado pelo modo histórico.</td></tr>
+    <tr><td><code>acknowledge_alert(alert_id)</code> / <code>acknowledge_all_alerts(event_id)</code></td><td>Marca alerta(s) como lido(s).</td></tr>
+    <tr><td><code>delete_all_alerts(event_id)</code></td><td>Apaga todos (lidos e não lidos).</td></tr>
+    <tr><td><code>download_alerts_log(event_id)</code></td><td>Exporta os alertas para um <code>.log</code> na pasta Downloads.</td></tr>
+    <tr><td><code>silence_alert(alert_key)</code></td><td>Silencia um tipo de alerta na sessão.</td></tr>
+  </table>
+
+  <h3>Diagnóstico, infra &amp; manutenção</h3>
+  <table>
+    <tr><th>Método</th><th>O que faz</th></tr>
+    <tr><td><code>get_collection_logs(limit=800)</code> / <code>clear_collection_logs()</code> / <code>download_collection_logs()</code></td><td>Logs de coleta em memória (painel <code>&lt;/&gt;</code>): ler, limpar, baixar.</td></tr>
+    <tr><td><code>get_app_status()</code></td><td><code>{recording, db_size_mb, now}</code>.</td></tr>
+    <tr><td><code>get_collection_status()</code></td><td>Estado de KPI/VIP/sessão (inclui <code>needs_interactive</code> e região) — alimenta o indicador de sync do header.</td></tr>
+    <tr><td><code>check_vpn()</code></td><td>Pinga o IP do OSS (precedência: <code>oss.base_url</code> → mapa regional → SP) e confirma por <code>TTL=</code> no ping nativo.</td></tr>
+    <tr><td><code>reauth_session()</code></td><td>Reautenticação interativa: abre navegador <em>visível</em> para resolver CAPTCHA/SSO; OSS-agnóstica.</td></tr>
+    <tr><td><code>open_file_dialog()</code></td><td>Abre o seletor de arquivo do SO para o JSON do evento.</td></tr>
+    <tr><td><code>clear_event_history(event_id)</code></td><td>Apaga medições e alertas do evento (mantém a configuração).</td></tr>
+  </table>
+  <p style="font-size:13px;color:var(--txt-faint)">Helpers internos: <code>_sanitize_event</code> (remove <code>sites/vips/config_json</code> do payload), <code>_aggregate_utilization</code>, <code>_aggregate_metric_for_list</code>, <code>_detect_gaps</code>.</p>
+</section>
+
+<!-- ════════════ 07 ════════════ -->
+<section id="frontend">
+  <h2><span class="sn">07</span>Frontend SPA — telas principais</h2>
+  <p>Tudo vive em um único <code>frontend/index.html</code>. As "telas" são <code>&lt;div&gt;</code> alternadas pela classe <code>.screen.active</code>. Módulos ES (sem bundler) cuidam de cada área.</p>
+
+  <h3>Módulos JavaScript</h3>
+  <table>
+    <tr><th>Módulo</th><th>Responsabilidade</th></tr>
+    <tr><td><code>app.js</code></td><td>Orquestrador: <code>boot()</code>, transições standby/ativo/histórico, polling, checagem de VPN, troca de evento, indicador de sync.</td></tr>
+    <tr><td><code>bridge.js</code></td><td>Ponte com a API Python (ver <a href="#ponte">seção 5</a>).</td></tr>
+    <tr><td><code>state.js</code></td><td>Store pub/sub central (<code>State.set/merge/on</code>): evento ativo, site selecionado, modo, métrica.</td></tr>
+    <tr><td><code>map.js</code></td><td>Leaflet: sites como setores coloridos por banda, polígono do evento, basemaps, filtros.</td></tr>
+    <tr><td><code>kpi.js</code></td><td>Lista de sites + gráfico de KPI: seleção de métrica, drill por célula, janelas de tempo.</td></tr>
+    <tr><td><code>vip.js</code></td><td>Painel de VIPs e modal de detalhe (gráfico RSRP/RSRQ).</td></tr>
+    <tr><td><code>alerts.js</code></td><td>Drawer de alertas: render, reconhecer, excluir, fluxo de reauth.</td></tr>
+    <tr><td><code>logs.js</code></td><td>Drawer de logs de coleta (auto-refresh).</td></tr>
+  </table>
+
+  <h3>Telas</h3>
+  <h4>Standby (<code>#standby-screen</code>)</h4>
+  <p>Exibida quando não há evento ativo. Anel animado, "Nenhum evento ativo", próximo evento agendado, botões "Carregar evento" e "Ver histórico".</p>
+
+  <h4>Dashboard (<code>#dashboard-screen</code>)</h4>
+  <p>Visão operacional, dividida em três zonas:</p>
+  <ul>
+    <li><strong>Zona do mapa</strong> — sites como setores SVG coloridos por banda de frequência; ponto central colorido por status (verde/laranja/vermelho/desconhecido); ring tracejado no site selecionado; badge "V" dourado em sites com VIP. Controles: basemap (claro/escuro/satélite), polígono, "somente evento", legenda.</li>
+    <li><strong>Painel de VIPs</strong> (direita) — cards divididos em "No evento" / "Fora do evento" com barras de sinal; clique abre o modal de detalhe; botão "Atualizar VIPs".</li>
+    <li><strong>Zona de KPI</strong> (rodapé) — lista de sites pesquisável à esquerda; gráfico Chart.js à direita com seletor de métrica, seletor de célula, janelas (15/30/60 min/"Evento") e botão de expandir.</li>
+  </ul>
+
+  <h4>Modo histórico</h4>
+  <p>Acionado por "Ver histórico" ou ao escolher um evento encerrado. Usa <code>get_event_timestamps()</code> para montar um slider de tempo; arrastar/avançar busca sites/VIPs/alertas naquele instante. Estado congelado — sem polling.</p>
+
+  <h3>Ciclos de polling</h3>
+  <table>
+    <tr><th>Ciclo</th><th>Intervalo</th><th>Chama</th></tr>
+    <tr><td>Principal</td><td>30 s</td><td><code>getSites</code>, <code>getVips</code>, <code>getAlerts</code>, <code>getAppStatus</code></td></tr>
+    <tr><td>Status de sync</td><td>5 s</td><td><code>getCollectionStatus</code></td></tr>
+    <tr><td>VPN</td><td>15 min</td><td><code>checkVpn</code></td></tr>
+    <tr><td>Logs (drawer aberto)</td><td>4 s</td><td><code>getCollectionLogs</code></td></tr>
+  </table>
+</section>
+
+<!-- ════════════ 08 ════════════ -->
+<section id="bastidores">
+  <h2><span class="sn">08</span>Conteúdo fora das telas principais</h2>
+  <p class="lead">Boa parte da funcionalidade vive em modais e drawers que só aparecem sob demanda. Esta seção cataloga esse conteúdo "escondido".</p>
+
+  <h3>Modais</h3>
+  <table>
+    <tr><th>Modal</th><th>Para quê</th></tr>
+    <tr><td><code>#event-selector-modal</code></td><td>Escolher qual evento visualizar quando há 2+ ativos.</td></tr>
+    <tr><td><code>#vpn-modal</code></td><td>Aviso de falha de VPN com IP alvo e botão "Verificar conexão". Fecha sozinho ao reconectar.</td></tr>
+    <tr><td><code>#clear-history-modal</code> → <code>#confirm-delete-modal</code></td><td>Fluxo de dois passos para limpar o histórico do evento (irreversível).</td></tr>
+    <tr><td><code>#vip-detail-modal</code></td><td>Card detalhado do VIP com gráfico <strong>dual-axis</strong> (RSRP à esquerda, RSRQ à direita) dos últimos 60 min e linhas de limiar.</td></tr>
+    <tr><td><code>#sync-modal</code></td><td>Painel de status da coleta: seções KPI, VIP e Sessão (com botão "Reconectar" se a sessão expirou). Abre sozinho uma vez quando a sessão precisa de reauth.</td></tr>
+    <tr><td><code>#chart-popup-modal</code></td><td>Gráfico de KPI expandido em tela cheia.</td></tr>
+  </table>
+
+  <h3>Drawers (painéis laterais)</h3>
+  <ul>
+    <li><strong><code>#alert-drawer</code></strong> — lista de alertas ordenada por severidade, com ações OK / Reautenticar / Marcar como lido / Excluir Tudo / Baixar Logs. Alertas de auth ganham botão "Reautenticar".</li>
+    <li><strong><code>#logs-drawer</code></strong> (botão <code>&lt;/&gt;</code>) — stream em tempo real dos logs de coleta, alimentado pelo <code>log_buffer</code>.</li>
+  </ul>
+
+  <h3>Gráficos "por célula" e regras de agregação</h3>
+  <p>Ao selecionar um site, o seletor de célula oferece três modos, resolvidos em <code>get_kpi_series</code>:</p>
+  <ul>
+    <li><code>__all__</code> — uma linha colorida por célula (campo <code>cells_data</code>).</li>
+    <li><code>__media__</code> — uma linha única com a média das células.</li>
+    <li><em>célula específica</em> — uma linha só daquela célula.</li>
+  </ul>
+  <p>A agregação de múltiplas células num único valor por timestamp (gráfico) depende da métrica:</p>
+  <table>
+    <tr><th>Métrica</th><th>Agregação no gráfico</th></tr>
+    <tr><td>throughput_dl / throughput_ul</td><td><strong>soma</strong> (capacidade do site)</td></tr>
+    <tr><td>availability / accessibility</td><td><strong>média</strong></td></tr>
+    <tr><td>rsrp / rsrq</td><td><strong>média</strong></td></tr>
+    <tr><td>utilization, user_count (demais)</td><td><strong>máximo</strong> (pior caso)</td></tr>
+  </table>
+  <div class="callout warn"><span class="tag">Atenção</span>A agregação para a <em>coluna da lista de sites</em> (<code>_aggregate_metric_for_list</code>) usa regras ligeiramente diferentes: volume (<code>user_count</code>, <code>traffic_volume_*</code>) vira <strong>share %</strong> da soma; <code>accessibility</code> usa <strong>mínimo</strong>; <code>rsrp/rsrq/throughput</code> usam <strong>média</strong>; utilização usa <strong>máximo</strong>. São contextos distintos (gráfico vs. lista).</div>
+</section>
+
+<!-- ════════════ 09 ════════════ -->
+<section id="servidor">
+  <h2><span class="sn">09</span>Servidor central (FastAPI)</h2>
+  <p>Em <code>server.py</code>. Existe para dar uma <strong>fonte única de verdade</strong> de configuração a múltiplos operadores na rede: todos veem o mesmo polígono, lista de sites, limiares e VIPs. Roda em <code>0.0.0.0:8000</code> (acessível pela rede local) e também é subido embarcado pelo app.</p>
+  <p>Detecta o IP local no startup, habilita CORS para qualquer origem e é ciente de PyInstaller: separa <code>RESOURCE_DIR</code> (recursos read-only do bundle) de <code>DATA_DIR</code> (gravável, ao lado do <code>.exe</code>), garantindo que app e servidor compartilhem o <strong>mesmo</strong> <code>server_data/</code>. Na primeira execução, semeia <code>server_data/</code> a partir da cópia embutida.</p>
+
+  <h3>Endpoints</h3>
+  <table>
+    <tr><th>Rota</th><th>O que faz</th><th>Request → Response</th></tr>
+    <tr><td><span class="pill get">GET</span> <code>/</code></td><td>Serve a UI de autoria (<code>server_frontend/index.html</code>).</td><td>— → HTML</td></tr>
+    <tr><td><span class="pill post">POST</span> <code>/api/parse-sites</code></td><td>Recebe planilha (Excel/CSV/TSV) e devolve sites normalizados (ver <a href="#autoria">seção 10</a>).</td><td><code>multipart file</code> → <code>{ok, sites[]}</code></td></tr>
+    <tr><td><span class="pill get">GET</span> <code>/api/events</code></td><td>Lê todos os <code>server_data/events/*.json</code>.</td><td>— → <code>Event[]</code></td></tr>
+    <tr><td><span class="pill post">POST</span> <code>/api/events</code></td><td>Cria/atualiza evento (exige <code>id</code> e <code>name</code>); grava <code>{event_id}.json</code>.</td><td><code>Event JSON</code> → <code>{ok, message}</code></td></tr>
+    <tr><td><span class="pill del">DELETE</span> <code>/api/events/{event_id}</code></td><td>Remove o JSON do evento (404 se não existir).</td><td>— → <code>{ok}</code></td></tr>
+    <tr><td><span class="pill get">GET</span> <code>/api/vips?oss=SP</code></td><td>Lê <code>server_data/vips/*.json</code>; filtro opcional por OSS.</td><td>— → <code>VIP[]</code></td></tr>
+    <tr><td><span class="pill post">POST</span> <code>/api/vips</code></td><td>Cria/atualiza VIP (exige <code>id</code> e <code>name</code>).</td><td><code>VIP JSON</code> → <code>{ok}</code></td></tr>
+    <tr><td><span class="pill del">DELETE</span> <code>/api/vips/{vip_id}</code></td><td>Remove o JSON do VIP (404 se não existir).</td><td>— → <code>{ok}</code></td></tr>
+  </table>
+
+  <h3><code>server_data/</code></h3>
+  <p>Armazenamento simples em arquivos JSON, um por entidade, legível por humanos:</p>
+  <pre class="tree">server_data/
+├── events/
+│   └── vips-rio-tim-jun-2026.json
+└── vips/
+    ├── agr-junho.json
+    └── bru-junho.json   ...</pre>
+  <pre><code>// vips/agr-junho.json
+{ "id": "agr-junho", "name": "AGR_Junho", "role": null,
+  "oss": "RJ", "task_id": 14135, "notes": null }</code></pre>
+</section>
+
+<!-- ════════════ 10 ════════════ -->
+<section id="autoria">
+  <h2><span class="sn">10</span>UI de autoria (<code>server_frontend</code>)</h2>
+  <p>SPA com abas <strong>Eventos</strong> e <strong>VIPs</strong>, tema escuro, mapa Leaflet servido de <code>/static/</code>. É aqui que os eventos são <em>criados</em> — algo que não existe no app desktop (que apenas <em>carrega</em> e ativa).</p>
+
+  <h3>Aba Eventos</h3>
+  <p><strong>Lista:</strong> cards com nome, id/slug, badge de status, datas, nº de sites e PM Task ID, com botões editar/excluir e "Novo Evento".</p>
+  <p><strong>Formulário:</strong></p>
+  <ul>
+    <li><strong>Geral</strong> — nome, id/slug (auto a partir do nome), status, início/fim.</li>
+    <li><strong>Planilha de sites</strong> — zona de drag-and-drop que envia o arquivo a <code>/api/parse-sites</code> e mostra "Carregados X sites com Y células".</li>
+    <li><strong>OSS / Coleta</strong> — região (SP/RJ), pasta de import CSV, base URL da API.</li>
+    <li><strong>iManager</strong> — PM Task ID (opcional).</li>
+    <li><strong>Limiares</strong> — RSRP/RSRQ warning/critical, utilização warning/critical, disponibilidade crítica.</li>
+    <li><strong>Mapa</strong> — sites plotados como setores; ferramentas de polígono.</li>
+  </ul>
+
+  <h4>Desenho do polígono</h4>
+  <ul>
+    <li><strong>Auto</strong> — calcula o bounding box dos sites e aplica um padding (slider 100–2500 m), gerando um polígono retangular ao redor da área.</li>
+    <li><strong>Manual</strong> — clique no mapa para adicionar vértices; suporta formas irregulares.</li>
+  </ul>
+  <p>Ao salvar, <code>POST /api/events</code> com o payload completo. Em modo edição, se o id mudou, apaga o id antigo antes de gravar o novo.</p>
+
+  <h3>Aba VIPs</h3>
+  <p>CRUD de VIPs: nome, id/slug, função (role), OSS (SP/RJ), Task ID (para o Signaling Trace) e notas. Salva via <code>POST /api/vips</code>.</p>
+
+  <h3>Parsing de planilha (<code>/api/parse-sites</code>)</h3>
+  <p>Endpoint robusto baseado em pandas:</p>
+  <ul>
+    <li>Aceita <code>.xlsx/.xls</code> (via <code>read_excel</code>) e CSV/TSV/TXT com separador autodetectado (<code>,</code> <code>;</code> <code>\t</code>) e múltiplas codificações (UTF-8, Latin-1, UTF-16, CP1252).</li>
+    <li><strong>Mapeamento flexível de colunas</strong> (case-insensitive), ex.: <code>lat/latitude/coordenada y</code>, <code>lng/lon/longitude</code>, <code>enodebid/site_id/codigo site</code>, <code>cellid/celula</code>, <code>nename/sitename/estacao</code>, <code>cellname</code>, <code>azimuth/azimute/direcao</code>.</li>
+    <li>Colunas obrigatórias: <code>enodebid, cellid, nename, cellname, longitude, latitude, azimuth</code> — ausências retornam 400.</li>
+    <li>Agrupa células por site (<code>enodebid</code>), pula linhas sem coordenada, deduplica células e devolve a hierarquia normalizada com <code>beamwidth</code> padrão de 120°.</li>
+  </ul>
+  <pre><code>{ "ok": true, "sites": [
+  { "id": "136785", "name": "18NLRJCE44", "lat": -22.906, "lng": -43.182,
+    "is_event_site": true,
+    "cells": [ {"id":"18NLRJCE44A","azimuth":20,"beamwidth":120},
+               {"id":"18NLRJCE44B","azimuth":140,"beamwidth":120} ] } ] }</code></pre>
+</section>
+
+<!-- ════════════ 11 ════════════ -->
+<section id="coleta">
+  <h2><span class="sn">11</span>Fluxos de coleta (iManager)</h2>
+  <p>A coleta está em <code>core/collector.py</code>, em duas fases:</p>
+  <ul>
+    <li><strong>Fase 1 (CSV)</strong> — <code>CsvCollector</code> monitora a pasta <code>oss.import_folder</code> e processa exports CSV do iManager.</li>
+    <li><strong>Fase 2 (HTTP, implementada)</strong> — <code>HttpCollector</code> consulta o iManager diretamente via sessão autenticada, renovando a sessão via Playwright quando expira.</li>
+  </ul>
+  <p><code>build_collector(event_config, mock)</code> escolhe a implementação: <code>mock=True</code> → <code>MockCollector</code>; <code>integration.collection_type="csv"</code> → <code>CsvCollector</code>; senão <code>HttpCollector</code>.</p>
+
+  <h3>base_url regional</h3>
+  <p>Precedência (mesma usada por <code>check_vpn</code> e <code>reauth_session</code>): <code>oss.base_url</code> explícito → mapa regional → fallback SP.</p>
+  <pre><code>_REGIONAL_BASE_URLS = {
+  "SP": "https://10.220.50.9:31943",
+  "RJ": "https://10.220.30.9:31943",
+}
+_DEFAULT_BASE_URL = "https://10.220.50.9:31943"  # fallback = SP</code></pre>
+
+  <h3>Ciclo KPI (módulo Monitoring/PM)</h3>
+  <pre class="ascii">
+scheduler._collect_kpis()  (thread, intervalo ~120s)
+   │
+   ├─► HttpCollector.collect_kpis()
+   │     ├─ carrega sessão "monitoring" (cookies + roarand de session.json)
+   │     ├─ POST /rest/oss/access/pm/v1/monitor/task/result
+   │     │     (taskId = integration.pm_task_id OU task da sessão)
+   │     ├─ DESCOBERTA DINÂMICA: 1º ciclo consulta objNoExecTimes vazio p/ obter
+   │     │     todos os objNo; mapeia objNo → {cell_id, site_id} e cacheia
+   │     ├─ parse/flatten do JSON (counterRes {name,value})
+   │     │     + escala de contadores RJ (bits→MB, kbps→Mbps)
+   │     └─ retorna [{site_id, cell_id, event_id, timestamp, metric, value}, ...]
+   │
+   ├─► db.insert_kpi_batch(...)            (banco POR EVENTO)
+   └─► scheduler._evaluate_kpi_alerts(...) (compara limiares → insert_alert)
+  </pre>
+  <p>Erros de conexão (timeout/ConnectionError) geram alerta "VPN"; <code>SessionExpiredError</code> dispara a renovação (seção 12).</p>
+
+  <h3>Ciclo VIP (módulo Trace/FARS)</h3>
+  <p>Cada VIP tem uma <code>task_id</code> de Signaling Trace. Para cada uma, um workflow de 4 passos:</p>
+  <pre class="ascii">
+scheduler._collect_vips(mode)   express (~60s) | full (~600s)
+   │
+   └─► para cada task_id de VIP:
+        1. GET  .../fars/v1/traceresult/pre-check?taskId=…   (inicia sessão de trace)
+        2. GET  .../fars/v1/traceresult/query/result?taskId=…  (obtém sess_msg_id)
+        3. POST .../fars/v1/traceresult/query/filter-by-cols    (msgs RRC_MEAS_RPRT,
+              { colFilterDto: Message Type = RRC_MEAS_RPRT,        ordem cronológica
+                pageDto: {isAscend:false, pageSize:1000, taskId, msgId} }   reversa)
+        4. POST .../fars/v1/message/explain-info                 (decodifica RSRP/RSRQ
+                                                                   do conteúdo bruto)
+        → [{vip_name, event_id, timestamp, serving_cell, rsrp, rsrq, in_event}, ...]
+  </pre>
+  <p><strong>Decodificação de sinal</strong> a partir do conteúdo da mensagem:</p>
+  <pre><code>rsrpResult: 0x30 (48)  →  RSRP = 48 - 140   = -92 dBm
+rsrqResult: 0x3A (58)  →  RSRQ = 58/2 - 19.5 = -10.5 dB</code></pre>
+  <p><strong>Célula servidora</strong>: extraída da mensagem; match case-insensitive; IDs globais decodificáveis (4G <code>ECI // 256</code>, 5G <code>NCI // 4096</code>).</p>
+  <div class="callout warn"><span class="tag">Importante (lição do RJ)</span>O módulo FARS aceita <strong>uma sessão de trace ativa por token</strong>: a coleta de VIPs roda <strong>serializada</strong> (<code>_VIP_MAX_WORKERS = 1</code>), pois paralelizar invalidava os <code>sess_msg_id</code>. Ver <a href="#limitacoes">seção 15</a>.</div>
+
+  <h3>Matching célula → evento (4 estratégias)</h3>
+  <p><code>BaseCollector._cell_in_event()</code> aceita: (1) match exato com células do evento; (2) <code>obj_no</code> mapeado; (3) substring/prefixo de site id/nome; (4) decodificação de ECI/NCI.</p>
+</section>
+
+<!-- ════════════ 12 ════════════ -->
+<section id="sessao">
+  <h2><span class="sn">12</span>Sessão, SSO/CAPTCHA &amp; renovação</h2>
+  <p>O iManager exige login autenticado. A automação fica em <code>core/session_renew.py</code> (Playwright), e os tokens vão para <code>data/session.json</code>.</p>
+
+  <h3><code>session.json</code></h3>
+  <p>Guarda, por módulo, os cookies e o token CSRF (<code>roarand</code>). Os módulos <code>monitoring</code> (KPI) e <code>trace</code> (VIP) compartilham o cookie jar, mas têm <code>roarand</code> próprios.</p>
+  <pre><code>{
+  "monitoring": { "cookies": [...], "roarand": "…", "task_id": 374 },
+  "trace":      { "cookies": [...], "roarand": "…", "task_id": 123 }
+}</code></pre>
+
+  <h3>Detecção de expiração</h3>
+  <p>A sessão é considerada inválida quando:</p>
+  <ol>
+    <li>HTTP <strong>401/403</strong>;</li>
+    <li>A <strong>URL da resposta</strong> redireciona para SSO/login (<code>unisso</code> ou <code>login.action</code>);</li>
+    <li>O HTML contém marcadores de login/sso/authentication.</li>
+  </ol>
+  <div class="callout"><span class="tag">Convenção do projeto</span>As sondas de sessão devem <strong>inspecionar a URL da resposta</strong> para detectar redirecionamento SSO — a página de login pode retornar HTTP 200 com HTML longo, o que inviabiliza a busca por palavras-chave só nos primeiros 2000 caracteres do corpo.</div>
+
+  <h3>Renovação automática (headless)</h3>
+  <pre class="ascii">
+coleta detecta SessionExpiredError
+   │
+   ├─ checa backoff (60s → 120s → 180s → 300s, exponencial, por módulo)
+   ├─ single-flight: um lock evita renovações concorrentes (monitoring + trace)
+   └─ subprocess:  python main.py --get-session   (Playwright headless)
+         exit 0  (EXIT_SUCCESS)          → recarrega session.json, zera backoff
+         exit 2  (EXIT_NEEDS_INTERACTIVE)→ CAPTCHA/SSO: marca módulo, emite alerta,
+                                            auto-abre navegador visível (single-flight)
+         exit 1  (EXIT_GENERIC_FAIL)     → aplica backoff e tenta depois
+  </pre>
+
+  <h3>Reauth interativo (CAPTCHA/SSO)</h3>
+  <p>Quando o login exige CAPTCHA, o headless não resolve. O botão <strong>"Reautenticar"</strong> (drawer de alertas / modal de sync) chama <code>Api.reauth_session()</code> → <code>HttpCollector.run_interactive_reauth()</code>, que abre um navegador <strong>visível</strong> para o operador concluir o login. Ao terminar, a coleta detecta a mudança do <code>roarand</code> e retoma. Após uma tentativa manual há um cooldown (~5 min).</p>
+
+  <h3>Credenciais por região</h3>
+  <p>Resolução: <code>data/credentials.json[REGIÃO]</code> → mapa interno por região → conta padrão (SP) → entrada manual para regiões não configuradas.</p>
+</section>
+
+<!-- ════════════ 13 ════════════ -->
+<section id="sync">
+  <h2><span class="sn">13</span>Sync app ↔ servidor</h2>
+  <p>A sincronização cobre apenas <strong>configuração</strong>. As medições ao vivo nunca trafegam pelo servidor.</p>
+  <pre class="ascii">
+STARTUP / save_settings
+   app ──GET /api/events──► servidor      → db.sync_events_from_server()
+                                            (upsert em events + sites por evento)
+
+CARREGAR EVENTO (load_event)
+   app ──POST /api/events──► servidor     → db.export_event_to_server(config)
+                                            (distribui o evento às outras instâncias)
+
+ATIVAR EVENTO (activate_event)
+   detecta oss.region do evento
+   app ──GET /api/vips?oss=RJ──► servidor → db.sync_vips_from_server(oss)
+                                            (upsert em vips + cria event_vips)
+   scheduler.start(config) → começa a coletar KPI/VIP
+
+ISOLAMENTO
+   kpi_measurements / vip_measurements  →  ficam LOCAIS (SQLite da instância)
+   eventos / vips / limiares / polígono →  SINCRONIZADOS via servidor
+  </pre>
+  <p>O CRUD de VIPs no app (<code>create/update/delete_vip</code>) e as associações (<code>assign/unassign_vip_to_event</code>) também re-exportam para o servidor, mantendo as instâncias consistentes.</p>
+</section>
+
+<!-- ════════════ 14 ════════════ -->
+<section id="diagnostico">
+  <h2><span class="sn">14</span>VPN, diagnóstico &amp; logs</h2>
+  <h3>Checagem de VPN</h3>
+  <p><code>Api.check_vpn()</code> resolve o host do OSS (precedência <code>oss.base_url</code> → regional → SP) e roda o <code>ping</code> nativo do Windows (<code>ping -n 2 &lt;host&gt;</code>, sem janela). Conectado = presença de <code>TTL=</code> na saída. O frontend repete a cada 15 min e mostra o <code>#vpn-modal</code> quando cai.</p>
+
+  <h3>Buffer de logs (painel <code>&lt;/&gt;</code>)</h3>
+  <p><code>core/log_buffer.py</code> instala um handler de logging que mantém um <strong>ring buffer</strong> em memória (~3000 entradas) capturando collector, scheduler e renovação. O drawer de logs lê via <code>get_collection_logs()</code>, e há <code>clear_collection_logs()</code> e <code>download_collection_logs()</code> (salva <code>.log</code> em Downloads).</p>
+
+  <h3>Status de coleta</h3>
+  <p><code>scheduler.get_status()</code> (exposto por <code>get_collection_status()</code>) devolve, por módulo KPI/VIP: estado (<code>idle|running|ok|error</code>), último sucesso, contagem, e — para VIP — o modo (<code>express|full</code>). A seção de sessão informa <code>needs_interactive</code> e a região.</p>
+</section>
+
+<!-- ════════════ 15 ════════════ -->
+<section id="limitacoes">
+  <h2><span class="sn">15</span>Limitações conhecidas &amp; lições</h2>
+  <p>Resumo de <code>relatorio-erro-404.md</code> — diagnóstico de erros <strong>404</strong> na coleta da região <strong>RJ</strong> (SP funcionava). Endpoints afetados: <code>/rest/oss/access/pm/v1/monitor/task/result</code> (KPI) e o <code>filter-by-cols</code> do FARS (VIP).</p>
+  <div class="callout ok"><span class="tag">Resolvido — concorrência de VIP</span>O FARS permite só uma sessão de trace ativa por token; requisições paralelas a vários VIPs invalidavam os <code>sess_msg_id</code>. <strong>Fix:</strong> <code>_VIP_MAX_WORKERS = 1</code> (coleta serializada).</div>
+  <div class="callout ok"><span class="tag">Resolvido — query string em POST</span>O proxy/WAF da RJ rejeitava POST com query string <code>?nocache=</code> (GET passava). <strong>Fix:</strong> remoção do <code>?nocache=</code> dos POSTs.</div>
+  <div class="callout warn"><span class="tag">Em aberto</span>Hipóteses remanescentes: task IDs inválidos (deletados ou de outro usuário); diferença de versão de API entre regionais; drop do header <code>roarand</code>/cookie ao passar pela VPN; degradação de sessão entre requisições.</div>
+
+  <h3>Material de apoio (<code>arquivos_auxiliares/</code>)</h3>
+  <ul>
+    <li><code>design/prototype.md</code> — sistema de design (paleta, tipografia, componentes; tema escuro inspirado em GitHub/Grafana para centro de operações 24/7).</li>
+    <li><code>guias/</code> — guias em PT (ex.: <code>coleta_dados.md</code>, <code>descricao-coleta.md</code>).</li>
+    <li><code>files/</code> — versões legadas dos módulos (pré-refatoração) para referência.</li>
+    <li><code>events/</code>, <code>logs/</code>, <code>planos/</code>, <code>requests/</code>, <code>scratch/</code> — amostras, logs arquivados, planos e templates de requisição.</li>
+  </ul>
+</section>
+
+<!-- ════════════ 16 ════════════ -->
+<section id="glossario">
+  <h2><span class="sn">16</span>Glossário</h2>
+  <table>
+    <tr><th>Termo</th><th>Significado</th></tr>
+    <tr><td><strong>KPI</strong></td><td>Key Performance Indicator — métricas da célula (utilização de PRB, tráfego, throughput, acessibilidade, usuários).</td></tr>
+    <tr><td><strong>VIP</strong></td><td>Pessoa rastreada individualmente durante o evento; tem uma task de Signaling Trace dedicada.</td></tr>
+    <tr><td><strong>RSRP</strong></td><td>Reference Signal Received Power (dBm) — potência do sinal recebido; mais negativo = mais fraco.</td></tr>
+    <tr><td><strong>RSRQ</strong></td><td>Reference Signal Received Quality (dB) — qualidade do sinal.</td></tr>
+    <tr><td><strong>OSS</strong></td><td>Operations Support System — sistema do operador; aqui dividido por região (SP, RJ).</td></tr>
+    <tr><td><strong>iManager</strong></td><td>Plataforma de gestão de rede (Huawei) consultada para KPI e trace.</td></tr>
+    <tr><td><strong>FARS / Trace</strong></td><td>Módulo de Signaling Trace do iManager; fonte das mensagens RRC dos VIPs.</td></tr>
+    <tr><td><strong>roarand</strong></td><td>Token CSRF do iManager, enviado em header; pode "cair" via VPN.</td></tr>
+    <tr><td><strong>objNo</strong></td><td>Identificador de objeto monitorado no módulo PM; mapeado dinamicamente para célula/site.</td></tr>
+    <tr><td><strong>ECI / NCI</strong></td><td>E-UTRAN Cell Identifier (4G) / NR Cell Identity (5G); decodificáveis para inferir o site (<code>//256</code> e <code>//4096</code>).</td></tr>
+    <tr><td><strong>célula servidora</strong></td><td>Célula à qual o dispositivo do VIP está conectado no momento.</td></tr>
+    <tr><td><strong>PM Task ID</strong></td><td>Id da task de Performance Monitoring usada na coleta de KPI.</td></tr>
+    <tr><td><strong>polígono do evento</strong></td><td>Área geográfica do evento; usada para classificar se um VIP está "no evento".</td></tr>
+    <tr><td><strong>RRC_MEAS_RPRT</strong></td><td>Mensagem RRC de relatório de medição, de onde RSRP/RSRQ são decodificados.</td></tr>
+  </table>
+</section>
+
+</main>
+
+<footer>
+  Smart Events — documentação técnica gerada a partir do código-fonte
+  (<code>api/api.py</code>, <code>core/*</code>, <code>server.py</code>, <code>frontend/js/*</code>, <code>server_frontend/</code>, <code>relatorio-erro-404.md</code>).
+  Arquivo autocontido, sem dependências externas.
+</footer>
+
+<script>
+  // Scroll-spy: destaca o item da sidebar conforme a seção visível.
+  const links = Array.from(document.querySelectorAll('.nav a'));
+  const map = {};
+  links.forEach(a => { const id = a.getAttribute('href').slice(1); map[id] = a; });
+  const obs = new IntersectionObserver((entries) => {
+    entries.forEach(e => {
+      if (e.isIntersecting) {
+        links.forEach(l => l.classList.remove('active'));
+        const a = map[e.target.id];
+        if (a) a.classList.add('active');
+      }
+    });
+  }, { rootMargin: '-10% 0px -80% 0px', threshold: 0 });
+  document.querySelectorAll('section[id]').forEach(s => obs.observe(s));
+
+  // Fecha o menu mobile ao clicar num link.
+  links.forEach(a => a.addEventListener('click', () => {
+    document.querySelector('.sidebar').classList.remove('open');
+  }));
+</script>
+</body>
+</html>

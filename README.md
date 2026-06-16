@@ -36,8 +36,9 @@ Abaixo está o mapa completo da organização do projeto:
 SmartEvents/
 ├── main.py                  # Ponto de entrada do executável Desktop (cria janela PyWebView e injeta Api)
 ├── server.py                # Servidor API central FastAPI para coordenação de eventos na rede
+├── build.py / main.spec     # Geração do executável via PyInstaller
 ├── requirements.txt         # Arquivo de dependências Python do projeto
-├── requirements.txt         # Arquivo de dependências do Python
+├── sample_event.json        # JSON modelo de cadastro/configuração de evento
 │
 ├── api/
 │   └── api.py               # Classe Api que faz a comunicação e serialização segura entre Python e JavaScript
@@ -61,9 +62,6 @@ SmartEvents/
 │       ├── kpi.js           # Painel inferior com tabelas de sites e gráficos temporais via Chart.js
 │       └── alerts.js        # Gerenciamento do painel de alertas, ações de leitura/exclusão e download de logs
 │
-├── events/
-│   └── sample_event.json    # JSON modelo de cadastro/configuração de evento
-│
 ├── server_frontend/
 │   └── index.html           # Interface web do Servidor Central para cadastrar e exportar eventos JSON
 │
@@ -74,18 +72,27 @@ SmartEvents/
 │   ├── smart_events.db      # Banco de dados SQLite central criado automaticamente (IGNORAR no git)
 │   └── smart_events_*.db    # Bancos de dados SQLite específicos de cada evento (IGNORAR no git)
 │
-├── design/                  # Documentações visuais de design e protótipo estático standalone
-│   └── prototype.md         # Documento com diretrizes visuais e especificações de estilo
+├── tools/
+│   └── oss_validate.py      # Validador standalone da coleta HTTP (KPI/VIP) sem subir o app
 │
-├── docs/                     # Arquivos adicionais de documentação
-│   ├── evento.md            # Guia das fórmulas de plotagem das pétalas e especificações do JSON
-│   ├── guiavm.md            # Guia passo a passo para instalar o servidor em uma VM Linux no VirtualBox
-│   └── plano.md             # Plano de construção detalhado do projeto
+├── scratch/
+│   ├── get_session.py       # Renovação de sessão via Playwright (invocado pelo collector em modo dev)
+│   └── get_session_regional.py
 │
-└── download_page_assets.py  # Script auxiliar para baixar recursos externos e criar versões offline
+├── documentacao/            # Documentação técnica viva do projeto
+│   ├── ORGANIZACAO.md       # Mapa da organização do repositório
+│   ├── coleta-de-dados.md   # Documento canônico do fluxo de coleta (KPI/VIP, sessão, alertas)
+│   ├── evento-cadastro-e-petalas.md  # Fórmulas de plotagem das pétalas e campos do JSON de evento
+│   ├── guia-vm-servidor.md  # Guia passo a passo para instalar o servidor em uma VM Linux no VirtualBox
+│   └── smart-events.html    # Documentação técnica completa em HTML
+│
+└── references/              # Material de referência usado como base (NPSmart, traces HTTP, protótipo)
+    ├── npsmart/             # Cópias offline das páginas do NPSmart/OSS + script que as gerou
+    ├── requests/            # Traces HTTP reais capturados do iManager (PM e FARS)
+    └── prototipo/           # Protótipo visual standalone + design brief
 ```
 
-*(Arquivos de documentação mapeados para referência: [evento.md](file:///c:/Users/a50057663/Desktop/Automa%C3%A7%C3%B5es/SmartEvents/evento.md), [guiavm.md](file:///c:/Users/a50057663/Desktop/Automa%C3%A7%C3%B5es/SmartEvents/guiavm.md) e [plano.md](file:///c:/Users/a50057663/Desktop/Automa%C3%A7%C3%B5es/SmartEvents/plano.md))*
+*(Arquivos de documentação mapeados para referência: [evento-cadastro-e-petalas.md](file:///c:/Users/a50057663/Desktop/Automa%C3%A7%C3%B5es/SmartEvents/documentacao/evento-cadastro-e-petalas.md) e [guia-vm-servidor.md](file:///c:/Users/a50057663/Desktop/Automa%C3%A7%C3%B5es/SmartEvents/documentacao/guia-vm-servidor.md))*
 
 ---
 
@@ -185,7 +192,7 @@ Para implantar o Servidor Central de forma permanente em um ambiente de produç�
 1. Crie uma VM rodando Ubuntu Server no VirtualBox.
 2. Defina a placa de rede em modo **Placa em Ponte (Bridge Adapter)** para que ela ganhe um IP próprio na rede física.
 3. Transfira os arquivos do servidor e configure a execução automática utilizando o gerenciador de serviços do Linux `systemd`.
-4. Um passo a passo completo e detalhado com todos os comandos Linux necessários está documentado no arquivo [guiavm.md](file:///c:/Users/a50057663/Desktop/Automa%C3%A7%C3%B5es/SmartEvents/guiavm.md).
+4. Um passo a passo completo e detalhado com todos os comandos Linux necessários está documentado no arquivo [guia-vm-servidor.md](file:///c:/Users/a50057663/Desktop/Automa%C3%A7%C3%B5es/SmartEvents/documentacao/guia-vm-servidor.md).
 
 ---
 
@@ -195,7 +202,7 @@ Para implantar o Servidor Central de forma permanente em um ambiente de produç�
 O SmartEvents plota os setores das antenas celulares (pétalas) no mapa Leaflet de duas formas dependendo da tecnologia:
 *   **Técnica de Marcadores SVG (Padrão do SmartEvents):** Desenha dinamicamente arcos SVG `<path>` baseados no azimute e abertura da antena diretamente na viewport do Leaflet. Desta forma, as pétalas possuem tamanho fixo em pixels e mantêm a leitura ideal em qualquer nível de zoom.
 *   **Técnica SemiCircle (NPSmart Legado):** Utiliza projeções geográficas em metros na tela.
-*   Mais informações sobre a matemática trigonométrica empregada estão disponíveis em [evento.md](file:///c:/Users/a50057663/Desktop/Automa%C3%A7%C3%B5es/SmartEvents/evento.md).
+*   Mais informações sobre a matemática trigonométrica empregada estão disponíveis em [evento-cadastro-e-petalas.md](file:///c:/Users/a50057663/Desktop/Automa%C3%A7%C3%B5es/SmartEvents/documentacao/evento-cadastro-e-petalas.md).
 
 ### Regras de Negócio e Segurança
 *   **Sanitização de Dados Pessoais:** Por questões de segurança e privacidade (LGPD), informações críticas como o IMSI (ID de chip do cliente) do VIP cadastrado no JSON nunca são expostos no frontend JavaScript. A higienização é realizada diretamente na API Python ([api.py](file:///c:/Users/a50057663/Desktop/Automa%C3%A7%C3%B5es/SmartEvents/api/api.py)) antes que o objeto do evento seja serializado para a interface gráfica.
