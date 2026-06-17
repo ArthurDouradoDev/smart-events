@@ -34,10 +34,12 @@ Abaixo está o mapa completo da organização do projeto:
 
 ```
 SmartEvents/
-├── main.py                  # Ponto de entrada do executável Desktop (cria janela PyWebView e injeta Api)
+├── main.py                  # Ponto de entrada do executável Desktop (cria janela PyWebView, injeta Api e sobe o servidor embarcado)
 ├── server.py                # Servidor API central FastAPI para coordenação de eventos na rede
 ├── build.py / main.spec     # Geração do executável via PyInstaller
+├── clear_demo_event.py      # Utilitário standalone que remove o evento de demo dos bancos locais (data/)
 ├── requirements.txt         # Arquivo de dependências Python do projeto
+├── pytest.ini               # Configuração do pytest (testpaths, marker `vpn` de integração)
 ├── sample_event.json        # JSON modelo de cadastro/configuração de evento
 │
 ├── api/
@@ -47,30 +49,44 @@ SmartEvents/
 │   ├── models.py            # Dataclasses de domínio (Site, Cell, VIP, EventConfig, Alert)
 │   ├── database.py          # Conexão e queries SQLite (isolamento de concorrência com thread-local)
 │   ├── collector.py         # Drivers de coleta de dados (CSV iManager, HTTP REST e Mock)
-│   └── scheduler.py         # Threads de background que agendam coletas e analisam limites para gerar alertas
+│   ├── scheduler.py         # Threads de background que agendam coletas e analisam limites para gerar alertas
+│   ├── session_renew.py     # Renovação de sessão do iManager via Playwright (login headless/interativo, SSO/CAPTCHA)
+│   └── log_buffer.py        # Ring buffer de logs em memória para o painel de desenvolvedor
 │
 ├── frontend/                # Interface do Cliente Desktop
 │   ├── index.html           # Shell HTML5 que carrega os scripts locais (preparado para funcionamento offline)
 │   ├── css/
 │   │   └── main.css         # Design system escuro (Dark Mode premium, variáveis CSS e transições)
-│   └── js/
-│       ├── app.js           # Orquestrador da interface (ciclo de vida da tela, inicialização e polling)
-│       ├── bridge.js        # Wrapper da API Python (com fallback automático de mocks no navegador)
-│       ├── state.js         # Estado global reativo com padrão Publish/Subscribe
-│       ├── map.js           # Integração com Leaflet e plotagem geométrica de pétalas/setores via SVG
-│       ├── vip.js           # Painel direito com status de sinal e localização dos VIPs
-│       ├── kpi.js           # Painel inferior com tabelas de sites e gráficos temporais via Chart.js
-│       └── alerts.js        # Gerenciamento do painel de alertas, ações de leitura/exclusão e download de logs
+│   ├── js/
+│   │   ├── app.js           # Orquestrador da interface (ciclo de vida da tela, inicialização e polling)
+│   │   ├── bridge.js        # Wrapper da API Python (com fallback automático de mocks no navegador)
+│   │   ├── state.js         # Estado global reativo com padrão Publish/Subscribe
+│   │   ├── map.js           # Integração com Leaflet e plotagem geométrica de pétalas/setores via SVG
+│   │   ├── vip.js           # Painel direito com status de sinal e localização dos VIPs
+│   │   ├── kpi.js           # Painel inferior com tabelas de sites e gráficos temporais via Chart.js
+│   │   ├── alerts.js        # Gerenciamento do painel de alertas, ações de leitura/exclusão e download de logs
+│   │   └── logs.js          # Painel de logs do desenvolvedor (consome o ring buffer do backend)
+│   └── lib/                 # Bibliotecas vendored (Chart.js + Leaflet) para operação 100% offline
 │
 ├── server_frontend/
 │   └── index.html           # Interface web do Servidor Central para cadastrar e exportar eventos JSON
 │
-├── server_data/
-│   └── events/              # Banco de arquivos JSON de eventos gerenciados pelo Servidor Central
+├── server_data/             # Configuração compartilhada (fonte da verdade do Servidor Central; gitignored)
+│   ├── events/              # Arquivos JSON de eventos gerenciados pelo Servidor Central
+│   └── vips/                # Arquivos JSON do cadastro global de VIPs
 │
-├── data/                    # Diretório gerado em tempo de execução (bancos SQLite locais e cache)
+├── data/                    # Diretório gerado em tempo de execução (bancos SQLite locais e cache; gitignored)
 │   ├── smart_events.db      # Banco de dados SQLite central criado automaticamente (IGNORAR no git)
-│   └── smart_events_*.db    # Bancos de dados SQLite específicos de cada evento (IGNORAR no git)
+│   ├── smart_events_*.db    # Bancos de dados SQLite específicos de cada evento (IGNORAR no git)
+│   ├── session*.json        # Cookies + token roarand por regional (IGNORAR no git)
+│   ├── settings.json        # server_url e preferências locais (IGNORAR no git)
+│   └── credentials.json     # (opcional) credenciais de login por regional (IGNORAR no git)
+│
+├── tests/                   # Suíte pytest (unitários + integração marcada com `vpn`)
+│   ├── conftest.py
+│   ├── test_api.py  test_collector.py  test_database.py
+│   ├── test_models.py  test_scheduler.py
+│   └── test_http_vpn.py     # Integração: requer VPN ativa com o iManager (marker `vpn`)
 │
 ├── tools/
 │   └── oss_validate.py      # Validador standalone da coleta HTTP (KPI/VIP) sem subir o app
@@ -79,20 +95,22 @@ SmartEvents/
 │   ├── get_session.py       # Renovação de sessão via Playwright (invocado pelo collector em modo dev)
 │   └── get_session_regional.py
 │
-├── documentacao/            # Documentação técnica viva do projeto
-│   ├── ORGANIZACAO.md       # Mapa da organização do repositório
-│   ├── coleta-de-dados.md   # Documento canônico do fluxo de coleta (KPI/VIP, sessão, alertas)
-│   ├── evento-cadastro-e-petalas.md  # Fórmulas de plotagem das pétalas e campos do JSON de evento
-│   ├── guia-vm-servidor.md  # Guia passo a passo para instalar o servidor em uma VM Linux no VirtualBox
-│   └── smart-events.html    # Documentação técnica completa em HTML
-│
-└── references/              # Material de referência usado como base (NPSmart, traces HTTP, protótipo)
-    ├── npsmart/             # Cópias offline das páginas do NPSmart/OSS + script que as gerou
-    ├── requests/            # Traces HTTP reais capturados do iManager (PM e FARS)
-    └── prototipo/           # Protótipo visual standalone + design brief
+└── docs/                    # Documentação técnica viva do projeto
+    ├── ORGANIZACAO.md       # Mapa da organização do repositório
+    ├── coleta-de-dados.md   # Documento canônico do fluxo de coleta (KPI/VIP, sessão, alertas)
+    ├── evento-cadastro-e-petalas.md  # Fórmulas de plotagem das pétalas e campos do JSON de evento
+    ├── guia-vm-servidor.md  # Guia passo a passo para instalar o servidor em uma VM Linux no VirtualBox
+    ├── smart-events.html    # Documentação técnica completa em HTML (visão mais detalhada da arquitetura)
+    └── references/          # Material de referência usado como base (gitignored: espelhos pesados do NPSmart)
+        ├── npsmart/         # Cópias offline das páginas do NPSmart/OSS + script que as gerou
+        ├── requests/        # Traces HTTP reais capturados do iManager (PM e FARS)
+        ├── prototipo/       # Protótipo visual standalone + design brief
+        ├── get-info.md      # Elementos da tela de login do iManager usados na automação Playwright
+        ├── sample.md        # Amostra do formato de importação de sites do Servidor Central
+        └── vpn.md           # Referência do mecanismo de checagem de VPN
 ```
 
-*(Arquivos de documentação mapeados para referência: [evento-cadastro-e-petalas.md](file:///c:/Users/a50057663/Desktop/Automa%C3%A7%C3%B5es/SmartEvents/documentacao/evento-cadastro-e-petalas.md) e [guia-vm-servidor.md](file:///c:/Users/a50057663/Desktop/Automa%C3%A7%C3%B5es/SmartEvents/documentacao/guia-vm-servidor.md))*
+*(Documentação técnica detalhada: [docs/ORGANIZACAO.md](docs/ORGANIZACAO.md), [docs/coleta-de-dados.md](docs/coleta-de-dados.md), [docs/evento-cadastro-e-petalas.md](docs/evento-cadastro-e-petalas.md), [docs/guia-vm-servidor.md](docs/guia-vm-servidor.md) e [docs/smart-events.html](docs/smart-events.html))*
 
 ---
 
@@ -168,7 +186,7 @@ O cliente desktop pode ser executado em três modos diferentes, dependendo da ne
     ```
 
 > [!TIP]
-> **Desenvolvimento Rápido do Frontend:** Você também pode abrir o arquivo `frontend/index.html` diretamente em qualquer navegador padrão. O script [bridge.js](file:///c:/Users/a50057663/Desktop/Automa%C3%A7%C3%B5es/SmartEvents/frontend/js/bridge.js) identificará a ausência do PyWebView e mudará automaticamente para o modo de simulação no frontend, permitindo ajustar layouts CSS e lógicas JavaScript rapidamente.
+> **Desenvolvimento Rápido do Frontend:** Você também pode abrir o arquivo `frontend/index.html` diretamente em qualquer navegador padrão. O script [bridge.js](frontend/js/bridge.js) identificará a ausência do PyWebView e mudará automaticamente para o modo de simulação no frontend, permitindo ajustar layouts CSS e lógicas JavaScript rapidamente.
 
 ---
 
@@ -192,7 +210,44 @@ Para implantar o Servidor Central de forma permanente em um ambiente de produç�
 1. Crie uma VM rodando Ubuntu Server no VirtualBox.
 2. Defina a placa de rede em modo **Placa em Ponte (Bridge Adapter)** para que ela ganhe um IP próprio na rede física.
 3. Transfira os arquivos do servidor e configure a execução automática utilizando o gerenciador de serviços do Linux `systemd`.
-4. Um passo a passo completo e detalhado com todos os comandos Linux necessários está documentado no arquivo [guia-vm-servidor.md](file:///c:/Users/a50057663/Desktop/Automa%C3%A7%C3%B5es/SmartEvents/documentacao/guia-vm-servidor.md).
+4. Um passo a passo completo e detalhado com todos os comandos Linux necessários está documentado no arquivo [guia-vm-servidor.md](docs/guia-vm-servidor.md).
+
+---
+
+### 5. Rodando os Testes
+O projeto possui uma suíte de testes automatizados em [tests/](tests/) configurada via [pytest.ini](pytest.ini).
+
+1. Com o ambiente virtual ativo, instale o pytest (caso ainda não esteja presente) e rode a suíte:
+   ```bash
+   pip install pytest
+   pytest
+   ```
+2. **Testes de integração com VPN:** O arquivo `tests/test_http_vpn.py` faz chamadas reais ao iManager e está marcado com o marker `vpn`. Esses testes **só passam conectado à VPN do cliente**. Por padrão eles rodam junto; para executá-los isoladamente ou pulá-los:
+   ```bash
+   pytest -m vpn        # roda SOMENTE os testes que exigem VPN
+   pytest -m "not vpn"  # pula os testes de VPN (desenvolvimento offline)
+   ```
+
+> [!TIP]
+> Para uma validação rápida da coleta HTTP (KPI/VIP) sem subir a interface, use o validador standalone [tools/oss_validate.py](tools/oss_validate.py) (ex.: `python tools/oss_validate.py --kind both --region RJ`), também dependente da VPN.
+
+---
+
+### 6. Gerando o Executável (`.exe`)
+A distribuição em campo é um executável portátil gerado com **PyInstaller**:
+
+1. Com o ambiente virtual ativo, garanta que os navegadores do Playwright estão instalados (são empacotados no `.exe` para a renovação de sessão):
+   ```bash
+   playwright install chromium
+   ```
+2. Rode o script de build, que invoca o PyInstaller com o [main.spec](main.spec):
+   ```bash
+   python build.py
+   ```
+3. O executável final é gerado em `dist/`. A pasta `data/` (bancos, sessão e credenciais) é criada ao lado do `.exe` na primeira execução.
+
+> [!NOTE]
+> O `main.spec` empacota o Chromium completo do Playwright (necessário para o fluxo de reautenticação interativa com CAPTCHA), o que torna o `.exe` grande (~370 MB). Edite as credenciais por regional em `data/credentials.json` **sem recompilar** — a pasta `data/` é externa ao bundle.
 
 ---
 
@@ -202,8 +257,8 @@ Para implantar o Servidor Central de forma permanente em um ambiente de produç�
 O SmartEvents plota os setores das antenas celulares (pétalas) no mapa Leaflet de duas formas dependendo da tecnologia:
 *   **Técnica de Marcadores SVG (Padrão do SmartEvents):** Desenha dinamicamente arcos SVG `<path>` baseados no azimute e abertura da antena diretamente na viewport do Leaflet. Desta forma, as pétalas possuem tamanho fixo em pixels e mantêm a leitura ideal em qualquer nível de zoom.
 *   **Técnica SemiCircle (NPSmart Legado):** Utiliza projeções geográficas em metros na tela.
-*   Mais informações sobre a matemática trigonométrica empregada estão disponíveis em [evento-cadastro-e-petalas.md](file:///c:/Users/a50057663/Desktop/Automa%C3%A7%C3%B5es/SmartEvents/documentacao/evento-cadastro-e-petalas.md).
+*   Mais informações sobre a matemática trigonométrica empregada estão disponíveis em [evento-cadastro-e-petalas.md](docs/evento-cadastro-e-petalas.md).
 
 ### Regras de Negócio e Segurança
-*   **Sanitização de Dados Pessoais:** Por questões de segurança e privacidade (LGPD), informações críticas como o IMSI (ID de chip do cliente) do VIP cadastrado no JSON nunca são expostos no frontend JavaScript. A higienização é realizada diretamente na API Python ([api.py](file:///c:/Users/a50057663/Desktop/Automa%C3%A7%C3%B5es/SmartEvents/api/api.py)) antes que o objeto do evento seja serializado para a interface gráfica.
-*   **Padrões de Estado JS:** O frontend é inteiramente desacoplado. Módulos como [map.js](file:///c:/Users/a50057663/Desktop/Automa%C3%A7%C3%B5es/SmartEvents/frontend/js/map.js) e [kpi.js](file:///c:/Users/a50057663/Desktop/Automa%C3%A7%C3%B5es/SmartEvents/frontend/js/kpi.js) não importam um ao outro; em vez disso, comunicam-se de forma assíncrona por meio do barramento de eventos em [state.js](file:///c:/Users/a50057663/Desktop/Automa%C3%A7%C3%B5es/SmartEvents/frontend/js/state.js).
+*   **Sanitização de Dados Pessoais:** Por questões de segurança e privacidade (LGPD), informações críticas como o IMSI (ID de chip do cliente) do VIP cadastrado no JSON nunca são expostos no frontend JavaScript. A higienização é realizada diretamente na API Python ([api.py](api/api.py)) antes que o objeto do evento seja serializado para a interface gráfica.
+*   **Padrões de Estado JS:** O frontend é inteiramente desacoplado. Módulos como [map.js](frontend/js/map.js) e [kpi.js](frontend/js/kpi.js) não importam um ao outro; em vez disso, comunicam-se de forma assíncrona por meio do barramento de eventos em [state.js](frontend/js/state.js).

@@ -31,6 +31,8 @@ O JS no frontend nunca acessa o banco de dados diretamente. Toda interação é 
 - `core/database.py`: Ponto exclusivo de acesso ao SQLite.
 - `core/collector.py`: Coleta de dados do OSS com 3 modos (CsvCollector, HttpCollector, MockCollector).
 - `core/scheduler.py`: Threads de segundo plano para execução periódica de coletas (KPI: 120s, VIP: 60s) e avaliação de alertas.
+- `core/session_renew.py`: Renovação de sessão do iManager via Playwright (login headless/interativo, SSO/CAPTCHA). Exit codes `EXIT_SUCCESS`/`EXIT_GENERIC_FAIL`/`EXIT_NEEDS_INTERACTIVE`.
+- `core/log_buffer.py`: Ring buffer de logs em memória que alimenta o painel de logs do desenvolvedor.
 - `frontend/`:
   - `index.html`: Estrutura base da interface.
   - `css/main.css`: Tokens de design e estilos globais (incluindo tema escuro).
@@ -41,10 +43,12 @@ O JS no frontend nunca acessa o banco de dados diretamente. Toda interação é 
   - `js/vip.js`: Lógica do painel de monitoramento de VIPs.
   - `js/kpi.js`: Painel de visualização de KPI e gráficos.
   - `js/alerts.js`: Histórico de alertas e download de logs.
+  - `js/logs.js`: Painel de logs do desenvolvedor (consome o ring buffer do backend via `log_buffer.py`).
+  - `lib/`: Bibliotecas vendored (Chart.js + Leaflet) para operação offline.
 - `server_frontend/`: Painel web do Servidor Central.
-- `server_data/`: Cadastro de eventos e VIPs em formato JSON gerenciados pelo Servidor Central.
-- `events/`:
-  - `sample_event.json`: Evento de exemplo para testes.
+- `server_data/`: Cadastro de eventos (`events/`) e VIPs (`vips/`) em formato JSON gerenciados pelo Servidor Central.
+- `sample_event.json` (na raiz): Evento de exemplo / modelo de configuração.
+- `tests/`: Suíte pytest (`pytest.ini`); `test_http_vpn.py` exige VPN (marker `vpn`).
 - `data/`:
   - `smart_events.db`: Gerado automaticamente (banco central/global). Nunca commitar.
 
@@ -181,7 +185,7 @@ Consulte as regras de modificação rápida:
 - **Campos de Evento**:
   1. Alterar `core/models.py` (dataclass `EventConfig`).
   2. Ajustar a sanitização em `api/api.py` -> `_sanitize_event()`.
-  3. Atualizar `events/sample_event.json`.
+  3. Atualizar `sample_event.json` (na raiz do projeto).
 - **Mapeamento de Importação de Sites (Servidor Central)**: Modificar a estrutura de sinônimos/aliases no dicionário `col_mappings` em `server.py` (linha ~90).
 
 ## Diretrizes de Desenvolvimento e Regras do Agente
@@ -190,6 +194,16 @@ Consulte as regras de modificação rápida:
 - **[Decisão 2026-06-01]** O agente deve seguir estritamente todas as diretrizes comportamentais e convenções definidas em [.claude/CLAUDE.md](file:///.claude/CLAUDE.md) em todas as sessões e interações com este projeto. Isso inclui os modos de execução, convenções de código (Python/JS), processos de design simples e cirúrgico, documentação em MEMORY.md/ERRORS.md, e a verificação contínua antes de finalizar tarefas.
 
 ## Registro de Atividades / Sessões
+
+### [Sessão 2026-06-17] Auditoria e sincronização da documentação
+- **Contexto:** A pasta `documentacao/` foi renomeada para `docs/` (e `references/`/`arquivos_auxiliares/` → `docs/references/`), mas a renomeação não havia sido propagada para `README.md`, `docs/ORGANIZACAO.md` nem `docs/smart-events.html`. A pasta `to-delete/` (citada na §4 do ORGANIZACAO) também já não existe.
+- **Correções aplicadas:**
+  - `README.md`: árvore de diretórios reescrita (`docs/`, `docs/references/`, `server_data/{events,vips}/`); incluídos `session_renew.py`, `log_buffer.py`, `frontend/js/logs.js`, `frontend/lib/`, `clear_demo_event.py`, `pytest.ini`, `tests/`; links absolutos `file:///c:/Users/...` trocados por caminhos relativos; **novas seções "5. Rodando os Testes" (marker `vpn`) e "6. Gerando o Executável (PyInstaller + Playwright)"**.
+  - `docs/ORGANIZACAO.md`: caminhos para `docs/`; removida a §4 obsoleta `to-delete/`; adicionadas tabelas de `core/` (com `session_renew`/`log_buffer`) e `tests/`.
+  - `docs/smart-events.html`: árvore (`arquivos_auxiliares/` → `docs/` + `tests/`); seção 15 atualizada — o 404/401 da RJ deixou de constar "em aberto" e passou a refletir a causa raiz resolvida (anti-CSRF double-submit + `Origin`/`Referer`); lista "Material de apoio" aponta para `docs/`.
+  - `.claude/MEMORY.md`: corrigido `events/sample_event.json` → `sample_event.json` (raiz); adicionados `session_renew.py`, `log_buffer.py`, `logs.js`, `lib/`, `tests/`, `server_data/vips/` na estrutura crítica.
+- **Não alterado:** entradas históricas datadas deste log (regra "nunca apagar histórico" do CLAUDE.md) — refletem o estado correto à época.
+- **Pendente:** nenhuma. Verificação por grep confirmou ausência de caminhos obsoletos nos arquivos estruturais.
 
 ### [Sessão 2026-06-12] Reorganização física do diretório (executada)
 - **Nova estrutura:** `references/` (material base: `requests/` traces HTTP, `npsmart/` páginas offline + `download_page_assets.py`, `prototipo/` standalone HTML + design brief, `get-info.md`, `sample.md`, `vpn.md`) e `to-delete/` (aguardando exclusão manual pelo operador: `build/`, `__pycache__`, `files/`, `arquivos_auxiliares/` inteiro — eram duplicatas byte-idênticas dos originais, só fins de linha diferentes —, `planos/`, `docs-historicos/`, scratch one-off, logs). Detalhes em [to-delete/LEIA-ME.md](file:///to-delete/LEIA-ME.md).

@@ -107,7 +107,10 @@
       "PowerShell(git check-ignore -v frontend/lib/chart.umd.min.js frontend/lib/leaflet.js main.spec .claude/settings.local.json 2>&1)",
       "PowerShell(New-Item -ItemType Directory -Force tests)",
       "PowerShell(\"ok\")",
-      "PowerShell(& \"c:\\\\Users\\\\a50057663\\\\Desktop\\\\Automa��es\\\\SmartEvents\\\\.venv\\\\Scripts\\\\pip3.exe\" install pytest 2>&1)"
+      "PowerShell(& \"c:\\\\Users\\\\a50057663\\\\Desktop\\\\Automa��es\\\\SmartEvents\\\\.venv\\\\Scripts\\\\pip3.exe\" install pytest 2>&1)",
+      "PowerShell(git ls-files | Where-Object { $_ -notmatch '^\\\\.venv/' -and $_ -notmatch 'NPSmart' -and $_ -notmatch '\\\\.pytest_cache' })",
+      "PowerShell(Write-Output \"=== docs tree ===\"; Get-ChildItem -Recurse docs | Where-Object { -not $_.PSIsContainer } | ForEach-Object { $_.FullName.Replace\\(\\(Get-Location\\).Path + '\\\\',''\\) }; Write-Output \"=== root dirs ===\"; Get-ChildItem -Directory | Select-Object -ExpandProperty Name; Write-Output \"=== to-delete exists? ===\"; Test-Path to-delete; Write-Output \"=== events dir exists? ===\"; Test-Path events; Write-Output \"=== server_data ===\"; if \\(Test-Path server_data\\) { Get-ChildItem -Recurse server_data | Select-Object -ExpandProperty Name } else { 'no server_data' })",
+      "PowerShell(Write-Output \"=== tests ===\"; Get-ChildItem tests | Select-Object Name; Write-Output \"=== requirements ===\"; Get-Content requirements.txt; Write-Output \"=== smart-events.html size/lines ===\"; \\(Get-Content docs/smart-events.html | Measure-Object -Line\\).Lines)"
     ]
   }
 }

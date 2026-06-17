@@ -280,7 +280,8 @@ SmartEvents/
 │   ├── session.json          <span class="c"># cookies + roarand (monitoring/trace)</span>
 │   ├── settings.json         <span class="c"># server_url</span>
 │   └── credentials.json      <span class="c"># (opcional) credenciais por região</span>
-└── arquivos_auxiliares/     <span class="c"># material de apoio (design, guias, código legado)</span>
+├── docs/                    <span class="c"># documentação viva + references/ (traces, protótipo, NPSmart)</span>
+└── tests/                   <span class="c"># suíte pytest (unitários + integração `vpn`)</span>
   </pre>
 
   <h3>Módulos <code>core/</code></h3>
@@ -761,17 +762,18 @@ ISOLAMENTO
 <!-- ════════════ 15 ════════════ -->
 <section id="limitacoes">
   <h2><span class="sn">15</span>Limitações conhecidas &amp; lições</h2>
-  <p>Resumo de <code>relatorio-erro-404.md</code> — diagnóstico de erros <strong>404</strong> na coleta da região <strong>RJ</strong> (SP funcionava). Endpoints afetados: <code>/rest/oss/access/pm/v1/monitor/task/result</code> (KPI) e o <code>filter-by-cols</code> do FARS (VIP).</p>
-  <div class="callout ok"><span class="tag">Resolvido — concorrência de VIP</span>O FARS permite só uma sessão de trace ativa por token; requisições paralelas a vários VIPs invalidavam os <code>sess_msg_id</code>. <strong>Fix:</strong> <code>_VIP_MAX_WORKERS = 1</code> (coleta serializada).</div>
-  <div class="callout ok"><span class="tag">Resolvido — query string em POST</span>O proxy/WAF da RJ rejeitava POST com query string <code>?nocache=</code> (GET passava). <strong>Fix:</strong> remoção do <code>?nocache=</code> dos POSTs.</div>
-  <div class="callout warn"><span class="tag">Em aberto</span>Hipóteses remanescentes: task IDs inválidos (deletados ou de outro usuário); diferença de versão de API entre regionais; drop do header <code>roarand</code>/cookie ao passar pela VPN; degradação de sessão entre requisições.</div>
+  <p>Diagnóstico dos erros <strong>404/401</strong> na coleta da região <strong>RJ</strong> (SP funcionava). Endpoints afetados: <code>/rest/oss/access/pm/v1/monitor/task/result</code> (KPI) e o <code>filter-by-cols</code> do FARS (VIP). <strong>Causa raiz resolvida em 2026-06-11</strong> — detalhes completos em <code>.claude/ERRORS.md</code>.</p>
+  <div class="callout ok"><span class="tag">Resolvido — anti-CSRF double-submit (causa raiz)</span>O iManager exige que o <strong>header <code>roarand</code> ECOE o cookie <code>roarand</code></strong> da sessão; a comparação <code>header == cookie</code> só ocorre em POST (por isso GET 200 / POST 401). <strong>Fix:</strong> em <code>collector._build_session</code>, o header <code>roarand</code> passou a usar o valor do cookie <code>roarand</code>.</div>
+  <div class="callout ok"><span class="tag">Resolvido — POST sem Origin/Referer → SSO</span>POSTs same-origin sem <code>Origin</code>/<code>Referer</code> eram redirecionados ao SSO (302 → 404 enganoso). <strong>Fix:</strong> envio de <code>Origin</code>/<code>Referer</code> por módulo + <code>allow_redirects=False</code> tratando 3xx→SSO como sessão inválida.</div>
+  <div class="callout ok"><span class="tag">Resolvido — concorrência de VIP</span>O FARS permite só uma sessão de trace ativa por token; requisições paralelas a vários VIPs invalidavam os <code>sess_msg_id</code>. <strong>Fix:</strong> coleta de VIP serializada com sessões individuais.</div>
+  <div class="callout"><span class="tag">Nota</span>A hipótese inicial de que o <code>?nocache=</code> em POST causava o erro foi <strong>descartada</strong> — removê-lo foi limpeza inócua, não a causa. Validação ao vivo na VPN RJ: KPI 7291 medições / 206 células, VIP 15 medições / 8 VIPs.</div>
 
-  <h3>Material de apoio (<code>arquivos_auxiliares/</code>)</h3>
+  <h3>Material de apoio (<code>docs/</code>)</h3>
   <ul>
-    <li><code>design/prototype.md</code> — sistema de design (paleta, tipografia, componentes; tema escuro inspirado em GitHub/Grafana para centro de operações 24/7).</li>
-    <li><code>guias/</code> — guias em PT (ex.: <code>coleta_dados.md</code>, <code>descricao-coleta.md</code>).</li>
-    <li><code>files/</code> — versões legadas dos módulos (pré-refatoração) para referência.</li>
-    <li><code>events/</code>, <code>logs/</code>, <code>planos/</code>, <code>requests/</code>, <code>scratch/</code> — amostras, logs arquivados, planos e templates de requisição.</li>
+    <li><code>docs/references/prototipo/prototype.md</code> — sistema de design (paleta, tipografia, componentes; tema escuro inspirado em GitHub/Grafana para centro de operações 24/7).</li>
+    <li><code>docs/coleta-de-dados.md</code>, <code>docs/evento-cadastro-e-petalas.md</code>, <code>docs/guia-vm-servidor.md</code> — documentação técnica viva em PT.</li>
+    <li><code>docs/references/requests/</code> — traces HTTP reais do iManager (PM/FARS) que embasam o <code>HttpCollector</code>.</li>
+    <li><code>docs/references/npsmart/</code> — espelhos offline do NPSmart/OSS (gitignored); <code>get-info.md</code>, <code>sample.md</code>, <code>vpn.md</code> — referências de login, importação de sites e checagem de VPN.</li>
   </ul>
 </section>
 
