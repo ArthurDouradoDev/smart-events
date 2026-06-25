@@ -376,17 +376,22 @@ class HttpCollector(BaseCollector):
 
     @staticmethod
     def _resolve_session_file(base_url: str) -> Path:
-        """Deriva o caminho do session file a partir da base_url."""
+        """Deriva o caminho do session file a partir da base_url.
+
+        Usa db.BASE_DIR (próximo ao .exe quando congelado, workspace em dev) — e NÃO
+        Path(__file__), que no onefile aponta para o _MEIPASS temporário apagado a cada
+        execução. O browser_profile do Playwright (derivado de session_path.parent) precisa
+        PERSISTIR entre execuções para manter o SSO quente e a renovação headless funcionando."""
         _SP_DEFAULT = "https://10.220.50.9:31943"
         if not base_url or base_url.rstrip("/") == _SP_DEFAULT.rstrip("/"):
-            return Path(__file__).parent.parent / "data" / "session.json"
+            return db.BASE_DIR / "data" / "session.json"
         try:
             import urllib.parse
             host = urllib.parse.urlparse(base_url).hostname or base_url
             slug = host.replace(".", "_")
         except Exception:
             slug = "regional"
-        return Path(__file__).parent.parent / "data" / f"session_{slug}.json"
+        return db.BASE_DIR / "data" / f"session_{slug}.json"
 
     def _load_session_data(self) -> dict:
         session_path = self._session_file

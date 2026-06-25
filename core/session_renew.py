@@ -13,6 +13,7 @@ Usado em dois contextos:
 
 import json
 import os
+import shutil
 import sys
 import time
 import logging
@@ -34,8 +35,38 @@ _REGIONAL_CREDENTIALS = {
 }
 
 
+def _data_dir() -> Path:
+    """Diretório de dados PERSISTENTE. No .exe (frozen) fica ao lado do executável —
+    NÃO em Path(__file__).parent.parent, que no onefile é o _MEIPASS temporário apagado a
+    cada execução (deixava o browser_profile/credentials.json frios e quebrava o headless)."""
+    if getattr(sys, "frozen", False):
+        return Path(sys.executable).parent / "data"
+    return Path(__file__).parent.parent / "data"
+
+
 def _credentials_file() -> Path:
-    return Path(__file__).parent.parent / "data" / "credentials.json"
+    return _data_dir() / "credentials.json"
+
+
+def _seed_credentials():
+    """1ª execução do .exe: se não houver credentials.json gravável ao lado do executável,
+    copia a cópia EMBUTIDA no bundle (_MEIPASS/data/credentials.json). Mantém o .exe
+    compartilhável sozinho — sem isso, rodar só o executável (sem a pasta data/ ao lado)
+    deixava o RJ sem credenciais e abria o login manual. O arquivo semeado continua editável
+    (trocar a conta da regional sem recompilar). Espelha server._seed_server_data()."""
+    if not getattr(sys, "frozen", False):
+        return
+    target = _credentials_file()
+    if target.exists():
+        return
+    bundled = Path(getattr(sys, "_MEIPASS", Path(sys.executable).parent)) / "data" / "credentials.json"
+    if bundled.exists() and bundled.resolve() != target.resolve():
+        try:
+            target.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(bundled, target)
+            logger.info(f"credentials.json semeado a partir de {bundled} -> {target}")
+        except Exception as e:
+            logger.warning(f"Falha ao semear credentials.json: {e}")
 
 
 def _resolve_credentials(region: str = "", base_url: str = "") -> tuple:
@@ -168,6 +199,7 @@ def run(headless: bool = True, module: str = "both",
     `region`: regional do OSS (SP, RJ, …) — define quais credenciais usar.
     """
     _ensure_browsers_path()
+    _seed_credentials()  # garante credentials.json ao lado do .exe na 1ª execução
 
     # Credenciais da regional (conta dedicada por OSS).
     username, password = _resolve_credentials(region, base_url)
@@ -183,7 +215,7 @@ def run(headless: bool = True, module: str = "both",
     if session_file:
         session_path = Path(session_file)
     else:
-        session_path = Path(__file__).parent.parent / "data" / "session.json"
+        session_path = _data_dir() / "session.json"
     session_path.parent.mkdir(parents=True, exist_ok=True)
 
     # Preserva seções não renovadas por esta execução.
