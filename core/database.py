@@ -254,6 +254,13 @@ def init_db():
     except sqlite3.OperationalError:
         pass
 
+    # Adiciona a coluna cliente na tabela vips (nível acima da regional: TIM, Vivo, …)
+    try:
+        conn.execute("ALTER TABLE vips ADD COLUMN cliente TEXT")
+        conn.commit()
+    except sqlite3.OperationalError:
+        pass
+
     # Garante UNIQUE index em vip_measurements global para deduplicação entre migrações.
     # Se já houver duplicatas (ciclos anteriores sem o índice), remove-as primeiro
     # mantendo o registro de maior id para cada (vip_name, timestamp).
@@ -941,17 +948,18 @@ def save_vip(vip: dict) -> dict:
             suffix += 1
 
     conn.execute("""
-        INSERT INTO vips (id, name, role, notes, task_id, oss, updated_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO vips (id, name, role, notes, task_id, oss, cliente, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(id) DO UPDATE SET
             name = excluded.name,
             role = excluded.role,
             notes = excluded.notes,
             task_id = excluded.task_id,
             oss = excluded.oss,
+            cliente = excluded.cliente,
             updated_at = excluded.updated_at
     """, (vip_id, vip["name"], vip.get("role"), vip.get("notes"), vip.get("task_id"), vip.get("oss"),
-          datetime.utcnow().isoformat()))
+          vip.get("cliente"), datetime.utcnow().isoformat()))
     conn.commit()
     return get_vip(vip_id)
 
@@ -1007,20 +1015,33 @@ def unassign_vip_from_event(event_id: str, vip_id: str):
 
 
 def get_event_vips(event_id: str) -> List[dict]:
-    """Retorna os VIPs (cadastro global) filtrados de acordo com a regional (OSS) do evento atual."""
+    """Retorna os VIPs (cadastro global) filtrados pelo cliente + regional (OSS) do evento atual."""
     conn = get_conn()
-    
-    # Busca a regional/OSS do evento
-    oss = None
-    event = get_event(event_id)
-    if event and "oss" in event and "region" in event["oss"]:
-        oss = event["oss"]["region"]
 
+    # Busca cliente e regional/OSS do evento
+    oss = None
+    cliente = None
+    event = get_event(event_id)
+    if event and isinstance(event.get("oss"), dict):
+        oss = event["oss"].get("region")
+        cliente = event["oss"].get("cliente")
+
+    clauses, params = [], []
     if oss:
-        vips = conn.execute("SELECT * FROM vips WHERE oss = ? ORDER BY name", (oss,)).fetchall()
+        clauses.append("oss = ?")
+        params.append(oss)
+    if cliente:
+        # Compatível com VIPs legados sem cliente (cliente NULL/''): eles ainda aparecem;
+        # só excluímos VIPs marcados com um cliente DIFERENTE.
+        clauses.append("(cliente = ? OR cliente IS NULL OR cliente = '')")
+        params.append(cliente)
+
+    if clauses:
+        sql = f"SELECT * FROM vips WHERE {' AND '.join(clauses)} ORDER BY name"
+        vips = conn.execute(sql, params).fetchall()
     else:
         vips = conn.execute("SELECT * FROM vips ORDER BY name").fetchall()
-    
+
     return [dict(v) for v in vips]
 
 
@@ -1047,22 +1068,23 @@ def _resync_event_vips_into_config(event_id: str):
     conn.commit()
 
 
-def sync_vips_from_server(oss: Optional[str] = None) -> dict:
+def sync_vips_from_server(oss: Optional[str] = None, cliente: Optional[str] = None) -> dict:
     """Sincroniza VIPs globais e suas associações com eventos a partir do servidor central.
 
-    Suporta dois formatos de resposta do servidor:
+    Filtra por regional (`oss`) e cliente (TIM, Vivo, …). Suporta dois formatos de resposta:
       - VIP com campo 'event_vips': [{event_id, task_id}] → associações embutidas
       - Endpoint separado GET /api/event-vips → [{event_id, vip_id, task_id}]
     """
-    if not oss:
+    if not oss or not cliente:
         try:
             active_events = get_events(status="ACTIVE")
             if active_events:
                 full_event = get_event(active_events[0]["id"])
-                if full_event and "oss" in full_event and "region" in full_event["oss"]:
-                    oss = full_event["oss"]["region"]
+                if full_event and isinstance(full_event.get("oss"), dict):
+                    oss = oss or full_event["oss"].get("region")
+                    cliente = cliente or full_event["oss"].get("cliente")
         except Exception as e:
-            print(f"Erro ao tentar detectar regional do evento ativo: {e}")
+            print(f"Erro ao tentar detectar cliente/regional do evento ativo: {e}")
 
     settings = get_settings()
     server_url = settings.get("server_url", "").strip()
@@ -1076,8 +1098,13 @@ def sync_vips_from_server(oss: Optional[str] = None) -> dict:
     erros = 0
     try:
         url = f"{base}/api/vips"
+        query = []
         if oss:
-            url += f"?oss={oss}"
+            query.append(f"oss={oss}")
+        if cliente:
+            query.append(f"cliente={cliente}")
+        if query:
+            url += "?" + "&".join(query)
         response = requests.get(url, timeout=5)
         if response.status_code != 200:
             return {"sincronizados": 0, "erros": 1,
@@ -1109,6 +1136,47 @@ def sync_vips_from_server(oss: Optional[str] = None) -> dict:
         return {"sincronizados": 0, "erros": 1, "msg": str(e)}
 
     return {"sincronizados": sincronizados, "erros": erros}
+
+
+def sync_clientes_from_server() -> dict:
+    """Baixa o catálogo de clientes/regionais do servidor central e grava o cache local
+    (data/clientes.json) usado por core.credentials para resolver IPs e popular a UI.
+    Mantém o app funcional offline depois do 1º sync."""
+    settings = get_settings()
+    server_url = settings.get("server_url", "").strip()
+    if not server_url:
+        return {"ok": False, "msg": "Servidor não configurado."}
+    requests = _get_requests()
+    try:
+        resp = requests.get(f"{server_url.rstrip('/')}/api/clientes", timeout=5)
+        if resp.status_code != 200:
+            return {"ok": False, "msg": f"HTTP {resp.status_code}"}
+        clientes = resp.json()
+        if not isinstance(clientes, list):
+            return {"ok": False, "msg": "Formato inválido."}
+        catalogo = {}
+        for c in clientes:
+            if not isinstance(c, dict) or not c.get("name"):
+                continue
+            regionais = {}
+            for r in c.get("regionais", []) or []:
+                region = (r.get("region") or "").strip().upper()
+                ip = (r.get("ip") or "").strip()
+                if region and ip:
+                    regionais[region] = ip
+            catalogo[c["name"]] = {
+                "name": c["name"],
+                "logo": c.get("logo", "") or "",
+                "regionais": regionais,
+            }
+        from core import credentials as _cred
+        f = _cred.clientes_file()
+        f.parent.mkdir(parents=True, exist_ok=True)
+        f.write_text(json.dumps(catalogo, indent=2, ensure_ascii=False), encoding="utf-8")
+        return {"ok": True, "clientes": len(catalogo)}
+    except Exception as e:
+        print(f"Erro ao sincronizar clientes do servidor: {e}")
+        return {"ok": False, "msg": str(e)}
 
 
 def export_vip_to_server(vip: dict) -> bool:

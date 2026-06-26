@@ -136,6 +136,7 @@ def _run_get_session() -> int:
         base_url=_get_arg("--base-url", "https://10.220.50.9:31943"),
         session_file=_get_arg("--session-file", None),
         region=_get_arg("--region", ""),
+        cliente=_get_arg("--cliente", ""),
     )
 
 
@@ -214,6 +215,10 @@ def main():
 
     db.init_db()
 
+    # 1ª execução do .exe: semeia data/clientes.json (catálogo) e data/credentials.json (vazio).
+    from core import credentials
+    credentials.seed_files()
+
     # Sobe o servidor FastAPI embutido em localhost e fixa o server_url para o app apontar para ele.
     server_url = ""
     try:
@@ -230,6 +235,7 @@ def main():
             else:
                 logger.warning(f"Servidor embutido não respondeu a tempo em http://127.0.0.1:{p}")
             try:
+                logger.info(f"Sync inicial de clientes: {db.sync_clientes_from_server()}")
                 logger.info(f"Sync inicial de eventos: {db.sync_events_from_server()}")
                 logger.info(f"Sync inicial de VIPs: {db.sync_vips_from_server()}")
             except Exception as e:

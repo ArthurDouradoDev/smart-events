@@ -1,0 +1,25 @@
+SmartEvents
+===========
+
+O que faz: monitora a radiofrequencia (RF) em tempo real durante grandes
+eventos - saude das celulas, rastreio de VIPs no mapa e alertas automaticos.
+
+COMO RODAR
+----------
+Jeito facil (nao precisa de Python):
+  -> abra a pasta "dist" e de duplo clique em "main.exe"
+
+Pelo codigo-fonte:
+  -> duplo clique em "Rodar SmartEvents (fonte).bat"
+     (ele pergunta: 1 = Producao, 2 = Demonstracao sem VPN)
+  (ou no terminal: python main.py  /  python main.py --mock)
+
+Precisa de: Windows. A coleta real (producao) exige a VPN do cliente ativa.
+
+DOCUMENTACAO
+------------
+- Guia completo (HTML): docs/smart-events.html
+- Visao geral + arquitetura: README.md
+- Coleta de dados, eventos/petalas, servidor em VM: pasta docs/
+
+Voltar ao portal de todos os projetos: index.html na pasta principal.

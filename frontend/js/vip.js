@@ -13,6 +13,11 @@ const STATUS_COLORS = {
 };
 
 let _modalChart = null;
+let _currentVip = null;
+let _fullSeries = [];        // série completa do VIP aberto (cache p/ as abas)
+let _vipWindow  = "today";   // today | 3d | 7d | all
+
+const _WINDOWS = ["today", "3d", "7d", "all"];
 
 export function initVip() {
   State.on("change:vips", render);
@@ -145,11 +150,55 @@ function _initModal() {
   modal.addEventListener("click", e => {
     if (e.target === modal) _closeModal();
   });
+
+  // Abas de janela temporal (Hoje / 3 dias / 7 dias / Total)
+  document.querySelectorAll("#vip-modal-time-tabs .time-tab").forEach(btn => {
+    btn.addEventListener("click", () => {
+      if (!_currentVip) return;
+      _vipWindow = btn.dataset.vipWindow;
+      _syncWindowTabs();
+      _renderChart(_filterSeries(_vipWindow));
+    });
+  });
+}
+
+function _syncWindowTabs() {
+  document.querySelectorAll("#vip-modal-time-tabs .time-tab").forEach(b => {
+    b.classList.toggle("active", b.dataset.vipWindow === _vipWindow);
+  });
+}
+
+// Instante de corte (ms) de cada janela. "today" = 00:00 local de hoje;
+// "all" = sem corte (tudo).
+function _windowCutoff(win) {
+  if (win === "all") return -Infinity;
+  if (win === "3d")  return Date.now() - 3 * 24 * 60 * 60 * 1000;
+  if (win === "7d")  return Date.now() - 7 * 24 * 60 * 60 * 1000;
+  const now = new Date();
+  return new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+}
+
+// Filtra a série completa (cache) pela janela selecionada.
+function _filterSeries(win) {
+  const cutoff = _windowCutoff(win);
+  if (cutoff === -Infinity) return _fullSeries;
+  return _fullSeries.filter(r => new Date(r.timestamp).getTime() >= cutoff);
+}
+
+// Default = menor janela que contém dados (Hoje → 3d → 7d → Total);
+// se não houver nenhum registro, abre em "today".
+function _pickDefaultWindow() {
+  for (const win of _WINDOWS) {
+    if (_filterSeries(win).length) return win;
+  }
+  return "today";
 }
 
 function _closeModal() {
   const modal = document.getElementById("vip-detail-modal");
   if (modal) modal.classList.add("hidden");
+  _currentVip = null;
+  _fullSeries = [];
   if (_modalChart) {
     _modalChart.destroy();
     _modalChart = null;
@@ -166,9 +215,9 @@ async function _openModal(vip) {
   const rsrqEl      = document.getElementById("vip-modal-rsrq");
   const siteEl      = document.getElementById("vip-modal-site");
   const lastSeenEl  = document.getElementById("vip-modal-last-seen");
-  const noDataEl    = document.getElementById("vip-modal-no-data");
-  const wrapperEl   = document.getElementById("vip-modal-chart-wrapper");
   if (!modal) return;
+
+  _currentVip = vip;
 
   // Preenche cabeçalho
   const color = STATUS_COLORS[vip.status] || STATUS_COLORS.unknown;
@@ -196,22 +245,61 @@ async function _openModal(vip) {
     }
   }
 
+  modal.classList.remove("hidden");
+
+  // Busca a série completa do VIP uma única vez; as abas filtram o cache.
+  _fullSeries = [];
+  try {
+    const res = await API.getVipSeries(State.eventId, vip.name, 525600);
+    if (res && res.ok) _fullSeries = res.series || [];
+  } catch (e) {
+    console.error("Erro ao buscar série VIP:", e);
+  }
+
+  // Se o VIP em foco mudou enquanto a busca corria, descarta este resultado.
+  if (_currentVip !== vip) return;
+
+  _vipWindow = _pickDefaultWindow();
+  _syncWindowTabs();
+  _renderChart(_filterSeries(_vipWindow));
+}
+
+// Detecta a virada de dia entre pontos consecutivos e devolve anotações
+// de linha vertical (com rótulo da data) para o Chart.js.
+function _dayDividers(series) {
+  const dividers = {};
+  for (let i = 1; i < series.length; i++) {
+    const prev = new Date(series[i - 1].timestamp);
+    const cur  = new Date(series[i].timestamp);
+    if (prev.toDateString() !== cur.toDateString()) {
+      dividers[`day_${i}`] = {
+        type: "line",
+        xMin: i - 0.5, xMax: i - 0.5,
+        borderColor: "#484F58", borderWidth: 1, borderDash: [3, 3],
+        label: {
+          display: true,
+          content: cur.toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit" }),
+          position: "start", font: { size: 9 }, color: "#8B949E",
+          backgroundColor: "rgba(13,17,23,0.75)",
+        },
+      };
+    }
+  }
+  return dividers;
+}
+
+function _renderChart(series) {
+  const vip       = _currentVip;
+  const noDataEl  = document.getElementById("vip-modal-no-data");
+  const wrapperEl = document.getElementById("vip-modal-chart-wrapper");
+  if (!vip) return;
+
+  const color = STATUS_COLORS[vip.status] || STATUS_COLORS.unknown;
+
   // Destrói chart anterior
   if (_modalChart) {
     _modalChart.destroy();
     _modalChart = null;
-  }
-
-  modal.classList.remove("hidden");
-
-  // Busca série histórica
-  const eventId = State.eventId;
-  let series = [];
-  try {
-    const res = await API.getVipSeries(eventId, vip.name, 60);
-    if (res && res.ok) series = res.series || [];
-  } catch (e) {
-    console.error("Erro ao buscar série VIP:", e);
   }
 
   if (!series.length) {
@@ -229,6 +317,7 @@ async function _openModal(vip) {
   });
   const rsrpValues = series.map(r => r.rsrp ?? null);
   const rsrqValues = series.map(r => r.rsrq ?? null);
+  const dayLines   = _dayDividers(series);
 
   const config = State.activeEvent || State.historicalEvent;
   const thresholds = config?.thresholds || {};
@@ -286,6 +375,14 @@ async function _openModal(vip) {
         },
         tooltip: {
           callbacks: {
+            title: (items) => {
+              const r = series[items[0]?.dataIndex];
+              if (!r) return "";
+              return new Date(r.timestamp).toLocaleString("pt-BR", {
+                day: "2-digit", month: "2-digit",
+                hour: "2-digit", minute: "2-digit",
+              });
+            },
             label: (ctx) => {
               const unit = ctx.dataset.yAxisID === "yRsrp" ? " dBm" : " dB";
               return `${ctx.dataset.label}: ${ctx.raw?.toFixed(1)}${unit}`;
@@ -294,6 +391,7 @@ async function _openModal(vip) {
         },
         annotation: {
           annotations: {
+            ...dayLines,
             warn: {
               type: "line", yMin: warnTh, yMax: warnTh,
               borderColor: "#D29922", borderWidth: 1, borderDash: [4, 3],

@@ -13,7 +13,7 @@ from typing import Optional
 from urllib.parse import urlparse
 
 from core import database as db
-from core.collector import _REGIONAL_BASE_URLS, _DEFAULT_BASE_URL
+from core import credentials
 from core.scheduler import scheduler
 from core.log_buffer import log_buffer
 
@@ -51,13 +51,45 @@ class Api:
             logger.error(f"load_event error: {e}")
             return {"ok": False, "error": str(e)}
 
-    def activate_event(self, event_id: str, mock: bool = False) -> dict:
-        """Ativa evento e inicia gravação de dados."""
+    def activate_event(self, event_id: str, mock: bool = False, cliente: str = None) -> dict:
+        """Ativa evento e inicia gravação de dados.
+
+        `cliente` (opcional): fixa o cliente do evento quando ele não tinha um (evento legado),
+        persistindo `oss.cliente` para que as credenciais e a renovação de sessão funcionem.
+        """
         global _active_event
         try:
             config = db.get_event(event_id) or _active_event
             if not config:
                 return {"ok": False, "error": "Evento não encontrado"}
+
+            oss = config.get("oss", {}) or {}
+
+            # Evento legado sem cliente: o operador escolheu um no modal — fixa e persiste.
+            if cliente:
+                oss["cliente"] = cliente
+                config["oss"] = oss
+                db.save_event(config)
+                try:
+                    db.export_event_to_server(config)
+                except Exception as ex:
+                    logger.warning(f"activate_event: falha ao exportar cliente do evento: {ex}")
+
+            # 1º acesso: a coleta HTTP precisa de credenciais (cliente, regional). Faltando,
+            # devolve needs_credentials para o front abrir o modal e re-chamar activate_event.
+            import_folder = oss.get("import_folder", "")
+            is_http = not mock and not (import_folder and Path(import_folder).exists())
+            if is_http:
+                cliente = (oss.get("cliente") or "").strip()
+                region = (oss.get("region") or "").strip().upper()
+                if not credentials.has_credentials(cliente, region):
+                    return {
+                        "ok": False,
+                        "needs_credentials": True,
+                        "cliente": cliente,
+                        "region": region,
+                        "base_url": credentials.resolve_base_url(oss),
+                    }
 
             db.update_event_status(event_id, "ACTIVE")
             config["status"] = "ACTIVE"
@@ -73,10 +105,11 @@ class Api:
             scheduler.set_update_callback(_notify)
             scheduler.start(config, mock=mock)
 
-            # Sincroniza os VIPs do OSS deste evento após ativá-lo
+            # Sincroniza os VIPs do cliente/OSS deste evento após ativá-lo
             try:
                 oss = config.get("oss", {}).get("region")
-                db.sync_vips_from_server(oss=oss)
+                cliente = config.get("oss", {}).get("cliente")
+                db.sync_vips_from_server(oss=oss, cliente=cliente)
             except Exception as se:
                 logger.error(f"Erro ao sincronizar VIPs ao ativar evento: {se}")
 
@@ -116,20 +149,26 @@ class Api:
         """
         try:
             event_stats = db.sync_events_from_server()
-            
-            # Detecta o OSS do evento ativo para filtrar a sincronização de VIPs
+            db.sync_clientes_from_server()  # atualiza o catálogo de clientes/regionais/IPs
+
+            # Detecta cliente/OSS do evento ativo para filtrar a sincronização de VIPs
             oss = None
+            cliente = None
             global _active_event
-            if _active_event and "oss" in _active_event and "region" in _active_event["oss"]:
-                oss = _active_event["oss"]["region"]
+            src = None
+            if _active_event and isinstance(_active_event.get("oss"), dict):
+                src = _active_event["oss"]
             else:
                 active_events = db.get_events(status="ACTIVE")
                 if active_events:
                     full_event = db.get_event(active_events[0]["id"])
-                    if full_event and "oss" in full_event and "region" in full_event["oss"]:
-                        oss = full_event["oss"]["region"]
+                    if full_event and isinstance(full_event.get("oss"), dict):
+                        src = full_event["oss"]
+            if src:
+                oss = src.get("region")
+                cliente = src.get("cliente")
 
-            vip_stats = db.sync_vips_from_server(oss=oss)
+            vip_stats = db.sync_vips_from_server(oss=oss, cliente=cliente)
             return {"ok": True, "stats": {"vips": vip_stats, "events": event_stats}}
         except Exception as e:
             logger.error(f"sync_events error: {e}")
@@ -150,6 +189,67 @@ class Api:
             stats = db.sync_events_from_server()
             return {"ok": True, "stats": stats}
         except Exception as e:
+            return {"ok": False, "error": str(e)}
+
+    # ── Credenciais (Cliente → Regional) ─────────────────────────────
+
+    def get_clientes(self) -> dict:
+        """Catálogo Cliente → {name, logo, logo_url, regionais:[...]} para popular a UI."""
+        try:
+            summary = credentials.clientes_summary()
+            server = (self._server_url or db.get_settings().get("server_url", "")).rstrip("/")
+            for c in summary.values():
+                c["logo_url"] = f"{server}/logos/{c['logo']}" if (c.get("logo") and server) else ""
+            return {"ok": True, "clientes": summary}
+        except Exception as e:
+            logger.error(f"get_clientes error: {e}")
+            return {"ok": False, "error": str(e)}
+
+    def sync_clientes(self) -> dict:
+        """Sincroniza o catálogo de clientes/regionais a partir do servidor central."""
+        try:
+            return {"ok": True, **db.sync_clientes_from_server()}
+        except Exception as e:
+            logger.error(f"sync_clientes error: {e}")
+            return {"ok": False, "error": str(e)}
+
+    def get_credentials_status(self, cliente: str) -> dict:
+        """Status das credenciais de um cliente, SEM expor senhas (só username + flags)."""
+        try:
+            return {"ok": True, **credentials.status_for(cliente)}
+        except Exception as e:
+            logger.error(f"get_credentials_status error: {e}")
+            return {"ok": False, "error": str(e)}
+
+    def save_credentials(self, cliente: str, region: str, username: str, password: str) -> dict:
+        """Salva a credencial de um par (cliente, regional)."""
+        try:
+            if not (cliente and region and username and password):
+                return {"ok": False, "error": "Cliente, regional, usuário e senha são obrigatórios."}
+            credentials.save_credential(cliente, region, username, password)
+            return {"ok": True}
+        except Exception as e:
+            logger.error(f"save_credentials error: {e}")
+            return {"ok": False, "error": str(e)}
+
+    def save_shared_credentials(self, cliente: str, username: str, password: str) -> dict:
+        """Salva a credencial compartilhada do cliente (vale para todas as regionais dele)."""
+        try:
+            if not (cliente and username and password):
+                return {"ok": False, "error": "Cliente, usuário e senha são obrigatórios."}
+            credentials.save_shared(cliente, username, password)
+            return {"ok": True}
+        except Exception as e:
+            logger.error(f"save_shared_credentials error: {e}")
+            return {"ok": False, "error": str(e)}
+
+    def delete_credentials(self, cliente: str, region: str) -> dict:
+        """Remove o override de uma regional (volta a herdar a compartilhada do cliente)."""
+        try:
+            credentials.delete_credential(cliente, region)
+            return {"ok": True}
+        except Exception as e:
+            logger.error(f"delete_credentials error: {e}")
             return {"ok": False, "error": str(e)}
 
     def get_server_url(self) -> dict:
@@ -194,12 +294,8 @@ class Api:
             global _active_event
             oss = (_active_event or {}).get("oss", {}) if _active_event else {}
 
-            base_url = oss.get("base_url", "")
-            if not base_url:
-                region = oss.get("region", "SP").upper()
-                base_url = _REGIONAL_BASE_URLS.get(region, _DEFAULT_BASE_URL)
-
-            target = urlparse(base_url).hostname or urlparse(_DEFAULT_BASE_URL).hostname
+            base_url = credentials.resolve_base_url(oss)
+            target = urlparse(base_url).hostname or urlparse(credentials._DEFAULT_BASE_URL).hostname
 
             flags = subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0
             result = subprocess.run(
@@ -226,18 +322,16 @@ class Api:
         global _active_event
         try:
             oss = (_active_event or {}).get("oss", {}) if _active_event else {}
-            base_url = oss.get("base_url", "")
-            if not base_url:
-                region = (oss.get("region") or "SP").upper()
-                base_url = _REGIONAL_BASE_URLS.get(region, _DEFAULT_BASE_URL)
-            base_url = base_url.rstrip("/")
+            base_url = credentials.resolve_base_url(oss).rstrip("/")
 
             # Resolve o session.json da regional (mesma regra do collector) e delega à
             # rotina compartilhada (single-flight com o auto-open disparado pela coleta).
             from core.collector import HttpCollector
             session_file = HttpCollector._resolve_session_file(base_url)
             region = (oss.get("region") or "").upper()
-            res = HttpCollector.run_interactive_reauth(base_url, session_file, region=region)
+            cliente = (oss.get("cliente") or "").strip()
+            res = HttpCollector.run_interactive_reauth(
+                base_url, session_file, region=region, cliente=cliente)
             if res.get("ok"):
                 # Força o collector ativo a reler o session.json recém-gravado.
                 try:

@@ -23,6 +23,8 @@
   <header id="app-header">
     <div class="hdr-left">
       <span class="brand">Smart Events</span>
+      <img id="event-cliente-logo" alt="" class="hidden"
+           style="height:26px;max-width:96px;object-fit:contain;margin-left:10px;vertical-align:middle;">
     </div>
 
     <div class="hdr-center">
@@ -85,6 +87,11 @@
           <polyline points="8 6 2 12 8 18" />
         </svg>
       </button>
+      <button id="credentials-btn" class="icon-btn" title="Credenciais de acesso (por cliente/regional)">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M21 2l-2 2m-7.61 7.61a5.5 5.5 0 1 1-7.778 7.778 5.5 5.5 0 0 1 7.777-7.777zm0 0L15.5 7.5m0 0l3 3L22 7l-3-3" />
+        </svg>
+      </button>
       <span id="clock" class="mono">--:--</span>
     </div>
   </header>
@@ -98,6 +105,7 @@
       <div class="standby-actions">
         <button id="load-event-btn" class="btn btn-primary">Carregar evento</button>
         <button id="open-history-btn" class="btn btn-ghost hidden">Ver histórico</button>
+        <button id="open-credentials-btn" class="btn btn-ghost">Credenciais de acesso</button>
       </div>
     </div>
   </div>
@@ -415,6 +423,12 @@
           <div id="vip-modal-last-seen" style="font-size:13px;font-family:var(--font-mono);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">—</div>
         </div>
       </div>
+      <div id="vip-modal-time-tabs" style="display:flex;gap:3px;justify-content:flex-end;margin-bottom:8px;">
+        <button class="time-tab active" data-vip-window="today">Hoje</button>
+        <button class="time-tab" data-vip-window="3d">3 dias</button>
+        <button class="time-tab" data-vip-window="7d">7 dias</button>
+        <button class="time-tab" data-vip-window="all">Total</button>
+      </div>
       <div id="vip-modal-chart-wrapper" style="position:relative;height:200px;">
         <canvas id="vip-modal-chart"></canvas>
       </div>
@@ -433,6 +447,53 @@
       </div>
       <div id="sync-modal-body">
         <!-- Renderizado por app.js -->
+      </div>
+    </div>
+  </div>
+
+  <!-- ── MODAL CREDENCIAIS (1º acesso, sob demanda) ─────────────── -->
+  <div id="credentials-modal" class="modal hidden" style="z-index: 2030;">
+    <div class="modal-box">
+      <h3 class="modal-title">Credenciais de acesso</h3>
+      <div class="modal-body" style="text-align:left;margin:14px 0;color:var(--text-secondary);line-height:1.5;">
+        <p>Informe o acesso ao iManager de <strong id="cred-modal-target"></strong>.</p>
+        <div id="cred-modal-cliente-row" class="hidden" style="margin-top:12px;">
+          <label style="font-size:12px;display:block;">Cliente
+            <select id="cred-modal-cliente" class="cred-input"></select>
+          </label>
+        </div>
+        <label style="font-size:12px;display:block;margin-top:12px;">Usuário
+          <input id="cred-modal-user" type="text" autocomplete="off" class="cred-input">
+        </label>
+        <label style="font-size:12px;display:block;margin-top:10px;">Senha
+          <input id="cred-modal-pass" type="password" autocomplete="off" class="cred-input">
+        </label>
+        <div id="cred-modal-error" class="hidden" style="color:var(--danger);font-size:12px;margin-top:8px;"></div>
+      </div>
+      <div class="modal-footer" style="display:flex;gap:10px;justify-content:flex-end;margin-top:16px;">
+        <button id="cred-modal-cancel" class="btn btn-ghost">Cancelar</button>
+        <button id="cred-modal-save" class="btn btn-primary">Salvar e continuar</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── GERENCIADOR DE CREDENCIAIS (atualização) ───────────────── -->
+  <div id="credentials-manager-modal" class="modal hidden" style="z-index: 2025;">
+    <div class="modal-box" style="width:560px;max-width:95vw;">
+      <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px;">
+        <h3 class="modal-title" style="flex:1;margin:0;">Credenciais de acesso</h3>
+        <button id="cred-mgr-close" class="icon-btn">&#10005;</button>
+      </div>
+      <div class="modal-body" style="text-align:left;">
+        <label style="font-size:12px;display:block;margin-bottom:12px;">Cliente
+          <select id="cred-mgr-cliente" class="cred-input"></select>
+        </label>
+        <label style="font-size:12px;display:flex;align-items:center;gap:8px;margin-bottom:12px;">
+          <input id="cred-mgr-shared-toggle" type="checkbox" style="width:auto;">
+          Usar a mesma credencial para todas as regionais deste cliente
+        </label>
+        <div id="cred-mgr-body"><!-- renderizado por credentials.js --></div>
+        <div id="cred-mgr-feedback" class="hidden" style="font-size:12px;margin-top:10px;"></div>
       </div>
     </div>
   </div>

@@ -113,10 +113,11 @@ export function initKpi() {
     if (sites) State.set("sites", sites);
   });
 
-  // Abas de janela temporal
-  document.querySelectorAll(".time-tab").forEach(btn => {
+  // Abas de janela temporal (escopadas ao próprio container — as abas do
+  // popup de VIP também usam .time-tab e não devem ser afetadas).
+  document.querySelectorAll("#time-tabs .time-tab").forEach(btn => {
     btn.addEventListener("click", () => {
-      document.querySelectorAll(".time-tab").forEach(b => b.classList.remove("active"));
+      document.querySelectorAll("#time-tabs .time-tab").forEach(b => b.classList.remove("active"));
       btn.classList.add("active");
       State.set("timeWindow", Number(btn.dataset.window));
     });
@@ -350,7 +351,13 @@ function _initPopupChart() {
           callbacks: {
             title: items => {
               const lbl = items[0]?.label;
-              return lbl ? new Date(lbl).toLocaleTimeString("pt-BR") : "";
+              if (!lbl) return "";
+              const d = new Date(lbl);
+              // No modo "Evento" (timeWindow 0) o gráfico pode abranger vários
+              // dias — inclui a data para orientar; nas demais janelas, só a hora.
+              return State.timeWindow === 0
+                ? d.toLocaleString("pt-BR", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" })
+                : d.toLocaleTimeString("pt-BR");
             },
           },
         },
@@ -426,7 +433,13 @@ function _initChart() {
           callbacks: {
             title: items => {
               const lbl = items[0]?.label;
-              return lbl ? new Date(lbl).toLocaleTimeString("pt-BR") : "";
+              if (!lbl) return "";
+              const d = new Date(lbl);
+              // No modo "Evento" (timeWindow 0) o gráfico pode abranger vários
+              // dias — inclui a data para orientar; nas demais janelas, só a hora.
+              return State.timeWindow === 0
+                ? d.toLocaleString("pt-BR", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" })
+                : d.toLocaleTimeString("pt-BR");
             },
           },
         },

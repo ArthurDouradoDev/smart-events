@@ -583,6 +583,16 @@
       </svg>
       VIPs
     </button>
+    <button class="tab-btn" id="tab-btn-clientes">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <path d="M3 21h18"/>
+        <path d="M5 21V7l8-4v18"/>
+        <path d="M19 21V11l-6-4"/>
+        <line x1="9" y1="9" x2="9" y2="9.01"/>
+        <line x1="9" y1="13" x2="9" y2="13.01"/>
+      </svg>
+      Clientes
+    </button>
   </div>
 
   <main>
@@ -716,7 +726,16 @@
             </div>
             <div class="form-group-grid">
               <div class="form-group">
-                <label for="oss-region">OSS:</label>
+                <label for="oss-cliente">Cliente:</label>
+                <select id="oss-cliente">
+                  <option value="TIM">TIM</option>
+                  <option value="Vivo">Vivo</option>
+                  <option value="Claro">Claro</option>
+                  <option value="Brisanet">Brisanet</option>
+                </select>
+              </div>
+              <div class="form-group">
+                <label for="oss-region">OSS / Regional:</label>
                 <select id="oss-region">
                   <option value="SP">SP</option>
                   <option value="RJ">RJ</option>
@@ -887,7 +906,16 @@
 
           <div class="form-group-grid">
             <div class="form-group">
-              <label for="vip-oss-select">OSS:</label>
+              <label for="vip-cliente-select">Cliente:</label>
+              <select id="vip-cliente-select">
+                <option value="TIM">TIM</option>
+                <option value="Vivo">Vivo</option>
+                <option value="Claro">Claro</option>
+                <option value="Brisanet">Brisanet</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label for="vip-oss-select">OSS / Regional:</label>
               <select id="vip-oss-select">
                 <option value="SP">SP</option>
                 <option value="RJ">RJ</option>
@@ -915,6 +943,72 @@
 
           <div id="vip-feedback-msg" class="feedback"></div>
         </div>
+      </div>
+    </div>
+
+    <!-- ══════════════ PAINEL CLIENTES ══════════════ -->
+    <div id="panel-clientes" style="display:none;">
+
+      <!-- Vista: Lista de Clientes -->
+      <div id="clientes-list-view">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:20px;">
+          <h2 class="section-title" style="margin-bottom:0;">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="color:var(--info)">
+              <path d="M3 21h18"/><path d="M5 21V7l8-4v18"/><path d="M19 21V11l-6-4"/>
+            </svg>
+            Clientes Cadastrados
+          </h2>
+          <button id="btn-new-cliente" class="btn btn-primary">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"/></svg>
+            Novo Cliente
+          </button>
+        </div>
+        <div id="clientes-list"></div>
+      </div>
+
+      <!-- Vista: Formulário de Cliente -->
+      <div id="clientes-form-view" style="display:none;">
+        <h2 class="section-title" id="cliente-form-section-title">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="color:var(--info)"><path d="M12 5v14M5 12h14"/></svg>
+          Cadastrar Novo Cliente
+        </h2>
+
+        <div id="cliente-edit-banner"
+          style="display:none; background:rgba(56,139,253,0.1); border:1px solid rgba(56,139,253,0.3); border-radius:var(--radius-md); padding:12px 16px; margin-bottom:20px; align-items:center; justify-content:space-between; gap:10px;">
+          <span>Editando cliente: <strong id="editing-cliente-name" style="color:var(--info);">[Nome]</strong></span>
+          <button class="btn btn-secondary" id="btn-cancel-cliente-edit" style="padding:6px 12px; font-size:12px;">Cancelar</button>
+        </div>
+
+        <div class="form-group">
+          <label for="cliente-name-input">Nome do Cliente:</label>
+          <input type="text" id="cliente-name-input" placeholder="Ex: TIM, Vivo, Claro..." required>
+        </div>
+
+        <div class="form-group">
+          <label>Logo (PNG, JPG, SVG):</label>
+          <div style="display:flex; align-items:center; gap:14px;">
+            <img id="cliente-logo-preview" alt="" style="height:48px; max-width:140px; object-fit:contain; background:var(--bg-hover); border:1px solid var(--border); border-radius:var(--radius-sm); padding:4px; display:none;">
+            <input type="file" id="cliente-logo-input" accept="image/*">
+          </div>
+          <div style="font-size:11px; color:var(--text-muted); margin-top:6px;">A logo é enviada ao salvar o cliente.</div>
+        </div>
+
+        <div class="form-section">
+          <div class="form-section-title">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="2" width="20" height="8" rx="2"/><rect x="2" y="14" width="20" height="8" rx="2"/></svg>
+            Regionais e IPs do iManager
+          </div>
+          <div id="cliente-regionais-list"></div>
+          <button id="btn-add-regional" class="btn btn-secondary" style="margin-top:10px; padding:6px 12px; font-size:12px;">+ Adicionar regional</button>
+        </div>
+
+        <div style="margin-top:25px;">
+          <button id="btn-cliente-submit" class="btn btn-primary">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg>
+            Salvar Cliente
+          </button>
+        </div>
+        <div id="cliente-feedback-msg" class="feedback"></div>
       </div>
     </div>
 
@@ -1043,6 +1137,20 @@
     const vipFeedbackMsg     = document.getElementById('vip-feedback-msg');
     const mapPanel           = document.getElementById('map-panel');
 
+    const tabBtnClientes     = document.getElementById('tab-btn-clientes');
+    const panelClientes      = document.getElementById('panel-clientes');
+    const clientesListView   = document.getElementById('clientes-list-view');
+    const clientesFormView   = document.getElementById('clientes-form-view');
+    const clientesList       = document.getElementById('clientes-list');
+    const clienteNameInput   = document.getElementById('cliente-name-input');
+    const clienteLogoInput   = document.getElementById('cliente-logo-input');
+    const clienteLogoPreview = document.getElementById('cliente-logo-preview');
+    const clienteRegionaisList = document.getElementById('cliente-regionais-list');
+    const btnClienteSubmit   = document.getElementById('btn-cliente-submit');
+    const clienteFeedbackMsg = document.getElementById('cliente-feedback-msg');
+    let editingClienteId = null;
+    let loadedClientesList = [];
+
     // ── Init ────────────────────────────────────────────────────
     document.addEventListener('DOMContentLoaded', () => {
       initMap();
@@ -1050,6 +1158,13 @@
 
       tabBtnEventos.addEventListener('click', () => switchTab('eventos'));
       tabBtnVips.addEventListener('click',    () => switchTab('vips'));
+      tabBtnClientes.addEventListener('click', () => switchTab('clientes'));
+
+      document.getElementById('btn-new-cliente').addEventListener('click', () => { resetClienteForm(); showClienteForm(); });
+      document.getElementById('btn-cancel-cliente-edit').addEventListener('click', () => { resetClienteForm(); hideClienteForm(); });
+      document.getElementById('btn-add-regional').addEventListener('click', () => addRegionalRow());
+      btnClienteSubmit.addEventListener('click', submitCliente);
+      clienteLogoInput.addEventListener('change', _previewLogo);
 
       btnNovoEvento.addEventListener('click', showEventForm);
       btnBackToList.addEventListener('click', () => { cancelEdit(); hideEventForm(); });
@@ -1070,7 +1185,39 @@
       });
 
       btnVipSubmit.addEventListener('click', submitVip);
+
+      // Popula os seletores de Cliente (evento e VIP) a partir do catálogo registrado.
+      populateClienteSelects();
+      document.getElementById('oss-cliente').addEventListener('change', () => _refreshRegionOptions('oss-cliente', 'oss-region'));
+      document.getElementById('vip-cliente-select').addEventListener('change', () => _refreshRegionOptions('vip-cliente-select', 'vip-oss-select'));
     });
+
+    let _clientesCache = [];
+    async function populateClienteSelects() {
+      try {
+        const res = await fetch('/api/clientes');
+        _clientesCache = await res.json();
+      } catch (err) { console.error('Erro ao carregar clientes nos selects:', err); _clientesCache = []; }
+      const opts = _clientesCache.map(c => `<option value="${escapeHTML(c.name)}">${escapeHTML(c.name)}</option>`).join('');
+      const ossSel = document.getElementById('oss-cliente');
+      const vipSel = document.getElementById('vip-cliente-select');
+      if (ossSel) ossSel.innerHTML = opts || '<option value="">(cadastre um cliente)</option>';
+      if (vipSel) vipSel.innerHTML = opts || '<option value="">(cadastre um cliente)</option>';
+      _refreshRegionOptions('oss-cliente', 'oss-region');
+      _refreshRegionOptions('vip-cliente-select', 'vip-oss-select');
+    }
+
+    function _refreshRegionOptions(clienteSelId, regionSelId) {
+      const regionSel = document.getElementById(regionSelId);
+      if (!regionSel) return;
+      const cName = document.getElementById(clienteSelId)?.value;
+      const c = _clientesCache.find(x => x.name === cName);
+      const regs = (c && c.regionais) ? c.regionais.map(r => r.region) : [];
+      const list = regs.length ? regs : ['SP', 'RJ'];
+      const prev = regionSel.value;
+      regionSel.innerHTML = list.map(r => `<option value="${escapeHTML(r)}">${escapeHTML(r)}</option>`).join('');
+      if ([...regionSel.options].some(o => o.value === prev)) regionSel.value = prev;
+    }
 
     // ── Utilitários ──────────────────────────────────────────────
     function slugify(str) {
@@ -1105,10 +1252,13 @@
     function switchTab(tab) {
       tabBtnEventos.classList.toggle('active', tab === 'eventos');
       tabBtnVips.classList.toggle('active',    tab === 'vips');
-      panelEventos.style.display = tab === 'eventos' ? '' : 'none';
-      panelVips.style.display    = tab === 'vips'    ? '' : 'none';
-      if (tab === 'eventos') loadEvents();
-      if (tab === 'vips')    loadVips();
+      tabBtnClientes.classList.toggle('active', tab === 'clientes');
+      panelEventos.style.display  = tab === 'eventos'  ? '' : 'none';
+      panelVips.style.display     = tab === 'vips'     ? '' : 'none';
+      panelClientes.style.display = tab === 'clientes' ? '' : 'none';
+      if (tab === 'eventos')  loadEvents();
+      if (tab === 'vips')     loadVips();
+      if (tab === 'clientes') loadClientes();
     }
 
     function showEventForm() {
@@ -1485,6 +1635,7 @@
           availability_critical: parseFloat(document.getElementById('avail-crit').value)
         },
         oss: {
+          cliente:       document.getElementById('oss-cliente').value.trim(),
           region:        document.getElementById('oss-region').value.trim(),
           import_folder: document.getElementById('oss-folder').value.trim(),
           base_url:      document.getElementById('oss-url').value.trim()
@@ -1565,11 +1716,13 @@
       endTimeInput.value     = event.end_time   ? event.end_time.substring(0, 16)   : '';
 
       if (event.oss) {
+        document.getElementById('oss-cliente').value = event.oss.cliente       || '';
+        _refreshRegionOptions('oss-cliente', 'oss-region');
         document.getElementById('oss-region').value = event.oss.region        || '';
         document.getElementById('oss-folder').value = event.oss.import_folder || '';
         document.getElementById('oss-url').value    = event.oss.base_url      || '';
       } else {
-        document.getElementById('oss-region').value = '';
+        _refreshRegionOptions('oss-cliente', 'oss-region');
         document.getElementById('oss-folder').value = '';
         document.getElementById('oss-url').value    = '';
       }
@@ -1624,7 +1777,7 @@
       startTimeInput.value = '';
       endTimeInput.value   = '';
 
-      document.getElementById('oss-region').value = 'SP';
+      _refreshRegionOptions('oss-cliente', 'oss-region');
       document.getElementById('oss-folder').value = '';
       document.getElementById('oss-url').value    = '';
       document.getElementById('pm-task-id').value = '';
@@ -1694,15 +1847,17 @@
       }
       vips.sort((a, b) => (a.name || '').localeCompare(b.name || ''));
       vipsList.innerHTML = vips.map(vip => {
-        const role   = vip.role    ? escapeHTML(vip.role)  : '—';
-        const oss    = vip.oss     ? escapeHTML(vip.oss)   : '—';
-        const taskId = vip.task_id ? vip.task_id           : '—';
-        const notes  = vip.notes   ? escapeHTML(vip.notes) : '';
+        const role    = vip.role    ? escapeHTML(vip.role)    : '—';
+        const cliente = vip.cliente ? escapeHTML(vip.cliente) : '—';
+        const oss     = vip.oss     ? escapeHTML(vip.oss)     : '—';
+        const taskId  = vip.task_id ? vip.task_id             : '—';
+        const notes   = vip.notes   ? escapeHTML(vip.notes)   : '';
         return `
           <div class="vip-card">
             <div style="display:flex; flex-direction:column; gap:2px; flex:1; min-width:0;">
                <span class="vip-name">${escapeHTML(vip.name)}</span>
                <div class="vip-detail">
+                 <span><strong>Cliente:</strong> ${cliente}</span>
                  <span><strong>OSS:</strong> ${oss}</span>
                  <span><strong>Cargo:</strong> ${role}</span>
                  <span><strong>Task ID:</strong> ${taskId}</span>
@@ -1738,6 +1893,7 @@
       const payload = {
         id, name,
         role:    vipRoleInput.value.trim()  || null,
+        cliente: document.getElementById('vip-cliente-select').value,
         oss:     document.getElementById('vip-oss-select').value,
         task_id: taskIdRaw ? parseInt(taskIdRaw, 10) : null,
         notes:   vipNotesInput.value.trim() || null
@@ -1797,7 +1953,9 @@
       vipNameInput.value   = vip.name    || '';
       vipIdInput.value     = vip.id      || '';
       vipRoleInput.value   = vip.role    || '';
-      document.getElementById('vip-oss-select').value = vip.oss || 'SP';
+      document.getElementById('vip-cliente-select').value = vip.cliente || '';
+      _refreshRegionOptions('vip-cliente-select', 'vip-oss-select');
+      document.getElementById('vip-oss-select').value = vip.oss || '';
       vipTaskIdInput.value = vip.task_id || '';
       vipNotesInput.value  = vip.notes   || '';
     }
@@ -1816,7 +1974,7 @@
       vipNameInput.value   = '';
       vipIdInput.value     = '';
       vipRoleInput.value   = '';
-      document.getElementById('vip-oss-select').value = 'SP';
+      _refreshRegionOptions('vip-cliente-select', 'vip-oss-select');
       vipTaskIdInput.value = '';
       vipNotesInput.value  = '';
       vipFeedbackMsg.className   = 'feedback';
@@ -1833,6 +1991,162 @@
           loadVips();
         } else {
           alert(`Erro ao excluir VIP: ${result.detail || 'Erro desconhecido'}`);
+        }
+      } catch (err) {
+        alert(`Erro de comunicação: ${err.message}`);
+      }
+    }
+
+    // ══════════════ CLIENTES ══════════════
+
+    function showClienteForm() { clientesListView.style.display = 'none'; clientesFormView.style.display = ''; }
+    function hideClienteForm() { clientesFormView.style.display = 'none'; clientesListView.style.display = ''; }
+
+    function showClienteFeedback(msg, type) {
+      clienteFeedbackMsg.textContent = msg;
+      clienteFeedbackMsg.className = `feedback ${type}`;
+    }
+
+    function addRegionalRow(region = '', ip = '') {
+      const row = document.createElement('div');
+      row.className = 'regional-row';
+      row.style = 'display:flex; gap:8px; margin-bottom:8px; align-items:center;';
+      row.innerHTML = `
+        <input type="text" class="reg-region" placeholder="Regional (ex: SP)" value="${escapeHTML(region)}" style="width:140px;">
+        <input type="text" class="reg-ip" placeholder="IP / Base URL (ex: https://10.220.50.9:31943)" value="${escapeHTML(ip)}" style="flex:1;">
+        <button type="button" class="btn btn-secondary reg-remove" style="padding:6px 10px;">✕</button>`;
+      row.querySelector('.reg-remove').addEventListener('click', () => row.remove());
+      clienteRegionaisList.appendChild(row);
+    }
+
+    function _previewLogo() {
+      const file = clienteLogoInput.files[0];
+      if (!file) { clienteLogoPreview.style.display = 'none'; return; }
+      clienteLogoPreview.src = URL.createObjectURL(file);
+      clienteLogoPreview.style.display = '';
+    }
+
+    function resetClienteForm() {
+      editingClienteId = null;
+      document.getElementById('cliente-edit-banner').style.display = 'none';
+      document.getElementById('cliente-form-section-title').innerHTML = `
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="color:var(--info)"><path d="M12 5v14M5 12h14"/></svg> Cadastrar Novo Cliente`;
+      clienteNameInput.value = '';
+      clienteLogoInput.value = '';
+      clienteLogoPreview.style.display = 'none';
+      clienteLogoPreview.src = '';
+      clienteRegionaisList.innerHTML = '';
+      addRegionalRow();
+      clienteFeedbackMsg.className = 'feedback';
+      clienteFeedbackMsg.textContent = '';
+    }
+
+    async function loadClientes() {
+      try {
+        const res = await fetch('/api/clientes');
+        loadedClientesList = await res.json();
+        renderClientes(loadedClientesList);
+      } catch (err) {
+        clientesList.innerHTML = `<div class="empty-state" style="color:var(--danger)">Erro ao buscar clientes: ${err.message}</div>`;
+      }
+    }
+
+    function renderClientes(clientes) {
+      if (!clientes || clientes.length === 0) {
+        clientesList.innerHTML = '<div class="empty-state">Nenhum cliente cadastrado.</div>';
+        return;
+      }
+      clientesList.innerHTML = clientes.map(c => {
+        const logo = c.logo ? `<img src="/logos/${escapeHTML(c.logo)}" alt="" style="height:36px; max-width:90px; object-fit:contain;">` : '';
+        const regs = (c.regionais || []).map(r =>
+          `<span class="vip-detail"><strong>${escapeHTML(r.region)}:</strong> ${escapeHTML(r.ip || '—')}</span>`).join(' ');
+        return `
+          <div class="vip-card">
+            <div style="display:flex; align-items:center; gap:12px; flex:1; min-width:0;">
+              ${logo}
+              <div style="min-width:0;">
+                <span class="vip-name">${escapeHTML(c.name)}</span>
+                <div class="vip-detail" style="flex-wrap:wrap; gap:10px;">${regs || '<span style="color:var(--text-muted)">sem regionais</span>'}</div>
+              </div>
+            </div>
+            <div style="display:flex; gap:6px; flex-shrink:0;">
+              <button class="event-action-btn edit-btn" title="Editar" onclick="editCliente('${escapeHTML(c.id)}')">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 1 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+              </button>
+              <button class="event-action-btn" title="Excluir" onclick="deleteCliente('${escapeHTML(c.id)}','${escapeHTML(c.name)}')">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/></svg>
+              </button>
+            </div>
+          </div>`;
+      }).join('');
+    }
+
+    function editCliente(id) {
+      const c = loadedClientesList.find(x => x.id === id);
+      if (!c) { showClienteFeedback('Cliente não encontrado.', 'danger'); return; }
+      resetClienteForm();
+      editingClienteId = id;
+      showClienteForm();
+      document.getElementById('cliente-edit-banner').style.display = 'flex';
+      document.getElementById('editing-cliente-name').textContent = c.name;
+      document.getElementById('cliente-form-section-title').innerHTML = `
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="color:var(--warning)"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 1 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg> Editar Cliente`;
+      clienteNameInput.value = c.name || '';
+      clienteRegionaisList.innerHTML = '';
+      (c.regionais || []).forEach(r => addRegionalRow(r.region, r.ip));
+      if (!(c.regionais || []).length) addRegionalRow();
+      if (c.logo) { clienteLogoPreview.src = `/logos/${c.logo}`; clienteLogoPreview.style.display = ''; }
+    }
+
+    async function submitCliente() {
+      const name = clienteNameInput.value.trim();
+      if (!name) { showClienteFeedback('Informe o nome do cliente.', 'danger'); return; }
+      const regionais = [...clienteRegionaisList.querySelectorAll('.regional-row')].map(row => ({
+        region: row.querySelector('.reg-region').value.trim(),
+        ip:     row.querySelector('.reg-ip').value.trim(),
+      })).filter(r => r.region);
+
+      const payload = { name, regionais };
+      if (editingClienteId) payload.id = editingClienteId;
+
+      btnClienteSubmit.disabled = true;
+      try {
+        const res = await fetch('/api/clientes', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload)
+        });
+        const result = await res.json();
+        if (!res.ok || !result.ok) { showClienteFeedback(`Erro: ${result.detail || 'desconhecido'}`, 'danger'); return; }
+        const cid = result.id;
+        // Envia a logo, se selecionada.
+        if (clienteLogoInput.files[0]) {
+          const fd = new FormData();
+          fd.append('file', clienteLogoInput.files[0]);
+          const up = await fetch(`/api/clientes/${cid}/logo`, { method: 'POST', body: fd });
+          if (!up.ok) { const e = await up.json(); showClienteFeedback(`Cliente salvo, mas a logo falhou: ${e.detail || ''}`, 'danger'); }
+        }
+        showClienteFeedback(editingClienteId ? 'Cliente atualizado.' : 'Cliente cadastrado.', 'success');
+        resetClienteForm();
+        hideClienteForm();
+        loadClientes();
+        populateClienteSelects();  // novos clientes aparecem nos seletores de evento/VIP
+      } catch (err) {
+        showClienteFeedback(`Erro de comunicação: ${err.message}`, 'danger');
+      } finally {
+        btnClienteSubmit.disabled = false;
+      }
+    }
+
+    async function deleteCliente(id, name) {
+      if (!confirm(`Excluir cliente "${name}" (${id})? Eventos/credenciais que o referenciam não serão alterados.`)) return;
+      try {
+        const res = await fetch(`/api/clientes/${id}`, { method: 'DELETE' });
+        const result = await res.json();
+        if (res.ok && result.ok) {
+          if (editingClienteId === id) { resetClienteForm(); hideClienteForm(); }
+          loadClientes();
+        } else {
+          alert(`Erro ao excluir cliente: ${result.detail || 'desconhecido'}`);
         }
       } catch (err) {
         alert(`Erro de comunicação: ${err.message}`);

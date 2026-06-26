@@ -13,7 +13,6 @@ Usado em dois contextos:
 
 import json
 import os
-import shutil
 import sys
 import time
 import logging
@@ -22,83 +21,27 @@ from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
-# Credenciais do iManager por regional. Cada OSS (SP, RJ, …) tem sua conta própria.
-# Precedência de resolução (ver _resolve_credentials): data/credentials.json[REGIÃO]
-# → _REGIONAL_CREDENTIALS[REGIÃO] → defaults. O arquivo externo permite trocar a conta
-# de uma regional SEM recompilar o .exe portátil.
-_DEFAULT_USERNAME = "T3524545"
-_DEFAULT_PASSWORD = "41140362@del02"
-_REGIONAL_CREDENTIALS = {
-    "SP": {"username": "T3524545", "password": "41140362@del02"},
-    # Conta dedicada da regional RJ — preencha aqui ou em data/credentials.json:
-    "RJ": {"username": "", "password": ""},
-}
+# Credenciais e catálogo de clientes/regionais vivem em core/credentials.py (fonte única).
+# Hierarquia: Cliente → Regional → base_url. Precedência das credenciais:
+# data/credentials.json[CLIENTE][REGIÃO] → [CLIENTE]["_shared"] → vazio (sem fallback hardcoded).
+from core import credentials as _credentials
 
 
 def _data_dir() -> Path:
-    """Diretório de dados PERSISTENTE. No .exe (frozen) fica ao lado do executável —
-    NÃO em Path(__file__).parent.parent, que no onefile é o _MEIPASS temporário apagado a
-    cada execução (deixava o browser_profile/credentials.json frios e quebrava o headless)."""
-    if getattr(sys, "frozen", False):
-        return Path(sys.executable).parent / "data"
-    return Path(__file__).parent.parent / "data"
-
-
-def _credentials_file() -> Path:
-    return _data_dir() / "credentials.json"
+    """Diretório de dados PERSISTENTE (delega a core.credentials)."""
+    return _credentials.data_dir()
 
 
 def _seed_credentials():
-    """1ª execução do .exe: se não houver credentials.json gravável ao lado do executável,
-    copia a cópia EMBUTIDA no bundle (_MEIPASS/data/credentials.json). Mantém o .exe
-    compartilhável sozinho — sem isso, rodar só o executável (sem a pasta data/ ao lado)
-    deixava o RJ sem credenciais e abria o login manual. O arquivo semeado continua editável
-    (trocar a conta da regional sem recompilar). Espelha server._seed_server_data()."""
-    if not getattr(sys, "frozen", False):
-        return
-    target = _credentials_file()
-    if target.exists():
-        return
-    bundled = Path(getattr(sys, "_MEIPASS", Path(sys.executable).parent)) / "data" / "credentials.json"
-    if bundled.exists() and bundled.resolve() != target.resolve():
-        try:
-            target.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copy2(bundled, target)
-            logger.info(f"credentials.json semeado a partir de {bundled} -> {target}")
-        except Exception as e:
-            logger.warning(f"Falha ao semear credentials.json: {e}")
+    """1ª execução do .exe: semeia data/clientes.json (catálogo) e data/credentials.json (vazio)
+    ao lado do executável. Delegado a core.credentials.seed_files()."""
+    _credentials.seed_files()
 
 
-def _resolve_credentials(region: str = "", base_url: str = "") -> tuple:
-    """Resolve (username, password) da regional. Precedência:
-    data/credentials.json[REGIÃO] → _REGIONAL_CREDENTIALS[REGIÃO] → defaults.
-
-    IMPORTANTE: os defaults são a conta de SP. NUNCA caímos neles para uma regional
-    DIFERENTE (ex.: RJ) — usar a conta de SP no acesso do RJ é um erro de credencial.
-    Quando a regional não tem conta configurada, devolvemos credenciais VAZIAS para o
-    operador digitar manualmente (e configurar em data/credentials.json se quiser autofill)."""
-    region = (region or "").upper()
-    try:
-        f = _credentials_file()
-        if f.exists():
-            data = json.loads(f.read_text(encoding="utf-8"))
-            entry = data.get(region) or {}
-            if entry.get("username") and entry.get("password"):
-                return entry["username"], entry["password"]
-    except Exception as e:
-        logger.warning(f"Não foi possível ler credentials.json: {e}")
-    entry = _REGIONAL_CREDENTIALS.get(region) or {}
-    if entry.get("username") and entry.get("password"):
-        return entry["username"], entry["password"]
-    # Só usa os defaults (SP) para SP ou quando nenhuma regional foi informada.
-    if region in ("", "SP"):
-        return _DEFAULT_USERNAME, _DEFAULT_PASSWORD
-    logger.warning(
-        f"Sem credenciais configuradas para a regional '{region}'. Deixando o login "
-        f"em branco para preenchimento manual (configure data/credentials.json[\"{region}\"] "
-        f"para autofill)."
-    )
-    return "", ""
+def _resolve_credentials(cliente: str = "", region: str = "") -> tuple:
+    """Resolve (username, password) de (cliente, regional). Delega a core.credentials.
+    Faltando credencial, devolve vazio para preenchimento manual no navegador."""
+    return _credentials.resolve_credentials(cliente, region)
 
 # Códigos de saída — o collector os usa para diferenciar a causa da falha.
 EXIT_SUCCESS = 0           # sessão renovada E autenticada (sonda REST OK)
@@ -192,17 +135,18 @@ def _probe_authenticated(page, base_url: str, module: str, session_data: dict) -
 
 def run(headless: bool = True, module: str = "both",
         base_url: str = "https://10.220.50.9:31943",
-        session_file: str = None, region: str = "") -> int:
+        session_file: str = None, region: str = "", cliente: str = "") -> int:
     """
     Renova a sessão do iManager. Retorna EXIT_SUCCESS/EXIT_GENERIC_FAIL/EXIT_NEEDS_INTERACTIVE.
     `module`: 'trace' | 'monitoring' | 'both'.
-    `region`: regional do OSS (SP, RJ, …) — define quais credenciais usar.
+    `cliente`/`region`: cliente (TIM, Vivo, …) e regional do OSS (SP, RJ, …) — definem quais
+    credenciais usar (Cliente → Regional).
     """
     _ensure_browsers_path()
-    _seed_credentials()  # garante credentials.json ao lado do .exe na 1ª execução
+    _seed_credentials()  # garante clientes.json + credentials.json ao lado do .exe na 1ª execução
 
-    # Credenciais da regional (conta dedicada por OSS).
-    username, password = _resolve_credentials(region, base_url)
+    # Credenciais do par (cliente, regional). Conta dedicada por OSS.
+    username, password = _resolve_credentials(cliente, region)
 
     # Import tardio: só carrega o Playwright quando a renovação é de fato acionada.
     from playwright.sync_api import sync_playwright, Request

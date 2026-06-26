@@ -110,7 +110,27 @@
       "PowerShell(& \"c:\\\\Users\\\\a50057663\\\\Desktop\\\\Automa��es\\\\SmartEvents\\\\.venv\\\\Scripts\\\\pip3.exe\" install pytest 2>&1)",
       "PowerShell(git ls-files | Where-Object { $_ -notmatch '^\\\\.venv/' -and $_ -notmatch 'NPSmart' -and $_ -notmatch '\\\\.pytest_cache' })",
       "PowerShell(Write-Output \"=== docs tree ===\"; Get-ChildItem -Recurse docs | Where-Object { -not $_.PSIsContainer } | ForEach-Object { $_.FullName.Replace\\(\\(Get-Location\\).Path + '\\\\',''\\) }; Write-Output \"=== root dirs ===\"; Get-ChildItem -Directory | Select-Object -ExpandProperty Name; Write-Output \"=== to-delete exists? ===\"; Test-Path to-delete; Write-Output \"=== events dir exists? ===\"; Test-Path events; Write-Output \"=== server_data ===\"; if \\(Test-Path server_data\\) { Get-ChildItem -Recurse server_data | Select-Object -ExpandProperty Name } else { 'no server_data' })",
-      "PowerShell(Write-Output \"=== tests ===\"; Get-ChildItem tests | Select-Object Name; Write-Output \"=== requirements ===\"; Get-Content requirements.txt; Write-Output \"=== smart-events.html size/lines ===\"; \\(Get-Content docs/smart-events.html | Measure-Object -Line\\).Lines)"
+      "PowerShell(Write-Output \"=== tests ===\"; Get-ChildItem tests | Select-Object Name; Write-Output \"=== requirements ===\"; Get-Content requirements.txt; Write-Output \"=== smart-events.html size/lines ===\"; \\(Get-Content docs/smart-events.html | Measure-Object -Line\\).Lines)",
+      "Bash(python -c \"import ast; ast.parse\\(open\\('core/collector.py',encoding='utf-8'\\).read\\(\\)\\); ast.parse\\(open\\('core/session_renew.py',encoding='utf-8'\\).read\\(\\)\\); print\\('OK sintaxe'\\)\")",
+      "Bash(cd \"c:/Users/a50057663/.claude/projects/c--Users-a50057663-Desktop-Automa--es-SmartEvents/memory\")",
+      "Bash(cat MEMORY.md)",
+      "Bash(find \"c:/Users/a50057663/.claude/projects/c--Users-a50057663-Desktop-Automa--es-SmartEvents\" -type f 2>/dev/null | head -50)",
+      "Read(//c/Users/a50057663/.claude/projects/c--Users-a50057663-Desktop-Automa--es-SmartEvents/**)",
+      "Bash(python -c \"import json; d=json.load\\(open\\('data/credentials.json',encoding='utf-8'\\)\\); print\\('Regioes configuradas:', list\\(d.keys\\(\\)\\)\\); print\\({k:{'username': \\(v.get\\('username'\\) or ''\\)[:3]+'***' if v.get\\('username'\\) else '\\(vazio\\)', 'password': 'definida' if v.get\\('password'\\) else '\\(vazio\\)'} for k,v in d.items\\(\\)}\\)\")",
+      "Bash(python -c \"import ast; [ast.parse\\(open\\(f,encoding='utf-8'\\).read\\(\\)\\) for f in ['core/session_renew.py','main.spec','build.py']]; print\\('OK sintaxe: session_renew.py, main.spec, build.py'\\)\")",
+      "PowerShell(python -c \"import core.credentials as c; print\\(c.resolve_base_url\\({'cliente':'TIM','region':'SP'}\\)\\); print\\(c.resolve_base_url\\({'cliente':'TIM','region':'RJ'}\\)\\); print\\(c.resolve_credentials\\('TIM','SP'\\)\\); print\\(c.status_for\\('TIM'\\)\\)\")",
+      "PowerShell(python -c \"import api.api, core.collector, core.session_renew, core.database, main; print\\('imports OK'\\)\")",
+      "PowerShell(python -m pytest -q -m \"not vpn\" 2>&1)",
+      "Bash(cat >> *)",
+      "PowerShell(python -m pytest tests/test_credentials.py -q 2>&1)",
+      "PowerShell(python -c \"import server, api.api, core.database, core.credentials, main; print\\('imports OK'\\)\")",
+      "PowerShell($env:TESTPORT=\"8077\"; Start-Process -FilePath python -ArgumentList \"-m\",\"uvicorn\",\"server:app\",\"--port\",\"8077\" -WindowStyle Hidden -RedirectStandardError \"$env:TEMP\\\\srv_err.log\" -RedirectStandardOutput \"$env:TEMP\\\\srv_out.log\"; Start-Sleep -Seconds 4; Write-Output \"server started\")",
+      "PowerShell($tmp = Join-Path $env:TEMP \"vipcheck\"; New-Item -ItemType Directory -Force $tmp | Out-Null; foreach \\($f in @\\(\"vip\",\"bridge\"\\)\\) { Copy-Item \"frontend\\\\js\\\\$f.js\" \"$tmp\\\\$f.mjs\" -Force; node --check \"$tmp\\\\$f.mjs\"; if \\($?\\) { \"OK $f\" } else { \"FAIL $f\" } })",
+      "PowerShell($tmp = Join-Path $env:TEMP \"vipcheck\"; Copy-Item \"frontend\\\\js\\\\vip.js\" \"$tmp\\\\vip.mjs\" -Force; node --check \"$tmp\\\\vip.mjs\"; if \\($?\\) { \"OK vip\" } else { \"FAIL vip\" })",
+      "PowerShell($tmp = Join-Path $env:TEMP \"vipcheck\"; Copy-Item \"frontend\\\\js\\\\kpi.js\" \"$tmp\\\\kpi.mjs\" -Force; node --check \"$tmp\\\\kpi.mjs\"; if \\($?\\) { \"OK kpi\" } else { \"FAIL kpi\" })"
+    ],
+    "additionalDirectories": [
+      "c:\\Users\\a50057663\\Desktop\\Automações\\SmartEvents\\.claude"
     ]
   }
 }

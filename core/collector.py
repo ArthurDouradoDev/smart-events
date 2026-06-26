@@ -43,6 +43,7 @@ else:
 import urllib3
 
 from core import database as db
+from core import credentials
 from core.session_renew import (
     EXIT_SUCCESS,
     EXIT_GENERIC_FAIL,
@@ -352,8 +353,10 @@ class HttpCollector(BaseCollector):
         self._session_built_roarand: dict = {}
         self._renew_lock = threading.Lock()
         self._oss_tz_offset_min = event_config.get("oss", {}).get("timezone_offset_min", -180)
-        # Regional do OSS (SP, RJ, …) — usada para escolher as credenciais por regional.
+        # Cliente (TIM, Vivo, …) e regional do OSS (SP, RJ, …) — escolhem as credenciais
+        # (Cliente → Regional) na renovação de sessão.
         self._region = (event_config.get("oss", {}).get("region") or "").upper()
+        self._cliente = (event_config.get("oss", {}).get("cliente") or "").strip()
 
         # Build obj_no-to-cell-info mapping for KPIs.
         # _static_obj_nos: obj_nos explicitly defined in the event config (used in API payload).
@@ -599,13 +602,13 @@ class HttpCollector(BaseCollector):
 
     @classmethod
     def run_interactive_reauth(cls, base_url: str, session_file, region: str = "",
-                              respect_cooldown: bool = False) -> dict:
+                              respect_cooldown: bool = False, cliente: str = "") -> dict:
         """Abre o navegador VISÍVEL (single-flight) para o operador concluir o login +
         CAPTCHA, captura a sessão e a grava. Retorna {'ok':bool,...}.
 
         - single-flight: nunca abre duas janelas simultâneas (monitoring + trace).
         - respect_cooldown=True (auto-open): pula se houve falha/cancelamento recente.
-        - region: regional do OSS, escolhe as credenciais por regional (SP, RJ, …).
+        - cliente/region: escolhem as credenciais (Cliente → Regional) para o autofill do login.
         """
         from datetime import timedelta
         if respect_cooldown:
@@ -621,6 +624,7 @@ class HttpCollector(BaseCollector):
                 "--base-url", base_url,
                 "--session-file", str(session_file),
                 "--region", region or "",
+                "--cliente", cliente or "",
             ]
             logger.info(f"[reauth] Abrindo navegador visível para reautenticação ({base_url})...")
             result = subprocess.run(
@@ -659,10 +663,11 @@ class HttpCollector(BaseCollector):
         if cd and datetime.utcnow() < cd:
             return
         base_url, session_file, region = self.base_url, self._session_file, self._region
+        cliente = self._cliente
 
         def _worker():
             res = HttpCollector.run_interactive_reauth(
-                base_url, session_file, region=region, respect_cooldown=True)
+                base_url, session_file, region=region, respect_cooldown=True, cliente=cliente)
             if res.get("ok"):
                 # Descarta as sessões em cache desta instância para releitura imediata.
                 self._invalidate_session("monitoring")
@@ -832,6 +837,7 @@ class HttpCollector(BaseCollector):
                         "--base-url", self.base_url,
                         "--session-file", str(self._session_file),
                         "--region", self._region,
+                        "--cliente", self._cliente,
                     ],
                     capture_output=True,
                     text=True,
@@ -1681,9 +1687,7 @@ def build_collector(event_config: dict, mock: bool = False) -> BaseCollector:
     if import_folder and Path(import_folder).exists():
         return CsvCollector(event_config, import_folder)
 
-    base_url = oss.get("base_url", "")
-    if not base_url:
-        region = oss.get("region", "SP").upper()
-        base_url = _REGIONAL_BASE_URLS.get(region, _DEFAULT_BASE_URL)
+    # Resolve a base_url pelo catálogo Cliente→Regional (oss.base_url tem precedência).
+    base_url = credentials.resolve_base_url(oss)
 
     return HttpCollector(event_config, base_url)

@@ -1,0 +1,2221 @@
+﻿"	-48V Power too High Alarm",6486
+"	-48V Power too Low Alarm",6488
+13M Clock Maintenance Alarm,2989
+13M Maintenance Alarm,4760
+16K Signaling Not Support alarm,3272
+1PPS State Abnormal,20201
+4 Diversity Alarm,3138
+4-way Diversity receiving alarm,3124
+802.1x Authentication Failure,26831
+89C52 FLASH Memory alarm,3164
+8K reference clock alarm,3204
+A Certificate Has Expired(CCE),375
+A Certificate Is About to Expire(CCE),376
+AAL2 Path Blocked,21561
+AAL2 Path Fault,25838
+AAS Board Not In Position,26560
+AAS Hardware Fault,26561
+Abis Control Port Fault,28060
+Abnormal Alarm Service Health Check,100007
+Abnormal Board Temperature Alarm,13320
+Abnormal Counters Over the Limit,603
+Abnormal Database Running Status,1060
+Abnormal Deployment of the Primary and Secondary Sites,101204
+Abnormal Fan Speed,4200
+Abnormal File Replication Between the Local Active and Standby Nodes,1078
+Abnormal GPS Alarm,13322
+Abnormal Heartbeat,101201
+Abnormal Heartbeat Between OSMU and OSS,1061
+Abnormal Information About DIP Switch of Subrack,20249
+Abnormal IP Clock Link Alarm,9922
+Abnormal NIC Status,30001100
+Abnormal Power Input for a Subrack,20051
+Abnormal Receiving on OLP Trunk Optical Fiber Port,25732
+Abnormal Replication,101200
+Abnormal SSH Trust Relationship,1045
+Abnormal Temperature at the Air Inlet of the Cabinet,13100
+Abnormal Temperature at the Air Outlet of the Cabinet,13098
+AC Arrester Failure,6050
+AC Input DDRM Over Configuration Alarm,4936
+AC Input Power Failure,28003
+AC Lightning Arrester Failure Alarm,4850
+AC Lost or Out-of-Range (PSN Status),367
+AC Lowvoltage Alarm,4122
+AC Off Alarm,12840
+AC Off or Battery Low Alarm,3446
+AC Over Voltage Alarm,4959
+AC Overvoltage Alarm,4647.333333
+AC Surge Protector Fault,23537
+AC Surge Protector Fault Alarm,10796
+AC Under Voltage Alarm,4961
+AC Undervoltage Alarm,5704
+Access Control Alarm,4942
+Active and Standby OMU Communication Link Failure,20702
+Active OMU Communication Excessive Error Packet Rate,20910
+Active Workspace Version Unavailable,26250
+Active/Standby Status Inconsistency Between Built-in NE and Host NE,20907
+Adjacent Node Congestion,21603
+Adjacent Node IP Address Ping Failure,21392
+Adjacent Node IP Path Excessive Packet Loss Rate,21395
+Adjacent Node IP Path Ping Failure,21393
+Aggregated Alarm,100901
+Air-Conditioner Protection Alarm,5580
+Air-conditioner/Heat-exchanger Alarm,3496
+AIS Alarm,3468
+AISU Satellite Card Abnormal,26763
+Alarm Box Disconnected,20740
+Alarm indicating that more than 30 objects meet the threshold condition in the same period,1500
+Alarm indicating that the threshold for Cell activation success rate exceeds the limit,1502
+Alarm indicating that the threshold for Cell attach success rate exceeds the limit,1501
+Alarm indicating that the threshold for Cell inter-SGSN RAU success rate exceeds the limit,1504
+Alarm indicating that the threshold for Cell intra-SGSN RAU success rate exceeds the limit,1503
+Alarm indicating that the threshold for MME attach success rate exceeds the limit,1515
+Alarm indicating that the threshold for MME create bearer success rate exceeds the limit,1516
+Alarm indicating that the threshold for MME inter-MME TAU success rate exceeds the limit,1517
+Alarm indicating that the threshold for MME intra-MME TAU success rate exceeds the limit,1518
+Alarm indicating that the threshold for RAI activation success rate exceeds the limit,1506
+Alarm indicating that the threshold for RAI attach success rate exceeds the limit,1505
+Alarm indicating that the threshold for RAI inter-SGSN RAU success rate exceeds the limit,1508
+Alarm indicating that the threshold for RAI intra-SGSN RAU success rate exceeds the limit,1507
+Alarm indicating that the threshold for SGSN activation success rate exceeds the limit,1510
+Alarm indicating that the threshold for SGSN attach success rate exceeds the limit,1509
+Alarm indicating that the threshold for TAI attach success rate exceeds the limit,1511
+Alarm indicating that the threshold for TAI create bearer success rate exceeds the limit,1512
+Alarm indicating that the threshold for TAI inter-MME TAU success rate exceeds the limit,1513
+Alarm indicating that the threshold for TAI intra-MME TAU success rate exceeds the limit,1514
+Alarm indicating that the Trace Server is disconnected from the SAU data channel,781
+Alarm of the Failure to Connect the Master and Standby Syslog Servers,122
+Alarm of the Switchover to the Standby Syslog Server,121
+Alarm Receiving Failures Due to Device Disconnection,101207
+ALCAP Fault,25837
+ALD Communication Alarm,9102
+ALD Current Abnormal Alarm,8531
+ALD Failure Alarm,12818
+ALD Hardware Fault,26752
+ALD Maintenance Link Failure,26541
+ALD Permission Configuration and Running Data Inconsistency,26762
+All Cell Access Barred Under a BSC,21838
+ALM-Traffic Threshold Alarm (Major),1522
+ALM-Traffic Threshold Alarm (Minor),1521
+ALM-Traffic Threshold Alarm (Warning),1520
+ALM-Users Threshold Alarm (Major),1525
+ALM-Users Threshold Alarm (Minor),1524
+ALM-Users Threshold Alarm (Warning),1523
+Ambient Humidity Abnormal,16568
+Ambient Humidity Too High,5638
+Ambient Humidity Too Low,5640
+Ambient Humidity Unacceptable,25651
+Ambient Temperature Abnormal,16566.5
+Ambient Temperature Too High Alarm,5220.666667
+Ambient Temperature Too Low Alarm,5222.666667
+Ambient Temperature Unacceptable,25650
+"An OSS User Is Added to the Administrators, SMManagers, or Subdomain Security Administrator Group",299
+Annual software service fee has expired,999999990
+Annual software service fee is due soon,999999989
+Antenna and TMA Control Unit Communication Alarm,10246
+Antenna Parameter Value Fluctuation Exceeds the Threshold,411
+APC alarm,3450
+APM Board Communication Alarm,3952
+APMU extended B1 alarm,3924
+APMU extended BB alarm,3944
+APMU extended BC alarm,3946
+APMU extended C1 alarm,3956
+APMU extended C2 alarm,3958
+APMU extended CE alarm,3982
+APMU extended CF alarm,3984
+APMU extended D0 alarm,3986
+APMU extended D1 alarm,3988
+APMU extended D2 alarm,3990
+APMU extended D3 alarm,3992
+APMU extended D4 alarm,3994
+APMU extended D5 alarm,3996
+APMU extended D6 alarm,3998
+APMU extended D7 alarm,4000
+ARFCN TRX Type Mismatch,4168
+ARP Conflict,21391
+ARP Detection Failure,21406
+ARP Session Fault,25903
+arrester alarm,9758
+ASU Communication alarm,3196
+ASU E1 Port alarm,3194
+ATM Logical Port Congestion,21586
+Audit Log Processing Failure,789
+Authentication Failures Reach the Maximum,100006
+Auto update certificate failed,41
+Automatic Certificate Update Failed,26842
+Automatic Version Rollback,26255
+Available Resources on Management Nodes Are Going to Be Insufficient,650008
+Avalanche alarm,118
+Average I/O Wait Too Long,103606
+Backup Channel Faulty,21386
+Backup clock alarm,11352
+Backup Clock Signal Inputs Faulty,20213
+Backup Data Packages Do Not Exist,1067
+Backup RNC Hardware Capacity Reaching the Limit in RNC in Pool Node Redundancy,22392
+Base Station Being Attacked,25950
+Base Station DC Power Supply Abnormal,26113
+Base Station Frame Number Synchronization Error,26265
+Base Station Service Overload,28230
+Base Station Service Unavailable,26283
+BaseBand Board Temperature Abnormal,5064
+BATERIA EM DESCARGA,65203
+BATERIA LITIO DESCARREGADA,65212
+BATERIA LITIO DESLIGADA,65211
+BATERIA LITIO FORA OPERAÇÃO,65087
+Battery Cabin Heater Fault,25632
+Battery Cabinet Heater Fault Alarm,4422
+Battery Circle Circuit Broken Alarm,5218.666667
+Battery Configuration Inconsistency,25640
+Battery Current Abnormal,13076
+Battery Current Out of Range,25625
+Battery Disconnected,13074
+Battery Failure,25635
+Battery Fuse Broken Alarm,4088
+Battery high temperature alarm,2356
+Battery Not In Position,25634
+Battery Power Off Alarm,4764.4
+Battery Power Unavailable,25624
+Battery Temperature Abnormal,13096
+Battery Temperature Too High Alarm,5227.333333
+Battery Temperature Too Low Alarm,5229.333333
+Battery Temperature Unacceptable,25654
+BBU Board Maintenance Link Failure,26205
+BBU CPRI Interface Error,26234
+BBU CPRI Line Rate Negotiation Abnormal,26246
+BBU CPRI Optical Interface Performance Degraded,26233
+BBU CPRI Optical Module Fault,26230
+BBU CPRI Optical Module or Electrical Port Not Ready,26231
+BBU DC Output Out of Range,26112
+BBU FAN Communication Abnormal,5082
+BBU Fan Not at Full Speed,26111
+BBU Fan Stalled,26110
+BBU IR Interface Error,26324
+BBU IR Line Rate Negotiation Abnormal,26325
+BBU IR Optical Module Fault,26320
+BBU IR Optical Module or Electrical Port Not Ready,26321
+BBU Optical Module Transmit/Receive Fault,26232
+BBU Power Alarm,5086
+BBU Temperature Alarm,9746
+BBU Topology and Configuration Mismatch,26240
+BFD Session Fault,25899
+BICC Link Set Broken,40009
+Blacklisted NE Versions,528
+Board Active-Standby Abnormal,20239
+Board BFN Abnormal,28302
+Board BIOS CRC Fault Alarm,20234
+Board Blocked,25292.61538
+Board Chip Loading Failed,5070
+Board Clock Abnormal,5084
+Board Clock Input Unavailable,26106
+Board Communication Alarm,5478
+Board Communication Fault,20262
+Board Configuration Data Change Invalid,21403
+Board Configuration Error,28019
+Board Configuration Inconsistent with Resource Group Configuration,28350
+Board Downlink Service Processing Channel Abnormal,28301
+Board File System Damaged,26208
+Board Frequent Abnormal Reset,20291
+Board Hardware Failure Alarm,12552
+Board Hardware Fault,25283.53846
+Board Hardware Indication Fault,12850
+Board in Wrong Slot,26207
+Board Initialization Failed,5068
+Board Input Voltage Out of Range,26107
+Board Internal Hardware Abnormal,5066
+Board Maintenance Link Abnormal Alarm,12820
+Board Not In Position,26204
+Board Not Securely Installed,26216
+Board Overload,26202
+Board Power Abnormal,5078
+Board Power on Failed Alarm,5582
+Board Powered Off,26214
+Board Software Auto-Supply Failure,26253
+Board Software Fault,12806
+Board Software Fault Alarm,12294
+Board Software Program Error,26203
+Board Software Synchronization Failure,26254
+Board Startup and Running Failure,20257
+Board Subsystem Unavailable,20242
+Board Temperature Abnormal,20280
+Board Temperature Abnormal Alarm,12573
+Board Temperature too High,20251
+Board Temperature Unacceptable,26104
+Board Transmission Resource Insufficiency,21399
+Board Type and Configuration Mismatch,26251
+Board Type Mismatch,5312
+Board Type Mismatch Alarm,6214.888889
+Board Unavailable,20241
+Board Unrecognizable,26252
+Board Uplink Service Processing Channel Abnormal,28300
+Board Voltage Abnormity Alarm,20233
+Bond NIC Status Abnormal,103608
+Boolean 1 Alarm,6782.5
+Boolean 10 Alarm,5680
+Boolean 11 Alarm,5682
+Boolean 12 Alarm,5684
+Boolean 13 Alarm,5686
+Boolean 14 Alarm,5688
+Boolean 15 Alarm,5690
+Boolean 16 Alarm,5692
+Boolean 17 alarm,6324
+Boolean 18 alarm,6326
+Boolean 19 alarm,6328
+Boolean 2 Alarm,6784.5
+Boolean 20 alarm,6330
+Boolean 21 alarm,6332
+Boolean 22 alarm,6334
+Boolean 23 alarm,6336
+Boolean 24 alarm,6338
+Boolean 25 alarm,6340
+Boolean 26 alarm,6342
+Boolean 27 alarm,6344
+Boolean 28 alarm,6346
+Boolean 29 alarm,6348
+Boolean 3 Alarm,7032
+Boolean 30 alarm,6350
+Boolean 31 alarm,6352
+Boolean 32 alarm,6354
+Boolean 4 Alarm,6788.5
+Boolean 5 Alarm,5798
+Boolean 6 Alarm,5800
+Boolean 7 Alarm,5802
+Boolean 8 Alarm,5676
+Boolean 9 Alarm,5678
+Broadcast Packet Overflow,20224
+Broadcast Packets Exceeding Alarm,25957
+Broken LAPD Link Alarm,4612
+BSC Node Redundancy Configuration Exception,21829
+BSC Node Redundancy Heart Beat Link Break,21828
+BSC Service Object Configuration Incomplete,21839
+BSL Fault,21840
+BSS Internal Voice Channel Abnormal,21814
+BTS Clock Synchronization Abnormal Alarm,12554
+BTS Configuration Conflict Alarm,12559
+BTS License Will Be Revoked,20758
+BTS Maintenance Alarm,3476
+BTS Not Support Configured Function,21806
+BTS Signal Interface Create Fail,21831
+BTS Statistical Alarm,20801
+BTS Unavailable,20804
+BTS Version Rollback Alarm,12552
+BTS3001C Power Abnormal alarm,3200
+BTS3001C Temperature alarm,3198
+BTS3006C/3002E AC Arrester Failure,6036
+BTS3006C/3002E Boolean 1 Alarm,4944
+BTS3006C/3002E Boolean 10 Alarm,4962
+BTS3006C/3002E Boolean 11 Alarm,4964
+BTS3006C/3002E Boolean 12 Alarm,4966
+BTS3006C/3002E Boolean 13 Alarm,4968
+BTS3006C/3002E Boolean 14 Alarm,4970
+BTS3006C/3002E Boolean 15 Alarm,4972
+BTS3006C/3002E Boolean 16 Alarm,4974
+BTS3006C/3002E Boolean 17 Alarm,4976
+BTS3006C/3002E Boolean 18 Alarm,4978
+BTS3006C/3002E Boolean 19 Alarm,4980
+BTS3006C/3002E Boolean 2 Alarm,4946
+BTS3006C/3002E Boolean 20 Alarm,4982
+BTS3006C/3002E Boolean 21 Alarm,4984
+BTS3006C/3002E Boolean 22 Alarm,4986
+BTS3006C/3002E Boolean 23 Alarm,4988
+BTS3006C/3002E Boolean 24 Alarm,4990
+BTS3006C/3002E Boolean 25 Alarm,4992
+BTS3006C/3002E Boolean 26 Alarm,4994
+BTS3006C/3002E Boolean 27 Alarm,4996
+BTS3006C/3002E Boolean 28 Alarm,4998
+BTS3006C/3002E Boolean 29 Alarm,5000
+BTS3006C/3002E Boolean 3 Alarm,4948
+BTS3006C/3002E Boolean 30 Alarm,5002
+BTS3006C/3002E Boolean 31 Alarm,5004
+BTS3006C/3002E Boolean 32 Alarm,5006
+BTS3006C/3002E Boolean 4 Alarm,4950
+BTS3006C/3002E Boolean 5 Alarm,4952
+BTS3006C/3002E Boolean 6 Alarm,4954
+BTS3006C/3002E Boolean 7 Alarm,4956
+BTS3006C/3002E Boolean 8 Alarm,4958
+BTS3006C/3002E Boolean 9 Alarm,4960
+BTS3006C/BTS3002E Boolean 1 Alarm,6122
+BTS3006C/BTS3002E Boolean 10 alarm,6230
+BTS3006C/BTS3002E Boolean 11 alarm,6232
+BTS3006C/BTS3002E Boolean 12 alarm,6234
+BTS3006C/BTS3002E Boolean 13 alarm,6236
+BTS3006C/BTS3002E Boolean 14 alarm,6238
+BTS3006C/BTS3002E Boolean 15 alarm,6240
+BTS3006C/BTS3002E Boolean 16 alarm,6242
+BTS3006C/BTS3002E Boolean 17 alarm,6244
+BTS3006C/BTS3002E Boolean 18 alarm,6246
+BTS3006C/BTS3002E Boolean 19 alarm,6248
+BTS3006C/BTS3002E Boolean 2 Alarm,6124
+BTS3006C/BTS3002E Boolean 20 alarm,6250
+BTS3006C/BTS3002E Boolean 21 alarm,6252
+BTS3006C/BTS3002E Boolean 22 alarm,6254
+BTS3006C/BTS3002E Boolean 23 alarm,6256
+BTS3006C/BTS3002E Boolean 24 alarm,6258
+BTS3006C/BTS3002E Boolean 25 alarm,6260
+BTS3006C/BTS3002E Boolean 26 alarm,6262
+BTS3006C/BTS3002E Boolean 27 alarm,6264
+BTS3006C/BTS3002E Boolean 28 alarm,6266
+BTS3006C/BTS3002E Boolean 29 alarm,6268
+BTS3006C/BTS3002E Boolean 3 alarm,6216
+BTS3006C/BTS3002E Boolean 30 alarm,6270
+BTS3006C/BTS3002E Boolean 31 alarm,6272
+BTS3006C/BTS3002E Boolean 32 alarm,6274
+BTS3006C/BTS3002E Boolean 4 Alarm,6128
+BTS3006C/BTS3002E Boolean 5 Alarm,6130
+BTS3006C/BTS3002E Boolean 6 Alarm,6132
+BTS3006C/BTS3002E Boolean 7 Alarm,6134
+BTS3006C/BTS3002E Boolean 8 alarm,6226
+BTS3006C/BTS3002E Boolean 9 alarm,6228
+BTS3006C/BTS3002E Low Analog Input Signal 1 Alarm,6278
+BTS3006C/BTS3002E Low Analog Input Signal 2 Alarm,6282
+BTS3006C/BTS3002E Low Analog Input Signal 3 Alarm,6286
+BTS3006C/BTS3002E LOW Analog Input Signal 4 Alarm,6290
+BTS3006C/BTS3002E Over Analog Input Signal 1 Alarm,6276
+BTS3006C/BTS3002E Over Analog Input Signal 2 Alarm,6280
+BTS3006C/BTS3002E Over Analog Input Signal 3 Alarm,6284
+BTS3006C/BTS3002E Over Analog Input Signal 4 Alarm,6288
+BTS3012 AC Arrester Failure,5658
+BTS3012 Boolean 1 Alarm,5654
+BTS3012 Boolean 11 Alarm,4846
+BTS3012 Boolean 12 Alarm,4848
+BTS3012 Boolean 13 Alarm,4850
+BTS3012 Boolean 14 Alarm,4852
+BTS3012 Boolean 15 Alarm,4854
+BTS3012 Boolean 16 Alarm,5639
+BTS3012 Boolean 19 Alarm,4862
+BTS3012 Boolean 2 Alarm,5656
+BTS3012 Boolean 20 Alarm,4864
+BTS3012 Boolean 21 Alarm,4866
+BTS3012 Boolean 22 Alarm,4868
+BTS3012 Boolean 23 Alarm,4870
+BTS3012 Boolean 24 Alarm,4872
+BTS3012 boolean 3 alarm,4782
+BTS3012 Boolean 4 Alarm,5222
+BTS3012 Boolean 5 Alarm,5224
+BTS3012 Boolean 6 Alarm,5226
+BTS3012 Boolean 7 Alarm,5228
+BTS3012 boolean 8 alarm,4792
+BTS3012 Boolean1 Alarm,6438
+BTS3012 Boolean10 Alarm,6456
+BTS3012 Boolean11 Alarm,6458
+BTS3012 Boolean12 Alarm,6460
+BTS3012 Boolean13 Alarm,6462
+BTS3012 Boolean14 Alarm,6464
+BTS3012 Boolean15 Alarm,6466
+BTS3012 Boolean17 Alarm,6424
+BTS3012 Boolean18 Alarm,6426
+BTS3012 Boolean19 Alarm,6428
+BTS3012 Boolean2 Alarm,6440
+BTS3012 Boolean20 Alarm,6430
+BTS3012 Boolean21 Alarm,6432
+BTS3012 Boolean22 Alarm,6434
+BTS3012 Boolean23 Alarm,6436
+BTS3012 Boolean24 Alarm,6468
+BTS3012 Boolean25 Alarm,6470
+BTS3012 Boolean26 Alarm,6472
+BTS3012 Boolean27 Alarm,6474
+BTS3012 Boolean28 Alarm,6476
+BTS3012 Boolean29 Alarm,6478
+BTS3012 Boolean3 Alarm,6442
+BTS3012 Boolean30 Alarm,6480
+BTS3012 Boolean31 Alarm,6482
+BTS3012 Boolean32 Alarm,6484
+BTS3012 Boolean4 Alarm,6444
+BTS3012 Boolean5 Alarm,6446
+BTS3012 Boolean6 Alarm,6448
+BTS3012 Boolean7 Alarm,6450
+BTS3012 Boolean8 Alarm,6452
+BTS3012 Boolean9 Alarm,6454
+BTS3012 cabinet 0 arrester alarm,4778
+BTS3012 cabinet 1 arrester alarm,4780
+BTS3012 Cabinet 3 Arrester Alarm,4842
+BTS3012 Cabinet 4 Arrester Alarm,4844
+BTS3012 Cabinet 6 Arrester Alarm,4858
+BTS3012 Cabinet 7 Arrester Alarm,4860
+BTS3012A Air-Conditioner Alarm,5522
+BTS3012A Heat-Exchanger Alarm,2492
+BTS3012AE AC Arrester Failure,5672
+BTS3012AE Boolean 1 Alarm,5271
+BTS3012AE Boolean 10 Alarm,4892
+BTS3012AE Boolean 11 Alarm,4894
+BTS3012AE Boolean 12 Alarm,4896
+BTS3012AE Boolean 13 Alarm,4898
+BTS3012AE Boolean 14 Alarm,4900
+BTS3012AE Boolean 15 Alarm,4902
+BTS3012AE Boolean 16 Alarm,4904
+BTS3012AE Boolean 17 Alarm,4906
+BTS3012AE Boolean 18 Alarm,4908
+BTS3012AE Boolean 19 Alarm,4910
+BTS3012AE Boolean 2 Alarm,5273
+BTS3012AE Boolean 20 Alarm,4912
+BTS3012AE Boolean 21 Alarm,4914
+BTS3012AE Boolean 22 Alarm,4916
+BTS3012AE Boolean 23 Alarm,4918
+BTS3012AE Boolean 24 Alarm,4920
+BTS3012AE Boolean 3 Alarm,4878
+BTS3012AE Boolean 4 Alarm,5277
+BTS3012AE Boolean 5 Alarm,5279
+BTS3012AE Boolean 6 Alarm,5281
+BTS3012AE Boolean 7 Alarm,5283
+BTS3012AE Boolean 8 Alarm,4888
+BTS3012AE Boolean 9 Alarm,4890
+BTS3900E boolean 1 alarm,12852
+BTS3900E boolean 2 alarm,12854
+BTS3900E boolean 3 alarm,12856
+BTS3900E boolean 4 alarm,12858
+Burglar Alarm,23577.66667
+CA has expired,800002
+CA is about to expire,800001
+Cabinet Air Inlet Temperature Unacceptable,25656
+Cabinet Air Outlet Temperature Unacceptable,25655
+Cabinet Capability  Mismatch,26293
+Cabinet Door Open,20037
+Cabinet Humidity Abnormal,13094
+Cabinet Humidity Unacceptable,25653
+Cabinet Power Over Alarm,20057
+Cabinet Temperature Abnormal,13092
+Cabinet Temperature Unacceptable,25652
+Cable Connection of the TRX Output Port Alarm,4208
+CAN BUS Communication Abnormal,4891
+CAN I2C Link Abnormal,4704
+Carrier Configuration Error,28010
+Carrier No Traffic,28009
+Cavity Board Type Mismatch,5348
+Cavity Configuration alarm,5126
+Cavity Tune Abnormal alarm,5128
+Cavity Tune Failure Alarm,5300
+CBC Communication Fault,22101
+CCDU inner data bus alarm,5302
+CCE CPU Usage Is High,355
+CCE Disk Usage Is High,357
+CCE Memory Usage Is High,356
+CCP Fault,25836
+CCP Faulty,22205
+CCP Information Inconsistency Between the RNC and the NodeB,22213
+CCU Topology and Configuration Mismatch,25719
+CCU-BBU Communication Failure,25721
+CDU Band Mismatch ARFCN Alarm,3808
+CDU Communication Alarm,2280
+CDU Diversity RX LNA Alarm,2278
+CDU Diversity RX TTA Alarm,3790
+CDU extended 60 alarm,5316
+CDU Main RX LNA Alarm,2276
+CDU Main RX TTA Alarm,3788
+CDU VSWR Critical Alarm,2286
+CDU VSWR Level 1 Alarm,2274
+CDU VSWR Level 2 Alarm,2272
+Cell Blocked,29245
+Cell Capability Degraded,29243
+Cell Configuration Abnormal,28211
+Cell DL Load Simulation Startup,28204
+Cell Logical Channel Failure Alarm,21816
+Cell No Traffic,28674.77778
+Cell Outage,311
+Cell Output Power too Low,28205
+Cell PCH Congestion,21822
+Cell PCI Conflict,29247
+Cell PS Service Faulty,22006
+Cell RACH Congestion,21817
+Cell Reconfiguration Failed,29241
+Cell RTWP Excessive,28213
+Cell RX Channel Interference Noise Power Unbalanced,29250
+Cell Simulated Load Startup,29246
+Cell Unavailable,29240
+Certificate Auto-update Failed,20803
+Certificate Has Expired,100005
+Certificate has expired of Certificate Authority Service,800007
+Certificate Invalid,26841
+Certificate Is About to Expire,100003
+Certificate is about to expire of Certificate Authority Service,800006
+Certificate of the CA Proxy Service Has Expired,800010
+Certificate of the CA Proxy Service Is About To Expire,800009
+Certificate of the Remote DR System About to Expire,51026
+Certificate of the Remote DR System Has Expired,51025
+Certificate Status Failed to Be Obtained,26843
+Channel Manually Blocked,21804
+CIC Downlink One-Way Mute,21590
+Clock alarm,3438
+Clock Reference Abnormal Alarm,3432
+Clock Reference Source of An Interface Board Unavailable,20212
+Clock Reference Source of Main Control Board Unavailable,20208
+Clock Signal Inputs Faulty,20204
+Clock Signal Outputs Faulty,20203
+Clock Signal Outputs to the Backplane Faulty,20274
+Clock Source Type Configuration Conflict,4698
+Clock Synchronization for Co-Site Failed,4834
+Cluster Resource Abnormal,788
+Cluster Still Contains Faulty Hosts,650010
+CN Node Flow Control,22389
+CN Node Inhibited,22395
+Combining and Distribution Unit Diversity RX LNA Alarm,5290
+Combining and Distribution Unit Extended 03 Alarm,5130
+Combining and Distribution Unit Extended 04 Alarm,5132
+Combining and Distribution Unit Extended 05 Alarm,5134
+Combining and Distribution Unit Main RX LNA Alarm,5288
+Combining and Distribution Unit VSWR Critical Alarm,5298
+Combining and Distribution Unit VSWR Level 1 Alarm,5286
+Combining and Distribution Unit VSWR Level 2 Alarm,5284
+Commands or Parameters Not Supported by RET Alarm,10272
+Communication Between GE Switching Board and OMU Faulty,20223
+Communication Between GE Switching Boards Faulty,20222
+Communication Between Internal OSS Services Is Abnormal,787
+Communication Between Subracks Faulty,20227
+Communication Between the PSU and APMU Abnormal,13086
+Communication Congestion Between Subracks,20277
+Communication Failure Between a Service Board and an SCU Board,20279
+Communication Failure Between BSC and VNP,20853
+Communication Failure Between NE and EMS,20738
+Communication with AC server Abnormal,22012
+Compressor of air-condition Alarm,10776
+Condensator high temperature alarm,10778
+Configuration Between Related NE Dismatch,22244
+Configuration Data Exceeding License Capacity,20741
+Configuration Data Inconsistency,26245
+Configuration Failure,26247
+Configuration File Damaged,26242
+Configuration Inconsistency Between Controller and CN,22013
+Configuration of Service Objects Incomplete,22388
+Configured ALD Subunit Type Inconsistent with the Actual Type,26761
+Configured board type inconsistent with the type of the board that is running,20278
+Configured Capacity Limit Exceeding Licensed Limit,26811
+Connect the infrastructure Failure,1081
+Connection Interrupted Between CCE and Device,354
+Cooler Fault,25674
+CPU Blocked,20263
+CPU Overload,20256
+CRC Value Inconsistency in Board Startup,20750
+Critical Overtemperature(CPUN Memory),372
+CRL is published failed,800005
+CSL Fault,21825
+Current Clock Reference Source of Main Control Board Abnormal,20210
+Current System Clock Reference Source Status Abnormal,20206
+CXU AC Power Input Failure,26919
+CXU Clock Abnormal,26913
+CXU DC Power Input Failure,26916
+CXU External Power Supply Insufficient,26914
+CXU Hardware Fault,26908
+CXU Link TX/RX Error,26904
+CXU Maintenance Link Failure,26918
+CXU Optical Module Fault,26906
+CXU Optical Module or Electrical Port Not Ready,26901
+CXU Optical Module Temperature Unacceptable,26917
+CXU Optical Module Type Mismatch,26902
+CXU Overload,26910
+CXU Runtime Topology Abnormal,26915
+CXU Software Program Error,26909
+CXU Temperature Unacceptable,26907
+Damp alarm,9750
+Data Channel Abnormal,790
+Data Configuration Exceeding Licensed Limit,26819
+Data Inconsistency Between OMU and Host,20736
+Data Processing Failure,792
+Data Store Usage Exceeds the Threshold,650024
+Data Synchronization Failed for the Offline Remote HA System,1075
+Database Application Scheduled Backup Failure,101218
+Database Connections to Be Used Up,103607
+Database Data Synchronization Between Active and Standby VRM Nodes Failed,650007
+Database instance failover occurred,101211
+Database Space Is Going to Be Insufficient,650025
+Database Table or Index Is Corrupted,1073
+Database User Locked,103709
+Database User Password Expired,103710
+DBUS Alarm,3266
+DC Lightning Arrester Failure Alarm,4852
+DC Lowvoltage Alarm,4092
+DC Output Abnormal,13068
+DC Over Voltage Alarm,5210.666667
+DC Overvoltage Alarm,4094
+DC Surge Protector Fault,13084
+DC Surge Protector Fault Alarm,10798
+DC Under Voltage Alarm,5212.666667
+DDPU Type Mismatch Trx Alarm,5336
+DEMU Hardware Failure Alarm,6506
+Deployment Region Connectivity Test Failed,100503
+Device Object Configuration Conflict,25730
+Device Removed (FANN F/R Presence),370
+Diesel Engine Failure Alarm,6060
+Diesel Generator Fault,25695
+Diesel Generator Low Fuel,25696
+Diesel Generator Startup Failure,25697
+"Digital Certificate Loss, Expiry, or Damage",20851
+Digital Certificate Will Be out of Valid Time,20850
+DISJUNTOR CONSUMIDOR,65208
+DISJUNTOR GERAL,65209
+Disk Index Nodes for HOFS About to Be Insufficient,103405
+Diversity Receive Channel Alarm,3286
+DNS Resolution Failure,25958
+Documents Overload,51027
+Door Alarm,7250
+Door Open Alarm,6510
+Downlink Adaptive Band-Pass Filter Optimization Fault,22286
+Downlink alarm,3446
+DPCL Link Communication Failure,26403
+DPTU board communication alarm,11364
+DPTU temperature abnormal alarm,11296
+DRS and DRS Master Module Capability Mismatch,26570
+DRS Maintenance Link Failure,26404
+DRU Band Mismatch ARFCN alarm,3580
+DRU Clock Critical alarm,3654
+DRU Close Power Amplifier alarm,3570
+DRU Communication alarm,3662
+DRU Configuration alarm,3574
+DRU extended 06 alarm,3582
+DRU extended 08 alarm,3586
+DRU extended 09 alarm,3588
+DRU extended 0A alarm,3590
+DRU extended 0F alarm,3600
+DRU extended 10 alarm,3602
+DRU extended 11 alarm,3604
+DRU extended 13 alarm,3608
+DRU extended 15 alarm,3612
+DRU extended 17 alarm,3616
+DRU extended 18 alarm,3618
+DRU extended 19 alarm,3620
+DRU extended 1A alarm,3622
+DRU extended 1B alarm,3624
+DRU extended 1C alarm,3626
+DRU extended 1E alarm,3630
+DRU extended 1F alarm,3632
+DRU extended 21 alarm,3636
+DRU extended 22 alarm,3638
+DRU extended 24 alarm,3642
+DRU extended 25 alarm,3644
+DRU extended 28 alarm,3650
+DRU extended 29 alarm,3652
+DRU extended 2C alarm,3658
+DRU Hardware alarm,3606
+DRU ID Mismatched Alarm,3596
+DRU Interior I/O alarm,3584
+DRU Processor Running alarm,3576
+DRU Reverse Power alarm,3614
+DRU Temperature alarm,3664
+DRU Temperature Critical alarm,3660
+Dry Contact 1 Alarm,4228
+Dry Contact 2 Alarm,4230
+DSP download fail alarm,3176
+DSP Version Report Alarm,4762
+DTMU Inverse Alarm,4806
+Dual Homing Virtual Node Dual Activation,310
+Dual Network Primary/Backup Inconsistency,26405
+Dual-Homed NodeB Configuration Incorrect,22235
+Dual-Homed NodeB Control Rights Inconsistency,22236
+DUP Unit Clock Abnormal,5321
+DUP Unit Hardware Fault,5324
+DUP Unit LNA Fault,5330
+DUP Unit Slot Changed Alarm,5332
+DUP Unit Voltage Abnormal,5318
+E1 Inboard Alarm,2454
+E1 Local Alarm,3012.666667
+E1 Outboard Alarm,2452
+E1 Remote Alarm,3014.666667
+E1 Remote Loop Test Alarm,2679
+E1/T1 Alarm Indication Signal,25801
+E1/T1 Excessive Bit Error Rate,25806
+E1/T1 Excessive Slip Frames,25805
+E1/T1 Inboard Alarm,7514
+E1/T1 Local Alarm,7996
+E1/T1 Local Failure Alarm,12846
+E1/T1 Loopback,25807
+E1/T1 Loss of Frame Alignment,25803
+E1/T1 Loss of Multiframe Alignment,25804
+E1/T1 Loss of Signal,25800
+E1/T1 Outboard Alarm,7512
+E1/T1 Port Illegal Alarm,4836
+E1/T1 Remote Alarm,7998
+E1/T1 Remote Alarm Indication Signal,25802
+E1/T1 Remote Failure Alarm,12848
+E1/T1 Remote Loop Test Alarm,4710
+"E9000H-2 Board ID Error (Mainboard, Major Alarm)",103727
+"E9000H-2 Board Not Firmly Seated (Mainboard, Major Alarm)",103728
+"E9000H-2 CPU Board Clock Lost (CPU Board, Major Alarm)",103712
+"E9000H-2 CPU Overtemperature Will Trigger CPU Underclocking (CPU, Major Alarm)",103715
+"E9000H-2 CPUs Mismatch (System, Critical Alarm)",103714
+"E9000H-2 Failed to Access the I2C Device (Mainboard, Major Alarm)",103717
+"E9000H-2 Fan removed (Fan, Major Alarm)",103731
+"E9000H-2 File System Read-Only (System, Major Alarm)",103742
+"E9000H-2 Forced System Power Cycle Due to Watchdog Timeout (System, Major Alarm)",103735
+"E9000H-2 Hard Disk Fault (Disk, Major Alarm)",103757
+"E9000H-2 Hard Disk Lost (Disk, Major Alarm)",103756
+"E9000H-2 Incorrect Hardware Address (Mainboard, Major Alarm)",103729
+"E9000H-2 Incorrect Slot Number (Mainboard, Major Alarm)",103726
+"E9000H-2 Information Synchronization Channel Fault (Chassis, Major)",103734
+"E9000H-2 Large Fan Speed Difference (Fan, Major Alarm)",103732
+"E9000H-2 LOM MCE/AER Error (Mainboard, Critical Alarm)",103724
+"E9000H-2 Low Hard Drive Endurance Rate (Disk, Major Alarm)",103758
+"E9000H-2 Low Voltage in Mainboard RTC Battery (Mainboard, Major Alarm)",103760
+"E9000H-2 LSW Inter-Board Link Aggregation Group Fault (Mainboard, Major)",103718
+"E9000H-2 Mainboard Clock Signal Lost (Mainboard, Major Alarm)",103762
+"E9000H-2 Mainboard CPLD Self-Check Failed (Mainboard, Major Alarm)",103759
+"E9000H-2 Mainboard Overvoltage (Mainboard, Major Alarm)",103764
+"E9000H-2 Mainboard Power Supply Failure (Mainboard, Major Alarm)",103761
+"E9000H-2 Mainboard Undervoltage (Mainboard, Major Alarm)",103763
+"E9000H-2 Memory Configuration Error (System, Critical Alarm)",103713
+"E9000H-2 Memory Overtemperature (Memory, Major Alarm)",103726
+"E9000H-2 No Memory Available (System, Critical Alarm)",103754
+"E9000H-2 No Memory Detected During POST (System, Critical Alarm)",103749
+"E9000H-2 Optical Module Power Abnormal (Port, Major Alarm)",103739
+"E9000H-2 Optical Module Speed Mismatches NIC Speed (Port, Major Alarm)",103741
+"E9000H-2 Optical Module Voltage Abnormal (Port, Major Alarm)",103740
+"E9000H-2 PCIe Card MCE/AER Fault (PCIe Card, Critical Alarm)",103725
+"E9000H-2 PCIe Card Power Fault (PCIe Card, Major Alarm)",103719
+"E9000H-2 Power-On Timed Out (System, Major Alarm)",103737
+"E9000H-2 PS/2 or USB Keyboard Controller Fault (Mainboard, Critical Alarm)",103720
+"E9000H-2 PSU Removed (PSU, Major Alarm)",103730
+"E9000H-2 Secure boot failed (System, Critical Alarm)",103723
+"E9000H-2 Server Powered Off (System, Major Alarm)",103755
+"E9000H-2 Soft-Start Circuit Undervoltage (Mainboard, Major Alarm)",103733
+"E9000H-2 Standby 1.1 V Overvoltage (Mainboard, Major Alarm)",103722
+"E9000H-2 Standby 1.1 V Undervoltage (Mainboard, Major Alarm)",103721
+"E9000H-2 Standby 12 V Overvoltage (Mainboard, Major Alarm)",103751
+"E9000H-2 Standby 12 V Undervoltage (Mainboard, Major Alarm)",103750
+"E9000H-2 System 12 V Overvoltage (Mainboard, Major Alarm)",103744
+"E9000H-2 System 12 V Undervoltage (Mainboard, Major Alarm)",103743
+"E9000H-2 System 3.3 V Overvoltage (Mainboard, Major Alarm)",103746
+"E9000H-2 System 3.3 V Undervoltage (Mainboard, Major Alarm)",103745
+"E9000H-2 System 5 V Overvoltage (Mainboard, Major Alarm)",103748
+"E9000H-2 System 5 V Undervoltage (Mainboard, Major Alarm)",103747
+"E9000H-2 System Error (System, Critical Alarm)",103752
+"E9000H-2 System Start Interrupt (System, Critical Alarm)",103753
+"E9000H-2 Video Controller Fault (Mainboard, Critical Alarm)",103738
+EAC Communication Alarm,3113
+EAC extended 89 alarm,3844
+EAC extended 8A alarm,3846
+EAC extended 8B alarm,3848
+EAC extended 8C alarm,3850
+EAC extended 8D alarm,3852
+EAC extended 8E alarm,3854
+EAC extended 8F alarm,3856
+EAC extended 90 alarm,3858
+EAC extended 9B alarm,3880
+EAC extended 9C alarm,3882
+EAC extended 9D alarm,3884
+EAC extended 9E alarm,3886
+EAC extended 9F alarm,3888
+EAC Extended F0 Alarm,3842
+EAC Extended F1 Alarm,3844
+EAC Extended F2 Alarm,5096
+EAC Extended F3 Alarm,3848
+EAC Extended F4 Alarm,3850
+EAC Extended F5 Alarm,3852
+EAC Extended F6 Alarm,3434.666667
+EAC Extended F7 Alarm,3856
+EAC Extended F8 Alarm,3858
+EAC Extended F9 Alarm,3860
+EAC Extended FA Alarm,3862
+EAC Extended FB Alarm,3864
+EAC Extended FC Alarm,3866
+EAC Extended FD Alarm,3868
+EAC Extended FE Alarm,3870
+EAC extended FF alarm,2622
+EDU LNA Alarm,3802
+EDU TTA Alarm,3804
+EDU VSWR Alarm,3798
+EDU VSWR Critical Alarm,3800
+Eighteenth Extended I/O Alarm,2390
+Eighth Extended I/O Alarm,3145
+Electromechanical Device Unavailable Alarm,20056
+Eleventh Extended I/O Alarm,2422
+Emergency System Not Associated with the Primary System,1077
+eMTC Service Failure,29253
+EMU boolean 1 alarm,13112
+EMU boolean 10 alarm,13130
+EMU boolean 11 alarm,13132
+EMU boolean 12 alarm,13134
+EMU boolean 13 alarm,13136
+EMU boolean 14 alarm,13138
+EMU boolean 15 alarm,13140
+EMU boolean 16 alarm,13142
+EMU boolean 17 alarm,13144
+EMU boolean 18 alarm,13146
+EMU boolean 19 alarm,13148
+EMU boolean 2 alarm,13114
+EMU boolean 20 alarm,13150
+EMU boolean 21 alarm,13152
+EMU boolean 22 alarm,13154
+EMU boolean 23 alarm,13156
+EMU boolean 24 alarm,13158
+EMU boolean 25 alarm,13160
+EMU boolean 26 alarm,13162
+EMU boolean 27 alarm,13164
+EMU boolean 28 alarm,13166
+EMU boolean 29 alarm,13168
+EMU boolean 3 alarm,13116
+EMU boolean 30 alarm,13170
+EMU boolean 31 alarm,13172
+EMU boolean 32 alarm,13174
+EMU boolean 4 alarm,13118
+EMU boolean 5 alarm,13120
+EMU boolean 6 alarm,13122
+EMU boolean 7 alarm,13124
+EMU boolean 8 alarm,13126
+EMU boolean 9 alarm,13128
+EMU Failure Alarm,4126
+eNodeB  Service Overload,29229
+eNodeB Logical RF Site Out of Service,29256
+eNodeB NG Control Plane Transmission Interruption,29227
+eNodeB NG Interface Fault,29226
+eNodeB Out of Clock Synchronization,23464
+eNodeB Out of Service,29249
+eNodeB S1 Control Plane Transmission Interruption,29213
+Entironment temperature alarm,9748
+EPLD Total Loaded Times Alarm,5104.666667
+EPLD Upgrade Fail alarm,3068
+EPLD Upgrading Fail Alarm,6126
+ESL Link Fault,21805
+ETH Link Alarm,7948
+Ethernet Link Fault,25182.30769
+Ethernet Port Bandwidth Mismatch,21400
+Ethernet Port Broadcast Packets Exceeding Alarm,25187.92308
+Ethernet Port Status Abnormal Alarm,12573
+Ethernet Trunk Group Fault,24985.8
+Ethernet Trunk Link Fault,24979.6
+ETHOAM 1AG CC Lost,21375
+ETHOAM 3AH Discovery Failed,11358
+ETHOAM 3AH Discovery Failure,25188
+ETHOAM 3AH Remote Fault,25884
+ETHOAM 3AH Remote Loopback,25072.18182
+EXAUSTOR 1,65207
+Exceeded Failures of Logins by the Local User,20852
+Excess Board in Subrack,20917
+Excessive License Usage,24192.4
+Excessive Synchronization Data for RNC in Pool Load Sharing,22243
+Excessive Time Difference Between Writing and Replicating Data,103708
+Expired certificates are archived failed,800008
+Extended Boolean 1 Alarm,5158
+Extended Boolean 2 Alarm,5160
+Extended Boolean 3 Alarm,5162
+Extended Boolean 4 Alarm,6064
+Extended Boolean 5 Alarm,6066
+Extended TMU Clock Alarm,3486
+External Clock Reference Not Configured,26261
+External Clock Reference Problem,26262
+External Node Unreachable,21607
+Failed Server RAID Array Detected,53069
+Failed to connect ZooKeeper,101212
+Failed to Load the Rule Lib File,20284
+Failed to Send the Remote Notification,117
+Failure in Locking System Clock Source,20207
+Failures of Synchronization Between Databases on the Active and Standby Nodes,385
+FALHA COMUNICAÇÃO BATERIA LITIO,65223
+FALHA DA BATERIA DE LITIO,65217
+FALHA DE AC,65202
+FALHA DE RETIFICADOR,65204
+FALHA NA FONTE CC,65210
+Fan Alarm,6331.333333
+Fan Box Failure,20041
+Fan Box Temperature Abnormal Alarm,20054
+Fan Fault Alarm,9736
+Fan In-Position alarm,4202
+Fan Not In-Position alarm,4204
+Fan Stalled,23578.83333
+Fan Stalling,20035
+Fan Subassembly Communication Alarm,9732
+Fan Subassembly Hardware Alarm,9740
+Fault Occurred on a VM,650020
+Fault Status,371
+Faulty Clock of the Phase-Lock Loop,5090
+Faulty Clock Source for Co-Site BTS Alarm,4832
+Faulty Network Port,650015
+Faulty Phase-Locked Loop of the Board Clock,20209
+FCU Frequency Point Proximity Alarm,2290
+FCU Staggering Failure Alarm,2288
+Feature Expired Alarm,20755
+Feature Invalid Alarm,20756
+Fiber optic cable connection error,21402
+Fifteenth Extended I/O Alarm,2430
+Fifth Extended I/O Alarm,3139
+File Loss or Damage,20723
+Filter Alarm,10782
+Fire Alarm,4199.333333
+First Extended I/O Alarm,3131
+FN Alarm,3442
+Forwarding Overload of An Interface Board,20275
+Fourteenth Extended I/O Alarm,2428
+Fourth Extended I/O Alarm,3137
+Fractional ATM Link Loss of Cell Delineation,25188.14286
+Frame or Timeslot Number alarm,3640
+Frame Or TS Number alarm,3157.333333
+Frequency Separation Configuration Mismatch,28210
+FTP Listening Port Negotiation Fails Between OSS and NE,306
+Function of RNC in Pool load sharing flow control,22391
+FusionCompute Arbitration IP Is Unreachable,101298
+FusionCompute Available Resources in the System Are Going to Be Insufficient,103603
+FusionCompute Data Storage I/O Response Latency,103706
+FusionCompute File System Is Abnormal,103605
+FusionCompute Inconsistent Data in VRM Internal Modules,101299
+FusionCompute Process Being in the D State,103604
+FusionCompute Standby Node Database Is Abnormal,103600
+FusionCompute SWAP Usage Exceeds the Threshold,103602
+GATM ALD Current Out of Range,28002
+GCK Port Connection Abnormal,26316
+GDU Antenna Fault,25740
+GDU Signal Output Abnormal,25742
+GDU Temperature Abnormal,25741
+GE Interface Unit Fault,20232
+GE Link Between GE Switching Board and Service Board Faulty,20228
+GE Link on GE Switching Board Panel Faulty,20225
+gNodeB Logical RF Site Out of Service,29848
+gNodeB NG Control Plane Transmission Interruption,29816
+gNodeB NG Interface Fault,29815
+gNodeB Out of Clock Synchronization,29830
+gNodeB Out of Service,29840
+gNodeB Radio Interface Ciphering Disabled,29901
+gNodeB X2 Interface Fault,29800
+gNodeB X2 Interface Full Specification,29801
+gNodeB Xn Interface Fault,29810
+GNSS Antenna Fault,26125
+GNSS Clock Output Unavailable,26124
+GNSS Locked Satellites Insufficient,26126
+GNSS Maintenance Link Failure,26127
+Gold Indicator Collection Channel Between the OSS and NE Is Abnormal,103539
+GPS antenna failure alarm,11976
+GPS Antenna Fault,26121
+GPS Antenna Fault Alarm,13326
+GPS board communication alarm,11782
+GPS board hardware alarm,11972
+GPS Card Antenna Abnormal,20252
+GPS Card Status Abnormal,20253
+GPS Clock Output Unavailable,26120
+GPS Data Receiver Fault,22211
+GPS Locked Satellites Insufficient,26122
+GPS Maintenance Link Failure,26123
+GPS Receiver Antenna Fault,28246
+GPS Receiver Antenna Power Problem,28245
+GPS receiver communication alarm,11790
+GPS Receiver Hardware Fault,28244
+GPS Receiver Initialization Configuration Failure,28250
+GPS Receiver Maintenance Link Failure,28249
+GPS receiver position not determined alarm,11784
+GPS Receiver Position Not Locked,28248
+GPS Receiver Software Program Error,28247
+GPS receiver work mode configuration error alarm,11792
+GPS satellite signal lost alarm,11788
+GPS Satellite Signals Lost Alarm,13324
+GSM Cell Manually Blocked,21802
+GSM Cell out of Service,21801
+GSM KPI Exceed Threshold,21820
+GSM Local Cell Blocked,28015
+GSM Local Cell Capability Decline,28017
+GSM Local Cell Unusable,28016
+GSM MSC Overload,21808
+GTPU Faulty,22510
+Guard Against Theft Alarm,4203.333333
+H.248 Link Set Broken,40005
+HA Gateway Communication Failures,364
+HA Heartbeat Interruption,361
+HA Link Interruption,363
+HA Resource in a Cluster Is Going to Be Insufficient,650009
+HA Service Monitoring Stopped,51028
+HA Synchronization Failures,362
+HA System Exception,1066
+HA System Heartbeat Interruption,1065
+Handshake Failure Between the Application System and the OSS,784
+Hard Disk Drive Fault (DISKN),368
+Hard Disk Predictive Failure (DISKN),369
+Hardware Alarm,11272
+Hardware Critical Alarm,4794
+Hardware Homing Exception,324
+Hardware Information Not Registered,51101
+HDSL transmission alarm,3206
+Heartbeat Communication Between Active and Standby VRM Nodes Interrupted,650005
+Heartbeat Communication Between the Host and VRM Interrupted,650029
+Heartbeat Communication Between the VRM and the NTP Server Interrupted,650006
+Heat Board Alarm,4938
+Heat exchanger board communication alarm,10758
+Heat Exchanger Communication Alarm,5544
+Heat Exchanger Extended Alarm,5536
+Heat Exchanger Fault Alarm,5538
+Heat Exchanger Hardware Failure Alarm,10766
+Heater Alarm,10768
+Heater Hardware Fault,25659
+Heat-Exchanger Temperature Alarm,8576
+Hierarchical Power Supply Alarm,4324
+High Disk Inode Usage,103711
+High Humidity Alarm,2380
+High Node Thread Usage,103699
+High-Risk Function Enable,26294
+Host CPU Usage Exceeds the Threshold,650011
+Host Memory Usage Exceeds the Threshold,650012
+Host Storage Links Interrupted,650023
+HPA alarm,3444
+IASU Cock Source Lost Alarm,5601
+IASU Communication Alarm,5623
+IASU Configuration Lost Alarm,5605
+IASU Crystal Oscillator Alarm,3802
+IASU E1 Port Alarm,3798
+IASU E1/T1 Port Alarm,7400
+IASU extended 76 alarm,5607
+IASU extended 77 alarm,5609
+IASU extended 78 alarm,5611
+IASU extended 79 alarm,5613
+IASU extended 7A alarm,5615
+IASU extended 7B alarm,5617
+IASU extended 7C alarm,5619
+IASU extended 7D alarm,5621
+IASU extended 7F alarm,5625
+IASU Hardware Failure Alarm,7404
+IKE Negotiation Failure,25891
+Illegal Request Detected,100450
+IMA Group Activated Links Insufficient,25174.71429
+IMA Group Activated Links Insufficient at Far End,25175.71429
+IMA Group Blocked at Far End,25176.71429
+IMA Group Configuration Aborted,25172.71429
+IMA Group Configuration Aborted at Far End,25173.71429
+IMA Group Local Startup,21236
+IMA Group Startup at Far End,25171.71429
+IMA Link Loss of Frame,25165.57143
+IMA Link Out of Delay Synchronization,25166.57143
+IMA Link Remote Failure Indication,25167.57143
+IMA Link RX Fault,25826
+IMA Link RX Unusable at Far End,25170.57143
+IMA Link TX Unusable at Far End,25169.57143
+IMA/UNI Link Loss of Cell Delineation,25164.71429
+Imminent Certificate Expiry,26840
+Inappropriate NodeB Deployment,22240
+Inbound Flow Bandwidth Usage of a Host Exceeds the Threshold,650013
+Inconsistency Between Data in Board Database and Service Data,21830
+Inconsistency Between NE ESN and License ESN,20744
+Inconsistent BSC Node Redundancy Configuration,707
+Inconsistent Parameter Configuration Alarm,13328
+Inconsistent RNC in Pool Configuration,706
+Inconsistent RNC Pool Configuration,703
+Inconsistent Software Versions Between Active and Standby OMUs,20705
+Incorrect Board Slot Information,20248
+Incorrect Connection of Ethernet Cables Between Subracks,20220
+Incorrect Format of Fingerprint File for OS User Password-free SSH Login,700012
+Incorrect GPS receiver work mode configuration Alarm,13330
+Incorrect MAC Entries for Backplane Ports of the GE Switching Board,20237
+Incorrect MAC Entries for Panel Ports of the GE Switching Board,20238
+Incorrect OMU Network Configuration Mode,20912
+Industrial User Exceeding Limit,29832
+Infrared Motion Alarm,6508
+Inner Circulation Fan Abnormal,4854
+Input Mains Lack of Phase,5724
+Input Mains Lack of Phase Alarm,5636
+Insufficient Free Space of the Performance Database,405
+Insufficient Key Resources of the Virtual Network,650016
+Insufficient License Resources,20743
+Insufficient Resources for Processing Enhanced Data,22512
+Insufficient Resources for Processing Smart Services,22511
+Insufficient Transmission Resources,21604
+Intelligent BSC Cold Backup Task Failure,268390406
+Inter-BBU Optical Module Fault,26310
+Inter-BBU Optical Module Not in Position,26311
+Inter-BBU Optical Module Receive Failure,26312
+Inter-BBU Optical Module Transmit Failure,26313
+Inter-BBU Port  Failure,26314
+Inter-BBU Port Connection Error,26315
+Inter-BBU Port Failure,26314
+Inter-Board CANBUS Communication Failure,26101
+Inter-Board Service Link Failure,26215
+Inter-CCU Port Connection Error,25720
+Interference,40927
+Inter-NE Address Conflict,26116
+Inter-System BBU Board Parameter Settings Conflict,26273
+Inter-System Board Installation and Configuration Mismatch,26279
+Inter-System Board Object Configuration Conflict,26274
+Inter-System Cabinet Configuration Conflict,26275
+Inter-System Communication Failure,26270
+Inter-System Control Rights Conflict,26277
+Inter-System CXU Parameter Settings Conflict,26912
+Inter-System Monitoring Device Parameter Settings Conflict,26271
+Inter-System RF Unit Parameter Settings Conflict,26272
+Inter-System RRU Chain Parameter Settings Conflict,26280
+Inter-System Site-Level Configuration Conflict,26276
+Invalid License File,650004
+Invalid Local Protection,103698
+Invalid Packets Exceeding Alarm,21388
+IOMU Aging alarm,3724
+IOMU Clock Alarm,3692
+IOMU communication alarm,3680
+IOMU extended 32 alarm,3670
+IOMU extended 35 alarm,3676
+IOMU extended 36 alarm,3678
+IOMU extended 3B alarm,3688
+IOMU extended 3C alarm,3690
+IOMU extended 40 alarm,3698
+IOMU Extended 4B Alarm,3720
+IOMU extended 4E alarm,3726
+IOMU extended 50 alarm,3730
+IOMU extended 51 alarm,3732
+IOMU extended 52 alarm,3734
+IOMU extended 53 alarm,3736
+IOMU extended 54 alarm,3738
+IOMU extended 55 alarm,3740
+IOMU extended 56 alarm,3742
+IOMU extended 57 alarm,3744
+IOMU extended 58 alarm,3746
+IOMU extended 59 alarm,3748
+IOMU extended 5A alarm,3750
+IOMU extended 5B alarm,3752
+IOMU extended 5C alarm,3754
+IOMU extended 5D alarm,3756
+IOMU extended 5E alarm,3758
+IOMU extended 5F alarm,3760
+IOMU extended 60 alarm,3762
+IOMU extended 61 alarm,3764
+IOMU extended 62 alarm,3766
+IOMU extended 63 alarm,3768
+IOMU extended 64 alarm,3770
+IOMU extended 65 alarm,3772
+IOMU extended 66 alarm,3774
+IOMU extended 67 alarm,3776
+IOMU extended 68 alarm,3778
+IOMU extended 69 alarm,3780
+IOMU extended 6A alarm,3782
+IOMU extended 6B alarm,3784
+IOMU extended 6C alarm,3786
+IOMU extended 6D alarm,3788
+IOMU extended 6E alarm,3790
+IOMU extended 6F alarm,3792
+IOMU Flash Memory Alarm,3686
+IOMU Software Alarm,3682
+IOMU Temperature Alarm,3696
+IOMU Temperature Major Alarm,3694
+IP Address Conflict,25186.84615
+IP Address In Transmission Resource Pool Blocked,21602
+IP clock abnormal alarm,11332
+IP Clock Link Failure,26263
+IP Connectivity Check Failure,21346
+IP Excessive Frame Error Rate,23254.27273
+IP Link Performance Measurement Fault,25076.72727
+IP Logical Port Congestion,21587
+IP Path Excessive Packet Loss Rate,25898
+IP Path Fault,25886
+IP PM Activation Failure,25071.09091
+IP PM Capability Exceeded,21396
+IP PM Excessive Packet Loss Rate,28052
+IP Remote Loopback,25896
+IP Route Configuration Inconsistency,21401
+IPAU Temperature alarm,3610
+IPv6 Address Conflict,25947
+iSite Power Off Alarm,3710
+IURP Link Congestion,21608
+IURP Link Fault,21606
+KPI Anomaly Alarm,268390401
+KPI Exceed Threshold,22302
+Lack of the lifespan information,318
+LAPD Alarm,3575.333333
+LAPD Link Abnormal Alarm,12563
+LAPD Link Congestion,21511
+Layer 2 Traffic Suppression Packet Loss,25967
+LCS Engineering Parameter Information Synchronization Failure,26406
+Level 1 VSWR Alarm,9078
+Level 2 VSWR Alarm,9080
+License Data Loss,26810
+License Expired,505
+License Feature About to Expire,26823
+License File Is Not Loaded,650003
+License Has Expired,325180.5
+License Inconsistency Between OMU and Host,20734
+License Invalid,501
+License Is About to Expire,650001
+License Is Invalid,360
+License Not Match,502
+License On Trial,24185.9
+License Value Automatically Assigned by the OSS to the Base Station Less Than the Initial License Value of the Base Station,527
+License Will Expire,358
+Licensed Feature Entering Keep-Alive Period,26815
+Licensed Feature Unusable,26816
+Lightning arrester alarm,5570
+Lightning Protection Box Alarm,3714
+Lightningproof Box Alarm,3498
+Link Between GE Switching Boards Faulty,20221
+Link Packets Exceeding,21609
+Load  Disconnect,25623
+Load Balancing Service Abnormal,101231
+Load Fuse Broken,25631
+Load Power Off Alarm,5214.666667
+Local Access Maintenance Device Abnormal,26844
+Local Cell Blocked,28201
+Local Cell Capability Decline,28206
+Local Cell Unusable,28203
+Local IMA Group Blocked,21234
+Local IMA Link Blocked,21235
+Local Switchover Failed,103697
+Local User Consecutive Login Retries Failed,26830
+Logical Object Binding Error,21824
+Loss of Power Supply Redundancy,25636
+Loss of Solar Array,25710
+Low Analog Input Signal 1 Alarm,6425
+Low Analog Input Signal 2 Alarm,6429
+Low Analog Input Signal 3 Alarm,6433
+LOW Analog Input Signal 4 Alarm,6437
+Low Forward Power alarm,3420
+Low Humidity Alarm,4213.333333
+Low OS Version,20746
+Low QAAL2 Setup Success Rate,21564
+Low SCCP Setup Success Rate,21522
+Low Temperature Alarm,4209.333333
+Low User Trust Score,100012
+M1 Interface eMBMS Session Loss,29223
+M2 Interface Fault,29208
+M3 Interface Fault,29209
+M3UA Destination Entity Inaccessible,21553
+M3UA Destination Entity Route Unavailable,21552
+M3UA Link Fault,21551
+M3UA Link RC Activation Failure,21610
+M3UA Link Set Broken,40006
+MAC Excessive Frame Error Rate,23345.93333
+Main Control Board in Wrong Slot,26206
+Main Control Module Clock Critical Alarm,4772
+Main Control Module Clock Prompt Alarm,4808
+Main Control Module Configuration Inconsistency Alarm,4810
+Main Control Module Hardware Fault Alarm,4800
+Main Control Module Voltage Alarm,4798
+Main Receive Channel alarm,3649.333333
+Mains Input Abnormal,13070
+Mains Input Out of Range,25666.18182
+Management Capability Exceeds the Limit,1076
+Master Remote Authentication Server Connection Failed,128
+Master TMU Clock Alarm,3484
+Master TMU Clock Failure Alarm,2232
+Maximum Number of X2 Interfaces Reached,29225
+MBSC Working Mode Inconsistency,20915
+MCI Communication alarm,3448
+Memory Usage of Service Is Too High,47
+MFU Clock Critical alarm,3134
+MFU Communication alarm,3142
+MFU Configuration alarm,3054
+MFU extended 05 alarm,3060
+MFU extended 06 alarm,3062
+MFU extended 07 alarm,3064
+MFU extended 0A alarm,3070
+MFU extended 0C alarm,3074
+MFU extended 0D alarm,3076
+MFU extended 0E alarm,3078
+MFU extended 0F alarm,3080
+MFU extended 10 alarm,3082
+MFU extended 11 alarm,3084
+MFU extended 12 alarm,3086
+MFU extended 13 alarm,3088
+MFU extended 14 alarm,3090
+MFU extended 15 alarm,3092
+MFU extended 16 alarm,3094
+MFU extended 17 alarm,3096
+MFU extended 18 alarm,3098
+MFU extended 19 alarm,3100
+MFU extended 1A alarm,3102
+MFU extended 1B alarm,3104
+MFU extended 1C alarm,3106
+MFU extended 1E alarm,3110
+MFU extended 21 alarm,3116
+MFU extended 24 alarm,3122
+MFU extended 25 alarm,3124
+MFU extended 28 alarm,3130
+MFU extended 29 alarm,3132
+MFU extended 2D alarm,3140
+MFU extended 2F alarm,3144
+MFU Hardware alarm,3112
+MFU Processor Running alarm,3056
+MLPPP Group Excessive Packet Loss Rate,22962.8
+MLPPP Group Failure,21344
+MLPPP Group Fault,22960
+MMU Clock alarm,3172
+MMU communication alarm,3160
+MMU extended 32 alarm,3150
+MMU extended 35 alarm,3156
+MMU extended 3B alarm,3168
+MMU extended 3C alarm,3170
+MMU extended 3E alarm,3174
+MMU extended 3F alarm,3176
+MMU extended 40 alarm,3178
+MMU extended 41 alarm,3180
+MMU FLASH Memory alarm,3166
+MMU Mail-box Failure alarm,3158
+MMU Software alarm,3162
+Monitoring Device Hardware Fault,25601
+Monitoring Device Maintenance Link Failure,25600
+Monitoring Device Port Abnormal,25743
+Monitoring Device Power Supply Problem,25620
+Monitoring Device Temperature Abnormal,25731
+Monitoring Unit Hardware Faulty,13062
+Monitoring Unit Maintenance Link Broken,13060
+Monitoring Unit Power Input Abnormal,13066
+MPT Clock Alarm,5088
+MPT I2C Components Fault,4706
+MPT Major Clock Abnormal,5072
+MPT Minor Clock Abnormal,5074
+MPT-to-Board Clock Abnormal,5076
+MSP Deactivated,21314
+MSP Multiplex Section K1/K2 Mismatch,21311
+MSP Multiplex Section K2 Mismatch,21312
+MSP Port Protection Mode Mismatch,21313
+MTP3 DSP Congestion,21502
+MTP3 DSP Inaccessible,21503
+MTP3 Link Set Broken,40007
+MTP3 Signaling Link Congestion,21501
+MTP3 Signaling Link Faulty,21506
+MTP3 Signaling Link Set Unavailable,21505
+MTP3 Signaling Route Inaccessible,21504
+MTP3B Link Set Broken,40008
+MTR extended C3 alarm,3440
+MTR extended C9 alarm,3452
+MTR extended CA alarm,3454
+MTR extended CB alarm,3456
+MTR extended CD alarm,3460
+MTR extended CE alarm,3462
+MTR extended CF alarm,3464
+NBI Alarm Socket Disconnection,268390405
+NCP Fault,25835
+NCP Faulty,22204
+NE Entering the Emergency Mode,28382
+NE Homogeneity Detection Anomaly,2147483560
+NE Is Disconnected,20156.5
+NE License Feature Expired,522
+NE License Feature On Trial,523
+NE Mediation Layer Version Unmatched,303
+NE-EMS Configuration Notification Failure,20713
+Network Link Failure,4700
+Next optic signal alarm,3136
+Next serial port alarm,3138
+nfcb not consistant with physical alarm,9768
+Nineteenth Extended I/O Alarm,2392
+Ninth Extended I/O Alarm,3147
+No AC Input Alarm,8237
+No AC Power Alarm,3922
+No Data in the Report Within the Detection Period,65801
+No DC Input Alarm,10772
+No License,20739
+No License Running in System,26818
+No Mains Supply Alarm,4745.333333
+No Traffic on NR DU Cell TRP,29875
+No Traffic Volume in the Cell,29242
+Node status is Abnormal,101208
+NodeB Audit No Response,22216
+NodeB Blocked,22224
+NodeB Signaling Plane Creation Failure,22245
+NodeB Unavailable,22214
+Notification Server Certificate Has Expired,103401
+Notification Server Certificate Is About to Expire,103400
+NR Cell PCI Conflict,29847
+NR Cell Unavailable,29841
+NR DU Cell Blocked,29874
+NR DU Cell Simulated Load Startup,29843
+NR DU Cell TRP Capability Degraded,29871
+NR DU Cell TRP Unavailable,29870
+NR DU Cell Unavailable,29844
+NSE Faulty,22005
+NSVL Dynamic Configuration Procedure Failure,22009
+NSVL Faulty,22004
+NTP Clock Source Is Not Configured for a Host,101246
+NTP Process Unavailable,1044
+NTP service abnormal,51023
+Number of Objects Whose Performance Thresholds Are Monitored Reaches Upper Limit,410
+Number of Resources Used Exceeding Alarm Threshold Specified by License,20259
+Number of Resources Used Reaching Alarm Threshold Specified by License,20258
+OceanStor Storage System Alarm,1043
+OML Fault,21807
+OMU Board Fault,20720
+OMU Configuration Board and Subrack Board Inconsistency,20731
+OMU Data Synchronization Failure,20704
+OMU Disconnected from Host,20737
+OMU Failure Switchover,20701
+OMU File Synchronization Failure,20715
+OMU Hard Disk Free Space Insufficiency,20712
+OMU IP Address Configuration Error,20721
+OMU IP Address Conflict,20709
+OMU Operating System Service Status Abnormity,20711
+OMU Process Abort,20707
+OMU Route Configuration Error,20913
+OMU Software Status Abnormal,20914
+OMU Time Synchronization Abnormity,20714
+One Input of Fan Box Power Failure,20042
+One-click DR Switchover Check Failure,268390408
+On-Site Detecting Circuit Fault,9742
+Optic Module Abnormal Alarm,4812
+Optic Power Abnormal,21398
+Optic Power Alarm,4224
+Optical Channel A Local Alarm,5012
+Optical Channel A Reception Alarm,5010
+Optical Channel A Remote Alarm,5014
+Optical Channel A Transmission Alarm,5008
+Optical Channel B Local Alarm,5020
+Optical Channel B Reception Alarm,5018
+Optical Channel B Remote Alarm,5022
+Optical Channel B Transmission Alarm,5016
+Optical Module Fault,21285
+Optical Module Mismatch,21290
+Optical Module Temperature Unacceptable,26317
+Optical Receive Channel Alarm,4867.2
+Optical Transmit Channel Alarm,4869.2
+OS Scheduled Backup Failure,101219
+OS User Password About to Expire,103643
+OS User Password Expired,103644
+OSS Fails to Receive SNMP Trap Packets from NEs,312
+OSS Key License Beyond Limitation,802
+OSS License Beyond Limitation,801
+OSS Link File Abnormal,1058
+OSS synchronism abnormal for Rnc in Pool data,22394
+OSS VM Switchover Occurred,268390409
+OSSU extended B9 alarm,5524
+OSSU extended BA alarm,5526
+OSSU extended BB alarm,5528
+OSSU extended BC alarm,5530
+OSSU extended BD alarm,5532
+OSSU extended C1 alarm,5540
+OSSU extended C2 alarm,8584
+OSSU extended C5 alarm,5548
+OSSU extended C6 alarm,5550
+OSSU extended C7 alarm,5552
+OSSU extended C8 alarm,5554
+OSSU extended C9 alarm,5556
+OSSU extended CB alarm,5560
+OSSU extended CC alarm,5562
+OSSU extended CD alarm,5564
+OSSU extended CE alarm,5566
+OSSU extended CF alarm,5568
+OSSU extended D1 alarm,5572
+OSSU extended D2 alarm,5574
+OSSU extended D3 alarm,5576
+OSSU extended D4 alarm,5578
+Outbound Flow Bandwidth Usage of a Host Exceeds the Threshold,650014
+Outer Circulation Fan Abnormal,4856
+Over Analog Input Signal 1 Alarm,6423
+Over Analog Input Signal 2 Alarm,6427
+Over Analog Input Signal 3 Alarm,6431
+Over Analog Input Signal 4 Alarm,6435
+Over Humidity Alarm,5127
+Over Temperature Alarm,4207.333333
+Over-Current Alarm During Charging,5238
+Parallel Alarm Exceeds the Limit,832
+Parameter set collision alarm,8195.5
+Path Congestion,21582
+Path Fault,21581
+PBU Band Mismatch ARFCN Alarm,6140
+PBU Clock Critical Alarm,6132
+PBU Communication Alarm,9696
+PBU extended E3 alarm,6120
+PBU extended EA alarm,2580
+PBU extended EB alarm,2582
+PBU extended EC alarm,2584
+PBU FLASH Memory Alarm,6122
+PBU Low Forward Power Alarm,6118
+PBU Main Clock Alarm,6128
+PBU Over Temperature Alarm,6116
+PBU Slave Clock Alarm,6130
+PBU VSWR Alarm,6114
+PDCH Close to Capability,21836
+PDCH Exceed Capability,21837
+Peer BSC License Will Be Revoked in Local BSC,20760
+Peer Certificate Expiry,26832
+Peer Certificate Invalid,25638
+PEER Clock Link Failure,26285
+PEM Circuit Breaker Turned Off Alarm,20052
+PEM Fault Alarm,20053
+PEM Type Conflict Alarm,20058
+Performance result loss alarm,1600
+Performance Threshold Default Alarm,40925
+Phase-Lock Loop alarm,3598
+Phase-lock Loop Critical Alarm,3346.666667
+PIU AC Over or Under Voltage Alarm,6666
+PIU AC Power-Off Alarm,6664
+PIU Arrester Alarm,6662
+PM Alarm Threshold Critical,404
+PM Alarm Threshold Major,403
+PM Alarm Threshold Minor,402
+PM Alarm Threshold Warning,401
+PM Monitor KPI Counter Threshold Alarm Critical,40004
+PM Monitor KPI Counter Threshold Alarm Major,40003
+PM Monitor KPI Counter Threshold Alarm Minor,40002
+PM Monitor KPI Counter Threshold Alarm Warning,40001
+PMU boolean 1 alarm,13176
+PMU boolean 2 alarm,13178
+PMU boolean 3 alarm,13180
+PMU boolean 4 alarm,13182
+PMU boolean 5 alarm,13184
+PMU Communication Alarm,3593.333333
+PMU extended 60 alarm,4066
+PMU extended 61 alarm,4068
+PMU extended 62 alarm,4070
+PMU extended 63 alarm,4072
+PMU extended 64 alarm,4074
+PMU extended 65 alarm,4076
+PMU extended 66 alarm,4078
+PMU extended 67 alarm,4080
+PMU extended 68 alarm,4082
+PMU extended 69 alarm,4084
+PMU extended 6C alarm,4090
+PMU extended 70 alarm,4098
+PMU extended 7A alarm,5880
+PMU extended A3 alarm,2438
+PMU extended A4 alarm,2440
+PMU extended A5 alarm,2442
+PMU extended A6 alarm,2444
+PMU extended A7 alarm,2446
+PMU extended B7 alarm,2478
+PMU Internal Interface Communication Failure,25633
+POOL license information synchronization failure,20759
+Pool Load Imbalance,951
+Port Auto-Negotiation Rate Has Not Reached the Maximum Port Rate,650028
+Port Congestion,21583
+PORTA ABERTA,65201
+Power alarm,10780
+Power Input to Monitoring Device Abnormal,20044
+Power Module Abnormal,23534.66667
+Power Module and Monitoring Module Communication Failure,25630
+Power supply AC lost(PSN Status),366
+Power Supply DC Output Out of Range,25621
+Power Supply Failure,23853.88889
+Power system alarm,5684
+PPP Excessive Frame Error Rate,21390
+PPP Link Excessive Frame Error Rate,22958.8
+PPP/MLPPP Link Fault,22811.90909
+PPPoE Link Fault,25948
+Primary/Backup TRP Status Inconsistency in Cell,29849
+Product Application Scheduled Backup Failure,101217
+Product Data Scheduled Backup Failure,101205
+Product/board already beyond service period,320
+Product/board is about to beyond service period,319
+Prompt Board Failure Alarm,10250
+Protection Password About to Expire,103696
+Protection Password Expired,103695
+PS Northbound Function Is Disabled,791
+PSE ASIC Power Supply Problem,26115
+PSU Comm. Alarm,5646
+PSU Communication Alarm,4706
+PSU Communication Failure Alarm,4876
+PSU extended A3 alarm,6986
+PSU extended A4 alarm,6988
+PSU extended A5 alarm,6990
+PSU extended A6 alarm,6992
+PSU extended A7 alarm,6994
+PSU extended DD alarm,4012
+PSU extended DE alarm,4014
+PSU extended DF alarm,4016
+PSU Failure Alarm,4879
+PSU Fault Alarm,4708
+PSU Faulty Alarm,5650
+PSU Illegal Alarm,5682
+PSU Lightningproof Alarm,3712
+PSU Module Protector Alarm,4881
+PSU Safeguard Alarm,5024
+PSU Shutdown Alarm,5136
+PSU Unlawful Alarm,4010
+PTP BVC Faulty,22008
+QAAL2 Adjacent Node Inaccessible,21562
+QAAL2 Protocol Version Mismatch on Adjacent Node,21563
+Rack Gate Magnetism Alarm,4112
+Rack High Humidity Alarm,4106
+Rack High Temperature Alarm,4102
+Rack ID error alarm,3684
+Rack Infrared Alarm,4110
+Rack Low Humidity Alarm,4104
+Rack Low Temperature Alarm,4100
+Rack Over Hot Degrade Alarm,4840
+Rack Smog Alarm,4108
+Rack Type Mismatch Alarm,4838
+Radio Link Abnormal Alarm,12568
+Radio Link Alarm,2932.666667
+Radio Link Critical Alarm,3095.333333
+Radio Link Failure,28008
+Radio link prompt alarm,4122
+Radio Links Critical Alarm,3578
+Radio Signaling Link Disconnected,28006
+RADIUS Server Connection Failed,1777670
+RAT Conflict between separate-MPT Boards,26402
+Real-time KPI Monitoring and Rapid Service Recover (for Monitored VNFs or VMs Whose Status Changes to Abnormal),313
+Real-time KPI Monitoring and Rapid Service Recover (NEs or SNs status Changed to Abnormal),379
+Redundancy Switchover of Logical RNC Control,22390
+Relational Database Core Files Changed,103707
+Relay or Contactor Alarm,5848
+Remote cold backup system data failed to synchronize,51015
+Remote cold backup system dynamic data failed to recover,51016
+Remote cold backup system heartbeat abnormal,53081
+Remote Maintenance Link Failure,25901
+Remote Maintenance Link Running Data and Configuration Mismatch,25902
+Repeated VM Restarts,650022
+Resource overload on the control plane,22306
+Resource overload on the user plane,22305
+RET Antenna Data Loss,26754
+RET Antenna Motor Fault,26751
+RET Antenna Not Calibrated,26753
+RET Antenna Running Data and Configuration Mismatch,26757
+RET Calibration Alarm,7255
+RET Configuration Data Lost Alarm,7259
+RET Downtilt Out of Normal Range Alarm,10274
+RET Hardware Failure Alarm,7253
+RET Operation Failure Alarm,10276
+RET Position Lose Alarm,7257
+RET Software Downloading Error Alarm,10278
+RET TMA Alarm,10280
+RF Out of Service,29248
+RF Unit AC Input Power Failure,26540
+RF Unit ALD Current Out of Range,26530
+RF Unit ALD Switch Configuration Mismatch,26531
+RF Unit and RET Antenna Connection Failure,26562
+RF Unit Backup Power Device Maintenance Link Failure,26542
+RF Unit Baseband Running Error,28018
+RF Unit Certificate Fault,26565
+RF Unit Clock Problem,26538
+RF Unit CPRI Interface Error,26504
+RF Unit DC Input Power Failure,26564
+RF Unit External Device Maintenance Link Failure,26543
+RF Unit External Power Supply Insufficient,26546
+RF Unit Fan Fault,26547
+RF Unit Hardware Fault,26532
+RF Unit Imminent Certificate Expiry,26567
+RF Unit Input Power Out of Range,26527
+RF Unit IR Interface Error,26508
+RF Unit Maintenance Link Failure,26235
+RF Unit Maintenance Link Negotiation Failure,26219
+RF Unit Maintenance Link TLS Negotiation Failure,26218
+RF Unit Optical Interface Performance Degraded,26506
+RF Unit Optical Module Fault,26507
+RF Unit Optical Module or Electrical Port Not Ready,26501
+RF Unit Optical Module Temperature Unacceptable,26566
+RF Unit Optical Module Transmit/Receive Fault,26503
+RF Unit Optical Module Type Mismatch,26502
+RF Unit Overload,26534
+RF Unit PA Overcurrent,26524
+RF Unit Power Connector Abnormal,26569
+RF Unit Power Supply Abnormal,26568
+RF Unit Power Surge Protector Fault,26544
+RF Unit Runtime Topology Error,26563
+RF Unit RX Channel Fault,28011
+RF Unit RX Channel RTWP/RSSI Too Low,26521
+RF Unit RX Channel RTWP/RSSI Unbalanced,26522
+RF Unit Software Program Error,26533
+RF Unit Temperature Unacceptable,26525
+RF Unit Topology Abnormal Alarm,26563
+RF Unit TX Channel Gain Out of Range,26520
+RF Unit TX Channel Switched Off Through Command,26545
+RF Unit VSWR Threshold Crossed,26529
+RF Unit Working Mode and Board Capability Mismatch,26278
+RHUB AC/DC Maintenance Link Failure,26774
+RHUB Clock Problem,26768
+RHUB CPRI Interface Error,26783
+RHUB Fan fault,26788
+RHUB Hardware Fault,26765
+RHUB Optical Module Fault,26786
+RHUB Optical Module or Electrical Port Not Ready,26780
+RHUB Optical Module Temperature Unacceptable,26791
+RHUB Optical Module Type Mismatch,26781
+RHUB Overload,26767
+RHUB PSE Power Supply Failure,26776
+RHUB Software Program Error,26766
+RHUB Temperature Unacceptable,26771
+RHUB Unit AC Input Power Failure,26789
+RHUB Unit Runtime Topology Error,26792
+RHUB-pRRU CPRI Interface Error,26787
+RNC in Pool Function Unavailable,22307
+RNC in Pool Node Redundancy Status Abnormal,22397
+RRC User Exceeding Limit,29831
+RRN Board Overload,29351
+RRN Certificate Invalid,29360
+RRN Device Type and Configuration Mismatch,29358
+RRN Ethernet Link Fault,29355
+RRN Hardware Fault,29352
+RRN Imminent Certificate Expiry,29359
+RRN Poor Received Signal,29353
+RRN Temperature Unacceptable,29350
+RRN Unavailable,29356
+RRN Version Abnormal,29354
+RRU Cascading Levels and Configuration Mismatch,26236
+RRU Network Breakpoint,26237
+RRU Network Topology Type and Configuration Mismatch,26238
+RX Channel Failure Alarm,12828
+RX/TX PLL out of Lock,4128
+RX_PLL_0 alarm,3432
+RX_PLL_1 alarm,3434
+RX_PLL_2 alarm,3436
+S1 Interface Fault,29201
+SAAL Link Congestion,25225.42857
+SAAL Link Fault,25224.42857
+SAAL Transport Fault,21616
+SASU Bypass,26760
+SASU Running Data and Configuration Mismatch,26759
+SASU VSWR Threshold Crossed,26756
+SAU Board Fault,20905
+SAU File Loss or Damage,20906
+SAU Hard Disk Free Space Insufficiency,20902
+SAU IP Address Conflict,20904
+SAU Process Abort,20903
+SCCP DSP Congestion,21611
+SCCP Subsystem Prohibited,21521
+Scheduled Backup Failure,101216
+Scheduled Data Backup Failure,20918
+SCTP IP Pair Unreach,21612
+SCTP Link Configuration Error,21618
+SCTP Link Congestion,25098.63636
+SCTP Link Fault,25097.63636
+SCTP Link IP Address Unreachable,25152.81818
+SCTP Transport Fault,21617
+SDH/SONET AU Alarm Indication Signal,21267
+SDH/SONET AU Loss of Pointer,21272
+SDH/SONET HP Remote Defect Indication,21273
+SDH/SONET HP Signal Deteriorated,21283
+SDH/SONET HP Signal Failure,21282
+SDH/SONET HP Signal Label Mismatch,21263
+SDH/SONET HP Signal Label Unstable,21293
+SDH/SONET HP Trace Identifier Mismatch,21265
+SDH/SONET HP Trace Identifier Unstable,21274
+SDH/SONET HP Unequipped,21264
+SDH/SONET Loss of Cell Delineation,21256
+SDH/SONET Loss of Cell Delineation Alignment,21281
+SDH/SONET Loss of Frame,21254
+SDH/SONET Loss of Frame Alignment,21255
+SDH/SONET Loss of Signal,21252
+SDH/SONET LP Remote Defect Indication,21261
+SDH/SONET LP Remote Failure Indication,21260
+SDH/SONET LP Signal Label Mismatch,21258
+SDH/SONET LP Signal Label Unstable,21279
+SDH/SONET LP Trace Identifier Mismatch,21259
+SDH/SONET LP Trace Identifier Unstable,21280
+SDH/SONET LP Unequipped Defect,21262
+SDH/SONET MS Alarm Indication Signal,21270
+SDH/SONET MS Remote Defect Indication,21253
+SDH/SONET Optical Port Loopback,21266
+SDH/SONET RS Trace Identifier Mismatch,21268
+SDH/SONET RS Trace Identifier Unstable,21269
+SDH/SONET Signal Degraded,21257
+SDH/SONET Signal Failure,21271
+SDH/SONET Tributary Alarm Indication Signal,21287
+SDH/SONET Tributary Excessive Bit Error Rate,21291
+SDH/SONET Tributary Excessive Slip Frames,21284
+SDH/SONET Tributary Loopback,21289
+SDH/SONET Tributary Loss of Frame,21275
+SDH/SONET Tributary Loss of Multiframe,21288
+SDH/SONET Tributary Online Loopback Detection,21251
+SDH/SONET Tributary Remote Alarm Indication Signal,21286
+SDH/SONET TU Alarm Indication Signal,21277
+SDH/SONET TU Loss of Pointer,21278
+SDH/SONET TU Multiframe Loss,21295
+SDH/SONET TU Signal Loss,21294
+SDH/SONET TU Type Inconsistent,21296
+Second Extended I/O Alarm,3133
+Secondary Load Shut Down,13072
+SEND_DIV Channel Alarm,2150
+SEND_DIV Channel Critical Alarm,3182
+SENSOR DE FUMAÇA,65205
+Sensor Failure,23512.33333
+Sensor Failure Alarm,4846
+Sensor Fault Alarm,6028
+Server Air Exhaust Vent Overtemperature,101272
+Server Backup Unsuccessful,512
+Server BBU Communication Failure,103693
+Server BBU Fault,103691
+Server CPU Core Overtemperature,101270
+Server CPU Faulty,1085
+Server CPU MCE/AER Error,103625
+Server CPU Overvoltage,101271
+Server CPU Temperature Too High,101221
+Server CPU Undervoltage,103610
+Server CPU VRD Overtemperature,53061
+Server DIMM MCE Error,103617
+Server Drive Backplane Power Failure,53067
+Server ECC Memory Correction,101229
+Server Fan Failure,101228
+Server Fan Faulty,1089
+Server Fan Out of Position,101227
+Server Fatal Error Detected in Memory Initialization (Memory),103619
+Server Fatal Error Detected in Memory Initialization Check (System),103620
+Server File System Read-Only,101266
+Server Hard Disk Drive Failure,101225
+Server Hard Disk I/O Performance Degradation,103704
+Server Hard Disk Link Fault,53068
+Server Hard Disk Lost,101268
+Server Hard Disk MCE/AER Error,103615
+Server Hard Disk Overtemperature,53062
+Server Hard Disk Prewarning,103614
+"Server Logical Drive Degraded, Partially Degraded, or Offline",53072
+Server LOM MCE/AER Error,101264
+Server Low BBU Battery,103692
+Server Low Hard Disk Remnant Wearout,101267
+Server Low Voltage in Mainboard RTC Battery,103623
+Server Mainboard Faulty,1091
+Server Mainboard Power Supply Failure,53065
+Server Management Subsystem Abnormal,1087
+Server Memory Configuration Error,103616
+Server Memory Faulty,1090
+Server Memory Initialization Error,103618
+Server Memory Overtemperature(Critical),101269
+Server Memory Temperature Too High,101222
+Server NIC Port Linkdown,53071
+Server PCIe Card Component Major Fault,101261
+Server PCIe Card Faulty,1092
+Server PCIe Card MCE/AER Fault,53070
+Server PCIe Card Overtemperature,103609
+Server PCIe Card Overvoltage,101263
+Server PCIe Card Self-Test Failed,101259
+Server PCIe Card Undervoltage,101262
+Server PCIe Plug-in RAID Controller Card Fault,101260
+Server Power Failure,1084
+Server Power Supply Failure,101223
+Server Power Supply Lost,101224
+Server Power Supply Redundancy Lost,103612
+Server Powered Off,53064
+Server Power-On Timed Out,53066
+Server PSU Air Inlet Overtemperature,53063
+Server PSU Overtemperature,101273
+Server RAID Array Failure,101226
+Server RAID card controller communication lost,103702
+Server RAID Controller Card Faulty,1094
+Server RAID Controller Card MCE/AER Error,53073
+Server Screw-in RAID Controller Card BBU Low Voltage,103694
+Server Screw-in RAID Controller Card Fault,103624
+Server Storage Faulty,1088
+Server System Error,101265
+Server System Memory Initialization Error,103621
+Server Temperature Abnormal,1083
+Server Watchdog Timeout,1086
+Service Flow Control in a Cell,22238
+Service Link Failure,1093
+ServiceFabric License Exceeds the Threshold,380
+Seventeenth Extended I/O Alarm,2388
+Seventh Extended I/O Alarm,3143
+Severe Board Failure Alarm,10248
+SFP Link Fault,12812
+SFP Module fault Alarm,4622
+SFP Port Inconsistency Alarm,5024
+SFP Port Local Alarm,4618
+SFP Port Remote Alarm,4620
+SFTP Is Unavailable,1069
+Site Configuration Error,28020
+Site Energy Conservation Alarm,4940
+Site Reset Alarm,5254.8
+Site Reset Fault,12838
+Site Signaling Link Connection Mismatch,21821
+Site Status Abnormal,51024
+Sixteenth Extended I/O Alarm,2386
+Sixth Extended I/O Alarm,3141
+Slave Main Control Module TDMA CLK Alarm,4804
+Smog Alarm,5600
+Smoke,20047
+Smoke Alarm,23576.5
+SO interface configuration Update Failure,29212
+SO Interface Fault,29211
+Software Not Activated Alarm,3062.666667
+Software Version Inconsistency Between OMU and Host,20733
+Solar Array Fault,25711
+Solar Controller Temperature Unacceptable,25713
+SPD Failure Alarm,4128
+SSH management channel is faulty,101206
+Standby Extended Boolean 1 Fault Alarm,10800
+Standby Extended Boolean 2 Fault Alarm,10802
+Standby Extended Boolean 3 Fault Alarm,10804
+Standby Extended Boolean 4 Fault Alarm,10806
+Standby OMU Default Route Exception,20909
+Standby OMU Failure,20703
+Standby Remote Authentication Server Connection Failed,160
+State Inconsistency Between License and Configuration,20762
+Statistical Alarm,20271
+Sub-board Status Abnormal,20250
+Subrack Reset,20244
+Subrack Type and Configuration Mismatch,26401
+Subsystem Blocked,20282
+Suspicious eNodeB Out of Clock Synchronization,315
+SW Not Activated Alarm,4764
+Switch A fan module experienced a complete failure,650070
+Switch A fault occurred in the CPU,650071
+Switch A power module experienced a complete failure,650062
+Switch A power module experienced a partial failure,650067
+Switch Device Configuration Error Fault,268390416
+Switch Device Fan Fault,268390412
+Switch Device Hardware Fault,268390419
+Switch Device Interface Error Fault,268390414
+Switch Device Link Status Fault,268390415
+Switch Device Optical Module Fault,268390413
+Switch Device Power Supply Fault,268390421
+Switch Device Software Abnormal Fault,268390417
+Switch Device Stack Fault,268390411
+Switch Device Subcard Fault,268390420
+Switch Device Temperature Abnormal Fault,268390418
+Switch Dual-active scenario is detected,650048
+Switch Error-down occurred,650054
+Switch Link bandwidth lost partly,650058
+Switch Link bandwidth lost totally,650057
+Switch MAC address learning reached the limit,650053
+Switch MAC and IP address conflict,650050
+Switch MAC flapping detected,650083
+Switch MAC usage reached the Threshold,650052
+Switch M-LAG member interfaces with the same M-LAG ID on both M-LAG devices are Down,650078
+Switch Optical Module has been removed,650074
+Switch Optical Module is invalid,650075
+Switch Rate of packets exceeded the storm control threshold,650051
+Switch The board temperature exceeded the fatal alarm threshold,650077
+Switch The CPU usage exceeded the pre-set overload threshold,650084
+Switch The CRC error is rising,650061
+Switch The DFS dual-active detection message is lost,650080
+Switch The DFS peer status went Down,650079
+Switch The fan module was removed,650068
+Switch The fan partially failed,650069
+Switch The interface status changes,650066
+Switch The last member interface link status changes to down,650060
+Switch The local fault alarm has occurred,650072
+Switch The member of LAG negotiation failed,650056
+Switch The number of forwarding resources reaches the alarm threshold,650064.5
+Switch The optical module was not certified by Huawei data center switches,650076
+Switch The peer link of the LACP member interface might be incorrectly connected,650059
+Switch The physical manage interface physical status changes to down,650055
+Switch The power module was removed,650063
+Switch The protocol status of the dual-active port is down,650049
+Switch The remote fault alarm has occurred,650073
+Switch The storage usage exceeded the pre-set overload threshold,650085
+Switch The two switches in the M-LAG have different type1 configurations,650082
+Switch The two switches in the M-LAG have different type2 configurations,650081
+Switch Users failed to login ssh server too frequently,650047
+Switchover Triggered by a Faulty Node,101209
+Synchronization Time Information Resource Unavailable Alarm,20276
+System Clock Abnormal,20214
+System Clock Failure,26260
+System Clock Reference Source Unavailable,20205
+System Clock Unlocked,26264
+System Connectivity Test Failed,100502
+System Dynamic Traffic Exceeding Licensed Limit,26812
+System Health Check Abnormal,101230
+System in Ineffective Mode,20745
+Task execution failure alarm,50
+TCU Board AC/DC Power Alarm,5842
+TCU Board DC/DC Power Alarm,5844
+TCU boolean 1 alarm,13186
+TCU boolean 2 alarm,13188
+TCU boolean 3 alarm,13190
+TCU boolean 4 alarm,13192
+TCU Temperature Sensor Alarm,2548
+TCU temperature sensor state alarm,9144
+TEC Cooler Fault,25657
+TEMPERATURA ALTA,65206
+TEMPERATURA ALTA BATERIA LITIO,65088
+Temperature A Level alarm,3422
+Temperature B Level alarm,3424
+Temperature high or low alarm,9738
+Temperature in Server Working Environment Too High,101220
+Temperature Prompt Alarm,4218
+Temperature Sensor Fault,9734
+Temperature Sensor Fault Alarm,10760
+Temperature Too High Alarm,10764
+Temperature Too Low Alarm,10770
+Temporary feature field in the license has expired,52
+Temporary feature field in the license is invalid,51
+Temporary feature field in the license will expire,999999988
+Temporary Routes Exist in the OS,386
+Tenth Extended I/O Alarm,3149
+TES Communication Alarm,5262
+TES extended B7 alarm,8050
+Test Phase-Lock Loop Alarm,2865
+TEU Communication Alarm,4986
+The AC power off alarm,4236
+The AC power supply alarm,4238
+The certificate has expired,51021
+The certificate is about to expire,51020
+The certificate update failed,51022
+The configuration command fails to be delivered,353
+The CPU Usage Is High,1
+The CRL File on the LDAP Server Is Invalid,125
+The Data Transmission Channel Between the Trace Server and the NE Is Disrupted,780
+The database had exception logs,39
+The database local copy status is abnormal,101210
+The database process is abnormal,38
+The Database Usage Is Too High,44
+The Database Usage Is Too High (Critical),45
+The Database Usage Is Too High (Minor),43
+The Database Usage Is Too High (Warning),42
+The Digital Certificate Has Expired,124
+The Digital Certificate Is Invalid,129
+The Digital Certificate Is to Expire,123
+The Disk Usage Is Too High,36
+The Disk Usage Is Too High (Critical),37
+The Emergency Disaster Recovery Server Is Abnormal,350
+The license control or sales item enters the grace period,999999999
+The license control or sales item has expired,999999991
+The license has expired,999999993
+The license is invalid,999999995
+The license resource exceeds the threshold,999999994
+The license resource usage reaches or exceeds the threshold 100%,999999997
+The license sales item exceeds the threshold,999999996
+The license sales item usage reaches or exceeds the threshold 100%,999999998
+The license will expire,999999992
+The Memory Usage Is Too High,12
+The Network License is to be Switched to Local State,20757
+The number of certificates issued by Certificate Authority Service has reached the upper limit,800004
+The number of certificates issued by Certificate Authority Service is about to reach the upper limit,800003
+The Number of Current Alarms Reaches the Threshold,157
+The number of key system resources exceeds the threshold,103537
+The Number of Login Attempts Reaches the Maximum,11
+The Number of OSS Server Connection Attempts Within a Short Time Has Exceeded the Threshold,158
+The OSS License Expired,297
+The OSS Service Is Terminated Abnormally,4
+The Periodical Synchronization Failed,351
+The Proportion of Distributed License Is Too High,519
+The Region Administrator Has Reset Another User's Password,161
+The Server Is Disconnected from the Database,33
+The software version already beyond service period,322
+The software version is about to beyond service period,321
+The swap Usage Is High,54
+The User Has Been Set as a Region Administrator,162
+The User in the SMManagers Group Changes a User's Password,298
+The VM is Fault Resuming because of insufficient resource,650021
+Theft Proof,20048
+Third Extended I/O Alarm,3135
+Thirteenth Extended I/O Alarm,2426
+Thirtieth Extended I/O Alarm,4315
+Thirty-First Extended I/O Alarm,4317
+Thirty-Second Extended I/O Alarm,4319
+Time Information Reception Abnormal,20202
+Time Synchronization Failure,26266
+Timeslot Loopback,20229
+TMA Bypass,26755
+TMA Communication Alarm,10254
+TMA Current High Alarm,10258
+TMA Current High Prompt Alarm,10282
+TMA Current Low Alarm,10260
+TMA Hardware Failure Alarm,10256
+TMA Running Data and Configuration Mismatch,26758
+TMA Shortcircuit Alarm,10262
+TMU Aging alarm,4766
+TMU clock critical alarm,4732
+TMU Communication Alarm,2222
+TMU extended 32 alarm,3462
+TMU extended 3B alarm,3480
+TMU extended 3F alarm,3488
+TMU extended 40 alarm,3490
+TMU extended 41 alarm,3492
+TMU extended 45 alarm,3500
+TMU extended 46 alarm,3502
+TMU extended 47 alarm,3504
+TMU extended 48 alarm,3506
+TMU extended 49 alarm,3508
+TMU extended 4B alarm,2262
+TMU extended 4D alarm,2266
+TMU extended 4E alarm,3518
+TMU Flash Memory Alarm,3478
+TMU Mail-box Failure Alarm,3470
+TMU Software Alarm,3474
+TOD Clock Unavailable,26267
+Trace Server Data Is Incomplete,794
+Trace Server Disconnected from the NMS,782
+Trace Server SQLite Database File Damaged,786
+Traffic Close to Capability,21834
+Traffic Exceed Capability,21835
+Transmission Configuration Integrity or Consistency Check Failure,21407
+Transmission LAPD Link Interrupt Alarm,11270
+Transmission Link Fault,28051
+Transmission Loop Test Alarm,3668
+Transmission Optical Interface Error,26222
+Transmission Optical Interface Performance Degraded,26223
+Transmission Optical Module Fault,26220
+Transmission Optical Module Not In Position,26221
+Transmission Power Alarm,5558
+Transmission Resource Pool Ping Packet Loss,21394
+Transmit Mode Error Alarm,4934
+Trial Operation of License,20735
+TRX Band Mismatch ARFCN,2180
+TRX Baseband FH Abnormal Alarm,3120
+TRX Clock Critical Alarm,3190
+TRX Clock Prompt Alarm,2166
+TRX Close HPA Alarm,3118
+TRX Communication Alarm,3198
+TRX Config Mismatch Alarm,3110
+TRX DBUS Alarm,3126
+TRX extended 00 alarm,4100
+TRX extended 0F alarm,3136
+TRX extended 13 alarm,4138
+TRX extended 15 alarm,4142
+TRX extended 17 alarm,4146
+TRX extended 18 alarm,4148
+TRX extended 19 alarm,3156
+TRX extended 1A alarm,3158
+TRX extended 1E alarm,3166
+TRX extended 1F alarm,3168
+TRX extended 21 alarm,3172
+TRX extended 24 alarm,3178
+TRX extended 25 alarm,3180
+TRX extended 29 alarm,3188
+TRX extended 2C alarm,3194
+TRX extended 2D alarm,3196
+TRX Hardware Critical Alarm,3142
+TRX Hardware Prompt Alarm,3132
+TRX ID Mismatch alarm,4126
+TRX ID Mismatched Alarm,2138
+TRX LAPD Link Interrupt Alarm,2114
+TRX main clock alarm,4154
+TRX Maintenance Alarm,3140
+TRX Manually Blocked,21803
+TRX PA Shutdown,28007
+TRX Power Decrease Alarm,3116
+TRX Receive Abnormal Alarm,2188
+TRX SEND_DIV Channel Alarm,4196
+TRX Slave Clock Alarm,3162
+TRX Software Running Abnormal Alarm,3112
+TRX Temperature Abnormal Alarm,2152
+Trx Temperature Alarm,4220
+TRX Temperature Too High Alarm,4140
+TRX Type Not Support alarm,3186
+TRX Voltage Alarm,3122
+TRX VSWR Alarm,3150
+TRX/CDU power off alarm,8626
+TRX/CDU Power- Off Alarm,2542
+Twelfth Extended I/O Alarm,2424
+Twentieth Extended I/O Alarm,2394
+Twenty-Eighth Extended I/O Alarm,4311
+Twenty-Fifth Extended I/O Alarm,4305
+Twenty-First Extended I/O Alarm,2396
+Twenty-Fourth Extended I/O Alarm,4303
+Twenty-Ninth Extended I/O Alarm,4313
+Twenty-Second Extended I/O Alarm,2398
+Twenty-Seventh Extended I/O Alarm,4309
+Twenty-Sixth Extended I/O Alarm,4307
+Twenty-Third Extended I/O Alarm,2400
+Tx Cabel Connect alarm,2160
+TX_PLL_0 alarm,3426
+TX_PLL_1 alarm,3428
+TX_PLL_2 alarm,3430
+UBFA Fault Alarm,9744
+UMTS Cell Blocked,22212
+UMTS Cell Broadcast Service Congestion,22502
+UMTS Cell Common Channel Faulty,22203
+UMTS Cell Common Channel Reconfiguration Failed,22209
+UMTS Cell Common Channel Setup Failed,22208
+UMTS Cell Congested,22201
+UMTS Cell DC-HSUPA Function Fault,22237
+UMTS Cell EFACH Function Fault,22219
+UMTS Cell EPCH Function Fault,22223
+UMTS Cell ERACH Function Fault,22222
+UMTS Cell HSDPA Function Fault,22217
+UMTS Cell HSUPA Function Fault,22218
+UMTS Cell Information Exchange Failed,22210
+UMTS Cell Max DL Power Mismatch,22215
+UMTS Cell MC-HSDPA Function Fault,22241
+UMTS Cell MIMO Function Fault,22220
+UMTS Cell Reconfiguration Failed,22207
+UMTS Cell Setup Failed,22206
+UMTS Cell Unavailable,22202
+UMTS CN Overload,22301
+UMTS Intelligent Feature Unavailable,22287
+Unbalanced Battery Alarm,5242
+Uncontrolled Host Detected,650026
+Uncontrolled VMs Detected,650027
+UPEU Fault Alarm,6668
+Uplink Alarm,3118
+UPS Communication alarm,3444
+UPS Failed Alarm,3448
+USCU Hardware Alarm,13318
+USCU Maintenance Link Fault Alarm,13316
+User Password Has Expired,30005
+User Password Is About to Expire,30004
+User Plane Fault,25954
+User Plane Path Excessive Packet Loss Rate,25959
+User Plane Path Fault,25952
+User Plane Path Major Fault,25966
+Users Having Not Logged In for an Excessively Long Time,56
+VCL Alarm Indication Signal,21322
+VCL CC Activation Failure,21324
+VCL CC Detection Failure,21321
+VCL LB Detection Failure,21326
+VCL PM Activation Failure,21327
+VCL Remote Alarm Indication,21323
+Version Rollback Alarm,5031.6
+Versions of the OSS Subsystems Are Inconsistent,793
+VLAN ID Inconsistency on Active and Standby OMU Boards,20722
+VNFC Subscription Failure,268390423
+Voltage Regulator Alarm,5546
+VSWR Prompt Alarm,4222
+Water Alarm,25670
+Water Damage,20043
+Water Damage Alarm,13102
+Water Immerse Alarm,5906
+Water Immersed Alarm,4205.333333
+Weak Algorithms or Protocols Exist,317
+Working Attributes of Load Sharing Ports Inconsistent,21348
+X2 Interface Fault,29204
+Xw Interface Fault,29224

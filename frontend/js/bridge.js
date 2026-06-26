@@ -232,12 +232,16 @@ const _mock = {
   download_collection_logs: () => ({ ok: true, path: "C:\\Users\\Mock\\Downloads\\smart_events_coleta.log" }),
 
   get_vip_series: (event_id, vip_name, minutes) => {
-    const n = Math.min(Math.floor(minutes) || 60, 120);
+    // Espalha ~200 pontos pela janela (até 7 dias no mock) para exercitar
+    // os divisores de dia no gráfico do popup de VIP.
+    const span = Math.min(Math.max(Math.floor(minutes) || 60, 1), 7 * 24 * 60);
+    const points = 200;
+    const stepMs = (span * 60000) / points;
     const series = [];
     const now = Date.now();
-    for (let i = n; i >= 0; i--) {
+    for (let i = points; i >= 0; i--) {
       series.push({
-        timestamp:    new Date(now - i * 60000).toISOString(),
+        timestamp:    new Date(now - i * stepMs).toISOString(),
         rsrp:         +(-88 + (Math.random() - 0.5) * 16).toFixed(1),
         rsrq:         +(-9  + (Math.random() - 0.5) * 6).toFixed(1),
         serving_cell: "ERB-07",
@@ -250,6 +254,24 @@ const _mock = {
   refresh_vips: (eventId) => ({ ok: true, count: 5 }),
   check_vpn: () => ({ ok: true, connected: true, target: "10.220.50.9" }),
   reauth_session: () => ({ ok: true, base_url: "https://10.220.30.9:31943" }),
+  get_clientes: () => ({
+    ok: true,
+    clientes: {
+      TIM: { name: "TIM", logo: "", logo_url: "", regionais: ["SP", "RJ"] },
+    },
+  }),
+  sync_clientes: () => ({ ok: true, clientes: 1 }),
+  get_credentials_status: (cliente) => ({
+    ok: true,
+    shared: { username: "", configured: false },
+    regionais: (cliente === "TIM" ? ["SP", "RJ"] : []).map(r => ({
+      region: r, base_url: "https://10.220.50.9:31943",
+      username: "", configured: false, uses_shared: false,
+    })),
+  }),
+  save_credentials: () => ({ ok: true }),
+  save_shared_credentials: () => ({ ok: true }),
+  delete_credentials: () => ({ ok: true }),
 };
 
 // ── Aguarda pywebview estar pronto ────────────────────────────────
@@ -297,7 +319,7 @@ const API = {
   getActiveEvent:   ()                       => API.call("get_active_event"),
   getEvents:        ()                       => API.call("get_events"),
   loadEvent:        (path)                   => API.call("load_event", path),
-  activateEvent:    (id, mock=false)         => API.call("activate_event", id, mock),
+  activateEvent:    (id, mock=false, cliente=null) => API.call("activate_event", id, mock, cliente),
   endEvent:         (id)                     => API.call("end_event", id),
   getSites:         (eventId, timestamp=null, metric=null) => API.call("get_sites", eventId, timestamp, metric),
   getSiteCells:     (eventId, siteId)        => API.call("get_site_cells", eventId, siteId),
@@ -327,6 +349,14 @@ const API = {
   clearEventHistory: (eventId)                  => API.call("clear_event_history", eventId),
   checkVpn:         ()                          => API.call("check_vpn"),
   reauthSession:    ()                          => API.call("reauth_session"),
+
+  // Credenciais (Cliente → Regional)
+  getClientes:           ()                            => API.call("get_clientes"),
+  syncClientes:          ()                            => API.call("sync_clientes"),
+  getCredentialsStatus:  (cliente)                     => API.call("get_credentials_status", cliente),
+  saveCredentials:       (cliente, region, u, p)       => API.call("save_credentials", cliente, region, u, p),
+  saveSharedCredentials: (cliente, u, p)               => API.call("save_shared_credentials", cliente, u, p),
+  deleteCredentials:     (cliente, region)             => API.call("delete_credentials", cliente, region),
 };
 
 export default API;

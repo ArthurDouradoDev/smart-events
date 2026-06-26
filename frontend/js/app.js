@@ -10,6 +10,7 @@ import { initVip }    from "./vip.js";
 import { initKpi, refreshChart }    from "./kpi.js";
 import { initAlerts, injectAlerts } from "./alerts.js";
 import { initLogs } from "./logs.js";
+import { initCredentials, promptCredentials } from "./credentials.js";
 
 const POLL_INTERVAL_MS = 30_000; // 30s: busca dados atualizados no banco local
 const VPN_CHECK_INTERVAL_MS = 15 * 60 * 1000; // 15min: verifica conexão com a VPN
@@ -32,6 +33,7 @@ async function boot() {
   initKpi();
   initAlerts();
   initLogs();
+  initCredentials();
 
   _setupHeaderClock();
   _setupLoadEventBtn();
@@ -62,8 +64,29 @@ async function boot() {
 
 // ── Modos da interface ────────────────────────────────────────────
 
+// Mostra a logo do cliente (do catálogo) no cabeçalho; oculta se não houver.
+async function _showClienteLogo(cliente) {
+  const img = document.getElementById("event-cliente-logo");
+  if (!img) return;
+  img.classList.add("hidden");
+  if (!cliente) return;
+  try {
+    const res = await API.getClientes();
+    const url = res && res.ok && res.clientes && res.clientes[cliente]
+      ? res.clientes[cliente].logo_url : "";
+    if (url) {
+      img.src = url;
+      img.alt = cliente;
+      img.classList.remove("hidden");
+    }
+  } catch (err) {
+    console.error("Erro ao carregar logo do cliente:", err);
+  }
+}
+
 function _enterStandbyMode() {
   State.set("mode", "standby");
+  document.getElementById("event-cliente-logo")?.classList.add("hidden");
   document.getElementById("standby-screen").classList.add("active");
   document.getElementById("dashboard-screen").classList.remove("active");
   document.getElementById("dashboard-screen").classList.add("hidden");
@@ -72,6 +95,19 @@ function _enterStandbyMode() {
   document.getElementById("event-timer").classList.add("hidden");
   document.getElementById("rec-indicator").classList.add("hidden");
   _stopSyncPolling();
+}
+
+// Ativa o evento; ao receber needs_credentials, abre o modal sob demanda e re-tenta.
+// Para eventos legados sem cliente, o modal devolve o cliente escolhido, que é fixado no
+// evento na re-ativação (persistido pelo backend).
+async function _activateEventWithCreds(event, isMock) {
+  let res = await API.activateEvent(event.id, isMock);
+  while (res && res.needs_credentials) {
+    const chosen = await promptCredentials(res.cliente, res.region);
+    if (!chosen) return res;  // operador cancelou — coleta não inicia
+    res = await API.activateEvent(event.id, isMock, chosen.cliente);
+  }
+  return res;
 }
 
 async function _enterActiveMode(event) {
@@ -89,6 +125,7 @@ async function _enterActiveMode(event) {
   // Header
   document.getElementById("event-name").textContent = event.name;
   document.getElementById("event-badge").classList.remove("hidden");
+  _showClienteLogo(event.oss && event.oss.cliente);
   
   const start = event.start_time ? new Date(event.start_time) : null;
   const end = event.end_time ? new Date(event.end_time) : null;
@@ -108,9 +145,10 @@ async function _enterActiveMode(event) {
   // Mapa: polígono do evento
   renderEventPolygon(event.polygon);
 
-  // Ativa coleta (inicia scheduler Python)
+  // Ativa coleta (inicia scheduler Python). Se faltarem credenciais (1º acesso),
+  // pede ao operador e re-tenta a ativação.
   const isMock = window.__MOCK_MODE__;
-  await API.activateEvent(event.id, isMock);
+  await _activateEventWithCreds(event, isMock);
 
   // Carrega dados iniciais
   await _poll();

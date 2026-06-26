@@ -63,6 +63,29 @@ select {
   cursor: pointer;
 }
 select:focus { outline: 1px solid var(--info); }
+.cred-input {
+  width: 100%;
+  background: var(--bg-hover);
+  color: var(--text-primary);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 6px 8px;
+  font: inherit;
+  font-size: 13px;
+  margin-top: 4px;
+  box-sizing: border-box;
+}
+.cred-input:focus { outline: 1px solid var(--info); }
+.cred-regional-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--border);
+}
+.cred-regional-row .cred-status { font-size: 11px; }
+.cred-ok { color: var(--success); }
+.cred-missing { color: var(--warning); }
 input[type="range"] {
   accent-color: var(--accent);
   cursor: pointer;

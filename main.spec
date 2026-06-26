@@ -21,6 +21,16 @@ _requests_hidden = (
 # O core/session_renew.py aponta PLAYWRIGHT_BROWSERS_PATH para 'ms-playwright/' no bundle.
 _pw_datas, _pw_binaries, _pw_hidden = collect_all('playwright')
 
+# clientes.json (catálogo Cliente→Regional→IP) embutido como SEMENTE: o .exe é compartilhável
+# SOZINHO e, na 1ª execução, core.credentials.seed_files() copia esta cópia para
+# <pasta do .exe>/data/clientes.json (gravável e editável depois, sem recompilar). As CREDENCIAIS
+# (data/credentials.json) NÃO são embutidas — seed_files() cria um arquivo vazio para o operador
+# digitar suas contas (o .exe circula entre clientes e não pode carregar segredos).
+_cred_seed = []
+_cat_file = Path('data/clientes.json')
+if _cat_file.exists():
+    _cred_seed = [(str(_cat_file), 'data')]
+
 _ms_playwright = Path(os.environ.get("LOCALAPPDATA", "")) / "ms-playwright"
 _browser_dirs = [
     "chromium-1223",
@@ -43,7 +53,7 @@ a = Analysis(
         ('server_frontend', 'server_frontend'),
         ('server_data', 'server_data'),  # semente: evento Rio + VIPs finalizados
         ('core/session_renew.py', 'core'),  # garante o módulo de renovação no bundle
-    ] + collect_data_files('certifi') + _pw_datas + _browser_datas,
+    ] + _cred_seed + collect_data_files('certifi') + _pw_datas + _browser_datas,
     hiddenimports=[
         'server',  # importado por main.py no modo --serve
         'core.session_renew',  # importado por main.py no modo --get-session

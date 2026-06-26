@@ -73,10 +73,16 @@ EVENTS_DIR = SERVER_DATA_DIR / "events"
 EVENTS_DIR.mkdir(parents=True, exist_ok=True)
 VIPS_DIR = SERVER_DATA_DIR / "vips"
 VIPS_DIR.mkdir(parents=True, exist_ok=True)
+CLIENTES_DIR = SERVER_DATA_DIR / "clientes"
+CLIENTES_DIR.mkdir(parents=True, exist_ok=True)
+LOGOS_DIR = SERVER_DATA_DIR / "logos"
+LOGOS_DIR.mkdir(parents=True, exist_ok=True)
 FRONTEND_FILE = RESOURCE_DIR / "server_frontend" / "index.html"
 
 # Mount server_frontend folder to serve local scripts/assets
 app.mount("/static", StaticFiles(directory=str(RESOURCE_DIR / "server_frontend")), name="static")
+# Logos das empresas (upload por cliente) — servidas como estáticos.
+app.mount("/logos", StaticFiles(directory=str(LOGOS_DIR)), name="logos")
 
 @app.post("/api/parse-sites")
 async def parse_sites(file: UploadFile = File(...)):
@@ -257,7 +263,7 @@ def delete_event(event_id: str):
 # ── VIPs (cadastro global) ──────────────────────────────────────────
 
 @app.get("/api/vips")
-def get_vips(oss: Optional[str] = None):
+def get_vips(oss: Optional[str] = None, cliente: Optional[str] = None):
     vips = []
     for file_path in VIPS_DIR.glob("*.json"):
         try:
@@ -265,6 +271,9 @@ def get_vips(oss: Optional[str] = None):
                 data = json.load(f)
                 if isinstance(data, dict) and "id" in data and "name" in data:
                     if oss is not None and data.get("oss") != oss:
+                        continue
+                    # VIPs sem cliente (legado) sempre passam; só filtra os de cliente diferente.
+                    if cliente is not None and data.get("cliente") and data.get("cliente") != cliente:
                         continue
                     vips.append(data)
         except Exception as e:
@@ -304,6 +313,106 @@ def delete_vip(vip_id: str):
         return {"ok": True}
     except Exception as e:
         logger.error(f"Failed to delete vip {vip_id}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ── Clientes (catálogo Cliente → Regional → IP, com logo) ───────────
+# Cada cliente é um JSON em server_data/clientes/<id>.json:
+#   {"id","name","logo": <arquivo em /logos ou "">, "regionais":[{"region","ip"}]}
+
+def _slugify(text: str) -> str:
+    import re, unicodedata
+    text = unicodedata.normalize("NFKD", text).encode("ascii", "ignore").decode("ascii")
+    return re.sub(r"[^a-z0-9]+", "-", text.lower()).strip("-") or "cliente"
+
+
+@app.get("/api/clientes")
+def get_clientes():
+    clientes = []
+    for file_path in CLIENTES_DIR.glob("*.json"):
+        try:
+            with open(file_path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+                if isinstance(data, dict) and "id" in data and "name" in data:
+                    clientes.append(data)
+        except Exception as e:
+            logger.error(f"Error loading cliente file {file_path.name}: {e}")
+    clientes.sort(key=lambda c: c.get("name", ""))
+    return clientes
+
+
+@app.post("/api/clientes")
+async def post_cliente(request: Request):
+    try:
+        data = await request.json()
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid JSON payload")
+    if not isinstance(data, dict) or not data.get("name"):
+        raise HTTPException(status_code=400, detail="Missing required field: name")
+
+    cid = data.get("id") or _slugify(data["name"])
+    data["id"] = cid
+    # Normaliza regionais: lista de {region, ip}
+    regionais = []
+    for r in data.get("regionais", []) or []:
+        region = (r.get("region") or "").strip().upper()
+        ip = (r.get("ip") or "").strip()
+        if region:
+            regionais.append({"region": region, "ip": ip})
+    data["regionais"] = regionais
+    data.setdefault("logo", "")
+
+    file_path = CLIENTES_DIR / f"{cid}.json"
+    try:
+        with open(file_path, "w", encoding="utf-8") as f:
+            json.dump(data, f, indent=4, ensure_ascii=False)
+        logger.info(f"Registered cliente: {data['name']} ({cid})")
+        return {"ok": True, "id": cid}
+    except Exception as e:
+        logger.error(f"Failed to save cliente {cid}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.delete("/api/clientes/{cliente_id}")
+def delete_cliente(cliente_id: str):
+    file_path = CLIENTES_DIR / f"{cliente_id}.json"
+    if not file_path.exists():
+        raise HTTPException(status_code=404, detail="Cliente not found")
+    try:
+        file_path.unlink()
+        logger.info(f"Deleted cliente: {cliente_id}")
+        return {"ok": True}
+    except Exception as e:
+        logger.error(f"Failed to delete cliente {cliente_id}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/clientes/{cliente_id}/logo")
+async def upload_cliente_logo(cliente_id: str, file: UploadFile = File(...)):
+    file_path = CLIENTES_DIR / f"{cliente_id}.json"
+    if not file_path.exists():
+        raise HTTPException(status_code=404, detail="Cliente not found")
+    ext = Path(file.filename or "").suffix.lower() or ".png"
+    if ext not in (".png", ".jpg", ".jpeg", ".svg", ".webp", ".gif"):
+        raise HTTPException(status_code=400, detail="Formato de imagem não suportado")
+    logo_name = f"{cliente_id}{ext}"
+    try:
+        # Remove logos antigas do cliente (extensão pode mudar)
+        for old in LOGOS_DIR.glob(f"{cliente_id}.*"):
+            old.unlink()
+        with open(LOGOS_DIR / logo_name, "wb") as out:
+            shutil.copyfileobj(file.file, out)
+        with open(file_path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        data["logo"] = logo_name
+        with open(file_path, "w", encoding="utf-8") as f:
+            json.dump(data, f, indent=4, ensure_ascii=False)
+        logger.info(f"Logo atualizada para cliente {cliente_id}: {logo_name}")
+        return {"ok": True, "logo": logo_name}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to save logo for cliente {cliente_id}: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 

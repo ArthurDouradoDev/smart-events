@@ -80,7 +80,8 @@ SmartEvents/
 │   ├── smart_events_*.db    # Bancos de dados SQLite específicos de cada evento (IGNORAR no git)
 │   ├── session*.json        # Cookies + token roarand por regional (IGNORAR no git)
 │   ├── settings.json        # server_url e preferências locais (IGNORAR no git)
-│   └── credentials.json     # (opcional) credenciais de login por regional (IGNORAR no git)
+│   ├── clientes.json        # catálogo Cliente→Regional→IP (editável; semeado do bundle)
+│   └── credentials.json     # credenciais por Cliente/Regional, com _shared por cliente (IGNORAR no git; criado vazio no 1º acesso)
 │
 ├── tests/                   # Suíte pytest (unitários + integração marcada com `vpn`)
 │   ├── conftest.py
@@ -247,7 +248,14 @@ A distribuição em campo é um executável portátil gerado com **PyInstaller**
 3. O executável final é gerado em `dist/`. A pasta `data/` (bancos, sessão e credenciais) é criada ao lado do `.exe` na primeira execução.
 
 > [!NOTE]
-> O `main.spec` empacota o Chromium completo do Playwright (necessário para o fluxo de reautenticação interativa com CAPTCHA), o que torna o `.exe` grande (~370 MB). Edite as credenciais por regional em `data/credentials.json` **sem recompilar** — a pasta `data/` é externa ao bundle.
+> O `main.spec` empacota o Chromium completo do Playwright (necessário para o fluxo de reautenticação interativa com CAPTCHA), o que torna o `.exe` grande (~370 MB). A pasta `data/` é externa ao bundle.
+
+### Credenciais de acesso (Cliente → Regional)
+
+O catálogo de clientes e regionais (`Cliente → Regional → IP`) fica em `data/clientes.json`, **editável sem recompilar** (semeado do bundle na 1ª execução). As credenciais de cada usuário ficam em `data/credentials.json` (texto puro, **não embutido** no `.exe` — criado vazio no 1º acesso).
+
+- **1º acesso:** ao ativar um evento cuja regional ainda não tem credencial, o app abre um modal pedindo usuário/senha daquele Cliente/Regional.
+- **Atualizar:** botão de credenciais no cabeçalho abre o gerenciador por Cliente. Marque **"usar a mesma credencial para todas as regionais deste cliente"** para uma conta única (compartilhada), ou preencha por regional (override). A credencial por regional tem precedência sobre a compartilhada.
 
 ---
 
