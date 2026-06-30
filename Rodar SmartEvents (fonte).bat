@@ -9,7 +9,7 @@ set "PY=%VENV%\Scripts\python.exe"
 echo ============================================
 echo   SmartEvents - execucao pelo codigo-fonte
 echo ============================================
-echo Dica: o jeito mais simples e dar duplo clique em dist\main.exe
+echo Dica: o jeito mais simples e dar duplo clique em dist\main\main.exe
 echo       (nao precisa de Python). Este .bat e para rodar pelo codigo.
 echo.
 

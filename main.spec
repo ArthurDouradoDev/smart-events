@@ -81,19 +81,24 @@ a = Analysis(
 )
 pyz = PYZ(a.pure)
 
+# Build ONEDIR (pasta dist/main/ com o .exe + _internal/), NÃO onefile.
+# O onefile comprime tudo (~400 MB com o Chromium) num único .exe e DESCOMPRIME para uma
+# pasta temporária _MEI a cada abertura. Ao enviar esse .exe para outra máquina, qualquer
+# truncamento/antivírus na transferência corrompe o stream e o bootloader falha com
+# "decompression resulted in return code -1". O onedir não descomprime nada em runtime
+# (os arquivos já ficam soltos ao lado do .exe), eliminando essa classe de erro e abrindo
+# mais rápido. Distribuição: zipar a pasta dist/main/ (o build.py já gera o .zip).
 exe = EXE(
     pyz,
     a.scripts,
-    a.binaries,
-    a.datas,
     [],
+    exclude_binaries=True,  # binaries/datas vão para o COLLECT (pasta), não para dentro do .exe
     name='main',
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
     upx=False,  # UPX desabilitado: comprimir o Chromium/node empacotados pode corrompê-los
     upx_exclude=[],
-    runtime_tmpdir=None,
     console=False,
     disable_windowed_traceback=False,
     argv_emulation=False,
@@ -101,4 +106,14 @@ exe = EXE(
     codesign_identity=None,
     entitlements_file=None,
     icon='assets/logoSmartEvents.ico',
+)
+
+coll = COLLECT(
+    exe,
+    a.binaries,
+    a.datas,
+    strip=False,
+    upx=False,
+    upx_exclude=[],
+    name='main',  # gera dist/main/ (main.exe + _internal/)
 )

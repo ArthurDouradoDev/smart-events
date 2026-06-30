@@ -195,6 +195,14 @@ Consulte as regras de modificação rápida:
 
 ## Registro de Atividades / Sessões
 
+### [Sessão 2026-06-26] Build do `.exe` migrado de onefile para onedir (corrige "decompression error -1")
+- **Motivação:** O `.exe` onefile (~394 MB, Chromium embutido) abria na máquina-origem mas falhava com `decompression resulted in return code -1` ao ser **enviado para outro PC** — corrupção do stream comprimido na transferência (ver [ERRORS.md](file:///.claude/ERRORS.md)).
+- **Mudança:** `main.spec` agora é **onedir** — `EXE(..., exclude_binaries=True)` + `COLLECT(...)` gerando a pasta `dist/main/` (`main.exe` + `_internal/` com frontend, server_frontend, `data/clientes.json` semente e `ms-playwright/`). `build.py` ajustado: exe em `dist/main/main.exe`, `clientes.json` persistente copiado p/ `dist/main/data/`, e novo passo que gera **`dist/SmartEvents.zip`** (envio robusto, CRC por arquivo). `LEIA-ME.txt` e o `.bat` apontam para `dist\main\main.exe` + instrução de mandar o `.zip`.
+- **Sem mudança de código do app:** todos os caminhos já eram frozen-aware — `data/` persistente via `Path(sys.executable).parent` (vira `dist/main/data`), recursos via `sys._MEIPASS` (vira `dist/main/_internal`). Onedir não descomprime em runtime → erro eliminado por construção e abertura mais rápida.
+- **Premissa registrada:** distribuição NÃO é mais "um .exe solto"; é a **pasta `dist/main/` inteira** (ou o `dist/SmartEvents.zip`). Mandar só o `main.exe` sem o `_internal/` ao lado NÃO funciona.
+- **Status:** build exit 0 (pasta 884.9 MB / zip 377.7 MB). Smoke-test do exe congelado em `--serve` → `/api/clientes` HTTP 200, sem erro de descompressão. Pendente: validar a UI completa (janela PyWebView) e a coleta com VPN no .exe novo.
+- **IP das coletas (verificado, já dinâmico):** o fluxo KPI/VIP resolve o IP por Cliente→Regional via `credentials.resolve_base_url(oss)` (catálogo `data/clientes.json`), sem hardcode. `alarm.py` (coletor de alarmes novo) permanece **standalone** com IP/tokens fixos — decisão do operador de não integrar agora.
+
 ### [Sessão 2026-06-26] Seletor de data + divisores de dia no gráfico do popup de VIP
 - **O que foi feito (só frontend, sem mudança de backend):**
   - Adicionadas abas de janela temporal no modal de detalhes do VIP (`#vip-modal-time-tabs` em `index.html`), reaproveitando a classe `.time-tab` dos KPIs: **Hoje** (default) · **3 dias** · **7 dias** · **Total**.

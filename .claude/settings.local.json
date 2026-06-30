@@ -127,7 +127,11 @@
       "PowerShell($env:TESTPORT=\"8077\"; Start-Process -FilePath python -ArgumentList \"-m\",\"uvicorn\",\"server:app\",\"--port\",\"8077\" -WindowStyle Hidden -RedirectStandardError \"$env:TEMP\\\\srv_err.log\" -RedirectStandardOutput \"$env:TEMP\\\\srv_out.log\"; Start-Sleep -Seconds 4; Write-Output \"server started\")",
       "PowerShell($tmp = Join-Path $env:TEMP \"vipcheck\"; New-Item -ItemType Directory -Force $tmp | Out-Null; foreach \\($f in @\\(\"vip\",\"bridge\"\\)\\) { Copy-Item \"frontend\\\\js\\\\$f.js\" \"$tmp\\\\$f.mjs\" -Force; node --check \"$tmp\\\\$f.mjs\"; if \\($?\\) { \"OK $f\" } else { \"FAIL $f\" } })",
       "PowerShell($tmp = Join-Path $env:TEMP \"vipcheck\"; Copy-Item \"frontend\\\\js\\\\vip.js\" \"$tmp\\\\vip.mjs\" -Force; node --check \"$tmp\\\\vip.mjs\"; if \\($?\\) { \"OK vip\" } else { \"FAIL vip\" })",
-      "PowerShell($tmp = Join-Path $env:TEMP \"vipcheck\"; Copy-Item \"frontend\\\\js\\\\kpi.js\" \"$tmp\\\\kpi.mjs\" -Force; node --check \"$tmp\\\\kpi.mjs\"; if \\($?\\) { \"OK kpi\" } else { \"FAIL kpi\" })"
+      "PowerShell($tmp = Join-Path $env:TEMP \"vipcheck\"; Copy-Item \"frontend\\\\js\\\\kpi.js\" \"$tmp\\\\kpi.mjs\" -Force; node --check \"$tmp\\\\kpi.mjs\"; if \\($?\\) { \"OK kpi\" } else { \"FAIL kpi\" })",
+      "Bash(git --no-pager diff main.spec build.py)",
+      "PowerShell($py = if \\(Test-Path .venv\\\\Scripts\\\\python.exe\\) { \".venv\\\\Scripts\\\\python.exe\" } else { \"python\" }; & $py -c \"import py_compile; py_compile.compile\\('build.py', doraise=True\\); py_compile.compile\\('main.spec', doraise=True\\); print\\('OK build.py + main.spec'\\)\")",
+      "PowerShell($py = if \\(Test-Path .venv\\\\Scripts\\\\python.exe\\) { \".venv\\\\Scripts\\\\python.exe\" } else { \"python\" }; & $py -c \"import PyInstaller, playwright; print\\('PyInstaller', PyInstaller.__version__, '| playwright OK'\\)\" 2>&1; $env:LOCALAPPDATA + '\\\\ms-playwright' | ForEach-Object { if \\(Test-Path $_\\) { Write-Output \\(\"chromium dirs: \" + \\(\\(Get-ChildItem $_ -Directory | Select-Object -ExpandProperty Name\\) -join ', '\\)\\) } else { Write-Output 'ms-playwright MISSING' } })",
+      "PowerShell($py = if \\(Test-Path .venv\\\\Scripts\\\\python.exe\\) { \".venv\\\\Scripts\\\\python.exe\" } else { \"python\" }; & $py build.py)"
     ],
     "additionalDirectories": [
       "c:\\Users\\a50057663\\Desktop\\Automações\\SmartEvents\\.claude"

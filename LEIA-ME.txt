@@ -7,7 +7,9 @@ eventos - saude das celulas, rastreio de VIPs no mapa e alertas automaticos.
 COMO RODAR
 ----------
 Jeito facil (nao precisa de Python):
-  -> abra a pasta "dist" e de duplo clique em "main.exe"
+  -> abra a pasta "dist\main" e de duplo clique em "main.exe"
+     (para enviar a outra pessoa, mande o arquivo "dist\SmartEvents.zip"
+      inteiro; a pessoa extrai e abre o main.exe de dentro da pasta)
 
 Pelo codigo-fonte:
   -> duplo clique em "Rodar SmartEvents (fonte).bat"
