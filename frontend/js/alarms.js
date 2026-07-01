@@ -202,6 +202,17 @@ function _row(al) {
     </div>
     <div class="alarm-name">${_esc(al.alarm_name || "—")}</div>
     <div class="alarm-source">${_esc(al.source || "—")}${al.location ? " · " + _esc(al.location) : ""}${siteTag}</div>`;
+
+  // Clicar num alarme correlacionado a um site do evento foca esse site no mapa
+  // (igual aos VIPs). Fecha o drawer para o foco ficar visível.
+  if (al.serving_site) {
+    item.classList.add("clickable");
+    item.title = "Focar no site no mapa";
+    item.addEventListener("click", () => {
+      State.set("selectedSite", al.serving_site);
+      _closeDrawer();
+    });
+  }
   return item;
 }
 

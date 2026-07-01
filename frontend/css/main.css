@@ -982,6 +982,8 @@ input[type="range"] {
   border-bottom: 1px solid var(--border-soft);
   border-left: 3px solid var(--border);
 }
+.alarm-item.clickable { cursor: pointer; }
+.alarm-item.clickable:hover { background: var(--bg-hover); }
 .alarm-item-top {
   display: flex;
   justify-content: space-between;
