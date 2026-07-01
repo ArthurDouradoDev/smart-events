@@ -952,7 +952,18 @@ input[type="range"] {
   border-bottom: 1px solid var(--border);
   flex-shrink: 0;
 }
+.alarms-scope {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--text-secondary);
+  cursor: pointer;
+  margin-bottom: 8px;
+}
+.alarms-scope input { width: auto; accent-color: var(--accent); }
 #alarms-filter-toggle { width: 100%; text-align: left; }
+.alarm-site { color: var(--text-secondary); margin-left: 6px; }
 #alarms-filter-panel { margin-top: 8px; }
 #alarms-filter-panel .site-search-input { width: 100%; margin-bottom: 6px; }
 #alarms-filter-options { max-height: 180px; overflow-y: auto; }

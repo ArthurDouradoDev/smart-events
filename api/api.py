@@ -777,12 +777,42 @@ class Api:
     # ── Alarmes (iMaster FM website, filtrados por tipo) ─────────────
 
     def get_alarms(self, event_id: str, timestamp: Optional[str] = None) -> list:
-        """Retorna os alarmes correntes do evento (opcionalmente até timestamp)."""
+        """Retorna os alarmes correntes (opcionalmente até timestamp), marcados com
+        `in_event`/`serving_site` pela correlação do `source` (meName) com os sites
+        do evento — feita aqui (query time) para refletir os sites do evento atual,
+        como os VIPs. A coleta continua sendo da rede toda (não recortada)."""
         try:
-            return db.get_alarms(event_id, timestamp)
+            rows = db.get_alarms(event_id, timestamp)
+            config = db.get_event(event_id) or _active_event or {}
+            sites = config.get("sites", [])
+            for r in rows:
+                site_id, site_name = self._resolve_site_for_source(sites, r.get("source"))
+                r["serving_site"] = site_id
+                r["serving_site_name"] = site_name
+                r["in_event"] = bool(site_id)
+            return rows
         except Exception as e:
             logger.error(f"get_alarms error: {e}")
             return []
+
+    @staticmethod
+    def _resolve_site_for_source(sites: list, source) -> tuple:
+        """Casa o `source` do alarme (meName, ex.: SR-UWCTJ1) com um site do evento.
+        Match por igualdade/prefixo/substring contra o id e o nome do site."""
+        if not source:
+            return None, None
+        src = str(source).strip().upper()
+        if not src:
+            return None, None
+        for site in sites:
+            s_id = site.get("id", "")
+            s_id_u = s_id.upper()
+            s_name_u = (site.get("name") or "").upper()
+            if s_id_u and (src == s_id_u or src.startswith(s_id_u) or s_id_u in src):
+                return s_id, site.get("name")
+            if s_name_u and (s_name_u in src or src in s_name_u):
+                return s_id, site.get("name")
+        return None, None
 
     def get_alarm_catalog(self) -> dict:
         """Nomes de alarme disponíveis (ordenados) para o multi-select do filtro."""

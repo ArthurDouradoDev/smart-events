@@ -11,6 +11,7 @@ import pytest
 import core.database as db
 from core.collector import (
     MockCollector,
+    HttpCollector,
     _load_alarm_catalog,
     _resolve_alarm_pairs,
     _build_alarm_condition,
@@ -95,6 +96,24 @@ class TestFlattenAlarm:
         assert row["severity"] == "Major"  # 2 → Major
         assert row["source"] == "SR-UWCTJ1"
         assert row["collected_at"] == "2026-06-30T12:01:00Z"
+
+
+class TestAlarmTimezone:
+    """arriveUtc/occurUtc vêm no fuso do cliente (UTC-3) apesar do nome 'Utc'.
+    _flatten_alarms deve convertê-los para UTC real (soma +3h com offset -180)."""
+
+    def test_flatten_alarms_converts_local_to_utc(self, sample_event, monkeypatch):
+        monkeypatch.setattr(db, "get_event_vips", lambda *a, **k: [])
+        c = HttpCollector(sample_event, "")  # offset default -180 (America/Sao_Paulo)
+        raw = [{
+            "csn": 1, "alarmId": "26529", "alarmGroupId": "8193",
+            "alarmName": "RF Unit VSWR Threshold Crossed", "severity": 3,
+            "meName": "SR-UWCTJ1",
+            "arriveUtc": "2026-06-24 15:45:03", "occurUtc": "2026-06-24 15:45:00",
+        }]
+        rows = c._flatten_alarms(raw)
+        assert rows[0]["arrive_time"] == "2026-06-24T18:45:03Z"  # 15:45 local → 18:45 UTC
+        assert rows[0]["occur_time"] == "2026-06-24T18:45:00Z"
 
 
 # ── MockCollector.collect_alarms ──────────────────────────────────────
@@ -205,6 +224,34 @@ class TestApiAlarms:
     def test_get_alarms_returns_list(self, api, sample_event):
         db.save_event(sample_event)
         assert isinstance(api.get_alarms(sample_event["id"]), list)
+
+    def test_get_alarms_marks_in_event(self, api, sample_event):
+        db.save_event(sample_event)
+        eid = sample_event["id"]
+        # sample_event tem o site SR-SPPNB2; source igual ao meName deve casar.
+        db.insert_alarms_batch([
+            {"csn": 1, "event_id": eid, "alarm_id": "1", "alarm_group_id": "1",
+             "alarm_name": "Cell Unavailable", "severity": "Major", "source": "SR-SPPNB2",
+             "ip": "", "location": "", "occur_time": "2026-06-30T10:00:00Z",
+             "arrive_time": "2026-06-30T10:00:00Z", "additional_info": "",
+             "collected_at": "2026-06-30T10:00:00Z"},
+            {"csn": 2, "event_id": eid, "alarm_id": "1", "alarm_group_id": "1",
+             "alarm_name": "Cell Unavailable", "severity": "Major", "source": "SR-OUTRO99",
+             "ip": "", "location": "", "occur_time": "2026-06-30T10:00:00Z",
+             "arrive_time": "2026-06-30T10:00:00Z", "additional_info": "",
+             "collected_at": "2026-06-30T10:00:00Z"},
+        ])
+        by_csn = {a["csn"]: a for a in api.get_alarms(eid)}
+        assert by_csn[1]["in_event"] is True
+        assert by_csn[1]["serving_site"] == "SR-SPPNB2"
+        assert by_csn[2]["in_event"] is False
+
+    def test_resolve_site_for_source(self, api, sample_event):
+        sites = sample_event["sites"]
+        assert api._resolve_site_for_source(sites, "SR-SPPNB2")[0] == "SR-SPPNB2"
+        assert api._resolve_site_for_source(sites, "SR-SPPNB2-3")[0] == "SR-SPPNB2"  # prefixo
+        assert api._resolve_site_for_source(sites, "SR-NOPE")[0] is None
+        assert api._resolve_site_for_source(sites, None)[0] is None
 
     def test_refresh_alarms_when_not_recording(self, api, sample_event):
         db.save_event(sample_event)

@@ -1880,14 +1880,24 @@ class HttpCollector(BaseCollector):
         return rows
 
     def _flatten_alarms(self, raw: List[dict]) -> List[dict]:
-        """Achata + injeta event_id/collected_at e deduplica por csn (lista viva)."""
+        """Achata + injeta event_id/collected_at e deduplica por csn (lista viva).
+
+        arriveUtc/occurUtc chegam como "YYYY-MM-DD HH:MM:SS" NO FUSO DO CLIENTE
+        (cookies timemode=client / timezone=America/Sao_Paulo), apesar do nome "Utc".
+        Convertemos para UTC real (mesma lógica do trace, via _oss_tz_offset_min) para
+        que o frontend — que interpreta o timestamp como UTC — exiba o horário certo."""
         collected_at = datetime.utcnow().strftime('%Y-%m-%dT%H:%M:%SZ')
         out = {}
         for a in raw:
             csn = a.get("csn")
             if csn is None:
                 continue
-            out[csn] = _flatten_alarm(a, self.event_id, collected_at)
+            row = _flatten_alarm(a, self.event_id, collected_at)
+            if row.get("arrive_time"):
+                row["arrive_time"] = self._parse_trace_timestamp(row["arrive_time"])
+            if row.get("occur_time"):
+                row["occur_time"] = self._parse_trace_timestamp(row["occur_time"])
+            out[csn] = row
         return list(out.values())
 
 

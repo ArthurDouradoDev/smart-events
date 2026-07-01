@@ -180,18 +180,20 @@ const _mock = {
   ]),
   get_alarms: (event_id, timestamp=null) => {
     const now = Date.now();
-    const mk = (i, name, sev, src) => ({
+    const mk = (i, name, sev, src, inEvent, siteName) => ({
       csn: 90000 + i, event_id, alarm_id: String(3600 + i), alarm_group_id: "268435456",
       alarm_name: name, severity: sev, source: src, ip: `10.0.0.${10 + i}`,
       location: "Interlagos", occur_time: new Date(now - i * 6 * 60000).toISOString(),
       arrive_time: new Date(now - i * 6 * 60000).toISOString(), additional_info: "mock",
       collected_at: new Date(now).toISOString(),
+      in_event: inEvent, serving_site: inEvent ? src : null,
+      serving_site_name: inEvent ? siteName : null,
     });
     return [
-      mk(0, "RF Unit VSWR Threshold Crossed", "Critical", "SR-ERB07"),
-      mk(1, "Cell Unavailable", "Major", "SR-ERB03"),
-      mk(2, "Cell Unavailable", "Major", "SR-ERB11"),
-      mk(3, "RF Unit VSWR Threshold Crossed", "Critical", "SR-ERB15"),
+      mk(0, "RF Unit VSWR Threshold Crossed", "Critical", "ERB-07", true,  "ERB-07 Interlagos"),
+      mk(1, "Cell Unavailable", "Major", "ERB-03", true,  "ERB-03 Av. Interlagos"),
+      mk(2, "Cell Unavailable", "Major", "SR-XYZ99", false, null),
+      mk(3, "RF Unit VSWR Threshold Crossed", "Critical", "SR-ABC12", false, null),
     ];
   },
   get_alarm_catalog: () => ({

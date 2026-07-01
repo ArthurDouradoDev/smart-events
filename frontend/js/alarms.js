@@ -21,6 +21,7 @@ const SEV_COLOR = {
 let _catalog = [];            // nomes disponíveis (do catálogo)
 let _selected = new Set();    // tipos atualmente selecionados
 let _filterLoadedFor = null;  // eventId para o qual o filtro foi carregado
+let _eventOnly = true;        // mostrar só alarmes correlacionados a sites do evento
 
 export function initAlarms() {
   State.on("change:alarms", _render);
@@ -28,6 +29,12 @@ export function initAlarms() {
   document.getElementById("alarms-btn")?.addEventListener("click", _toggleDrawer);
   document.getElementById("alarms-drawer-close")?.addEventListener("click", _closeDrawer);
   document.getElementById("alarms-refresh-btn")?.addEventListener("click", _refresh);
+
+  const eventOnly = document.getElementById("alarms-event-only");
+  eventOnly?.addEventListener("change", () => {
+    _eventOnly = eventOnly.checked;
+    _render(State.alarms);
+  });
 
   const toggle = document.getElementById("alarms-filter-toggle");
   const panel  = document.getElementById("alarms-filter-panel");
@@ -149,24 +156,29 @@ async function _onToggleType(name, checked) {
 // ── Renderização da lista ─────────────────────────────────────────
 
 function _render(alarms) {
+  alarms = alarms || [];
   const list    = document.getElementById("alarms-list");
   const summary = document.getElementById("alarms-summary");
   if (!list) return;
 
-  const counts = _severityCounts(alarms);
-  if (summary) {
-    summary.textContent = alarms.length
-      ? `${alarms.length} alarmes · ${counts.Critical || 0} crít · ${counts.Major || 0} maior`
-      : "0 alarmes";
-  }
-  _updateBadge(counts.Critical || 0);
+  const inEvent = alarms.filter(a => a.in_event);
+  const shown   = _eventOnly ? inEvent : alarms;
 
-  if (!alarms.length) {
-    list.innerHTML = `<div class="alarms-empty">Nenhum alarme dos tipos selecionados.</div>`;
+  if (summary) {
+    summary.textContent = `${inEvent.length} no evento · ${alarms.length} na rede`;
+  }
+  // O badge do header sempre reflete os críticos NO EVENTO (sinal mais relevante).
+  _updateBadge(_severityCounts(inEvent).Critical || 0);
+
+  if (!shown.length) {
+    const msg = _eventOnly && alarms.length
+      ? `Nenhum alarme nos sites do evento (${alarms.length} na rede).`
+      : "Nenhum alarme dos tipos selecionados.";
+    list.innerHTML = `<div class="alarms-empty">${msg}</div>`;
     return;
   }
 
-  const sorted = [...alarms].sort((a, b) => {
+  const sorted = [...shown].sort((a, b) => {
     const s = (SEV_ORDER[a.severity] ?? 9) - (SEV_ORDER[b.severity] ?? 9);
     if (s !== 0) return s;
     return String(b.arrive_time || "").localeCompare(String(a.arrive_time || ""));
@@ -181,13 +193,15 @@ function _row(al) {
   item.className = "alarm-item";
   const color = SEV_COLOR[al.severity] || "var(--text-secondary)";
   item.style.borderLeftColor = color;
+  const siteTag = al.in_event && al.serving_site_name
+    ? `<span class="alarm-site">📍 ${_esc(al.serving_site_name)}</span>` : "";
   item.innerHTML = `
     <div class="alarm-item-top">
       <span class="alarm-sev" style="color:${color}">${_esc(al.severity || "—")}</span>
       <span class="alarm-time">${_formatTime(al.arrive_time)}</span>
     </div>
     <div class="alarm-name">${_esc(al.alarm_name || "—")}</div>
-    <div class="alarm-source">${_esc(al.source || "—")}${al.location ? " · " + _esc(al.location) : ""}</div>`;
+    <div class="alarm-source">${_esc(al.source || "—")}${al.location ? " · " + _esc(al.location) : ""}${siteTag}</div>`;
   return item;
 }
 

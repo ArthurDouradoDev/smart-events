@@ -140,7 +140,10 @@
       "PowerShell(Get-ChildItem \"alarms\" | Select-Object Name, Length; Write-Output \"---\"; Get-Content \"alarms\\\\catalogo-alarmes.csv\" -TotalCount 3; Write-Output \"---lines---\"; \\(Get-Content \"alarms\\\\catalogo-alarmes.csv\" | Measure-Object -Line\\).Lines)",
       "PowerShell($files = @\\(\"frontend\\\\js\\\\alarms.js\",\"frontend\\\\js\\\\app.js\",\"frontend\\\\js\\\\bridge.js\",\"frontend\\\\js\\\\state.js\"\\); foreach \\($f in $files\\) { node --check $f; if \\($?\\) { Write-Output \"$f OK\" } })",
       "PowerShell(python -m pytest tests/ -q 2>&1)",
-      "PowerShell(python -c \"import api.api, core.collector, core.scheduler, core.database, core.models; from core.collector import build_collector, _load_alarm_catalog; c=_load_alarm_catalog\\(\\); print\\('catalog names:', len\\(c\\)\\); print\\('imports OK'\\)\")"
+      "PowerShell(python -c \"import api.api, core.collector, core.scheduler, core.database, core.models; from core.collector import build_collector, _load_alarm_catalog; c=_load_alarm_catalog\\(\\); print\\('catalog names:', len\\(c\\)\\); print\\('imports OK'\\)\")",
+      "PowerShell(python -m pytest tests/test_alarms.py -q 2>&1)",
+      "PowerShell(python -m pytest tests/ -q -p no:warnings 2>&1)",
+      "PowerShell(python -m pytest tests/ -q -p no:warnings 2>&1 | Select-Object -Last 6; Write-Output \"---JS---\"; foreach \\($f in @\\(\"frontend\\\\js\\\\alarms.js\",\"frontend\\\\js\\\\bridge.js\",\"frontend\\\\js\\\\app.js\"\\)\\) { node --check $f; if \\($?\\) { Write-Output \"$f OK\" } })"
     ],
     "additionalDirectories": [
       "c:\\Users\\a50057663\\Desktop\\Automações\\SmartEvents\\.claude"
