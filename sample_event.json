@@ -80,7 +80,8 @@
     "cliente":       "TIM",
     "base_url":      "",
     "region":        "SP",
-    "import_folder": ""
+    "import_folder": "",
+    "alarm_filter":  ["RF Unit VSWR Threshold Crossed", "Cell Unavailable"]
   },
   "integration": {
     "pm_task_id": 374

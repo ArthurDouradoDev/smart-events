@@ -9,6 +9,7 @@ import { initMap, renderSites, renderEventPolygon, fitToEvent } from "./map.js";
 import { initVip }    from "./vip.js";
 import { initKpi, refreshChart }    from "./kpi.js";
 import { initAlerts, injectAlerts } from "./alerts.js";
+import { initAlarms, injectAlarms } from "./alarms.js";
 import { initLogs } from "./logs.js";
 import { initCredentials, promptCredentials } from "./credentials.js";
 
@@ -32,6 +33,7 @@ async function boot() {
   initVip();
   initKpi();
   initAlerts();
+  initAlarms();
   initLogs();
   initCredentials();
 
@@ -222,16 +224,18 @@ async function _poll() {
   if (!id) return;
 
   try {
-    const [sites, vips, alerts, status] = await Promise.all([
+    const [sites, vips, alerts, alarms, status] = await Promise.all([
       API.getSites(id, null, State.selectedMetric),
       API.getVips(id),
       API.getAlerts(id),
+      API.getAlarms(id),
       API.getAppStatus(),
     ]);
 
     State.merge({ sites, vips });
     renderSites(sites);
     injectAlerts(alerts);
+    injectAlarms(alarms);
 
     if (status) {
       State.merge({ isRecording: status.recording, dbSizeMb: status.db_size_mb });
@@ -413,15 +417,17 @@ async function _updateHistoricalView(index) {
 
   try {
     const id = State.eventId;
-    const [sites, vips, alerts] = await Promise.all([
+    const [sites, vips, alerts, alarms] = await Promise.all([
       API.getSites(id, timestamp, State.selectedMetric),
       API.getVips(id, timestamp),
       API.getAlerts(id, timestamp),
+      API.getAlarms(id, timestamp),
     ]);
 
     State.merge({ sites, vips });
     renderSites(sites);
     State.set("alerts", alerts);
+    injectAlarms(alarms);
 
     if (State.selectedSite) {
       const still = sites.find(s => s.id === State.selectedSite);
@@ -989,6 +995,7 @@ function _renderSyncModal(st) {
   body.innerHTML =
     _syncSection("KPI (sites)", st.kpi, false) +
     _syncSection("VIPs (rastreamento)", st.vip, true) +
+    (st.alarms ? _syncSection("Alarmes", st.alarms, false) : "") +
     _syncSessionSection(st.session);
 }
 

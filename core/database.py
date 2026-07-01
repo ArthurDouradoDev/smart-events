@@ -102,6 +102,25 @@ def init_event_db(conn: sqlite3.Connection):
             task_id  INTEGER,
             PRIMARY KEY (event_id, vip_id)
         );
+
+        CREATE TABLE IF NOT EXISTS alarms (
+            csn             INTEGER PRIMARY KEY,      -- id único da ocorrência (dedup natural)
+            event_id        TEXT NOT NULL,
+            alarm_id        TEXT,
+            alarm_group_id  TEXT,
+            alarm_name      TEXT,
+            severity        TEXT,
+            source          TEXT,                     -- meName (ex.: SR-UWCTJ1)
+            ip              TEXT,
+            location        TEXT,
+            occur_time      TEXT,
+            arrive_time     TEXT,
+            additional_info TEXT,
+            collected_at    TEXT NOT NULL             -- quando o app coletou (p/ timeline)
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_alarms_arrive ON alarms(arrive_time);
+        CREATE INDEX IF NOT EXISTS idx_alarms_name ON alarms(alarm_name);
     """)
     conn.commit()
 
@@ -674,6 +693,47 @@ def get_vip_series(event_id: str, vip_name: str, minutes: int = 60) -> List[dict
         LIMIT 120
     """, (vip_name,)).fetchall()
     return [dict(r) for r in reversed(rows)]  # retorna em ordem crescente
+
+
+# ── Alarms (iMaster FM website, filtrados por tipo) ─────────────────
+
+def insert_alarms_batch(measurements: List[dict]):
+    """Insere lote de alarmes no banco do evento. INSERT OR IGNORE por csn (dedup)."""
+    if not measurements:
+        return
+    event_id = measurements[0]["event_id"]
+    conn = get_event_conn(event_id)
+    conn.executemany("""
+        INSERT OR IGNORE INTO alarms
+            (csn, event_id, alarm_id, alarm_group_id, alarm_name, severity,
+             source, ip, location, occur_time, arrive_time, additional_info, collected_at)
+        VALUES (:csn, :event_id, :alarm_id, :alarm_group_id, :alarm_name, :severity,
+                :source, :ip, :location, :occur_time, :arrive_time, :additional_info, :collected_at)
+    """, measurements)
+    conn.commit()
+
+
+def get_alarms(event_id: str, timestamp: Optional[str] = None, limit: int = 500) -> List[dict]:
+    """Lista alarmes do evento ordenados por arrive_time DESC.
+
+    Com `timestamp` (modo histórico/timeline) filtra collected_at <= timestamp,
+    coerente com get_sites/get_vips."""
+    conn = get_event_conn(event_id)
+    if timestamp:
+        rows = conn.execute("""
+            SELECT * FROM alarms
+            WHERE event_id = ? AND collected_at <= ?
+            ORDER BY arrive_time DESC
+            LIMIT ?
+        """, (event_id, timestamp, limit)).fetchall()
+    else:
+        rows = conn.execute("""
+            SELECT * FROM alarms
+            WHERE event_id = ?
+            ORDER BY arrive_time DESC
+            LIMIT ?
+        """, (event_id, limit)).fetchall()
+    return [dict(r) for r in rows]
 
 
 # ── Alerts ──────────────────────────────────────────────────────────
@@ -1277,6 +1337,7 @@ def clear_event_history(event_id: str):
     conn = get_event_conn(event_id)
     conn.execute("DELETE FROM kpi_measurements WHERE event_id = ?", (event_id,))
     conn.execute("DELETE FROM alerts WHERE event_id = ?", (event_id,))
+    conn.execute("DELETE FROM alarms WHERE event_id = ?", (event_id,))
     conn.commit()
 
     # Executa VACUUM fora de qualquer transação para liberar espaço em disco

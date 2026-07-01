@@ -774,6 +774,86 @@ class Api:
             logger.error(f"get_vip_series error: {e}")
             return {"ok": False, "series": []}
 
+    # ── Alarmes (iMaster FM website, filtrados por tipo) ─────────────
+
+    def get_alarms(self, event_id: str, timestamp: Optional[str] = None) -> list:
+        """Retorna os alarmes correntes do evento (opcionalmente até timestamp)."""
+        try:
+            return db.get_alarms(event_id, timestamp)
+        except Exception as e:
+            logger.error(f"get_alarms error: {e}")
+            return []
+
+    def get_alarm_catalog(self) -> dict:
+        """Nomes de alarme disponíveis (ordenados) para o multi-select do filtro."""
+        try:
+            from core.collector import _load_alarm_catalog
+            catalog = _load_alarm_catalog()
+            return {"ok": True, "names": sorted(catalog.keys())}
+        except Exception as e:
+            logger.error(f"get_alarm_catalog error: {e}")
+            return {"ok": False, "error": str(e), "names": []}
+
+    def get_alarm_filter(self, event_id: str) -> dict:
+        """Tipos de alarme atualmente coletados para o evento (default se não definido)."""
+        try:
+            from core.collector import _DEFAULT_ALARM_NAMES
+            config = db.get_event(event_id) or _active_event or {}
+            oss = config.get("oss", {}) or {}
+            names = oss.get("alarm_filter") or list(_DEFAULT_ALARM_NAMES)
+            return {"ok": True, "names": names}
+        except Exception as e:
+            logger.error(f"get_alarm_filter error: {e}")
+            return {"ok": False, "error": str(e), "names": []}
+
+    def set_alarm_filter(self, event_id: str, names: list) -> dict:
+        """Persiste alarm_filter na config do evento e recoleta na hora (se ativo)."""
+        try:
+            if not isinstance(names, list):
+                return {"ok": False, "error": "names deve ser uma lista de nomes."}
+            config = db.get_event(event_id)
+            if not config:
+                return {"ok": False, "error": "Evento não encontrado"}
+            oss = config.get("oss", {}) or {}
+            oss["alarm_filter"] = names
+            config["oss"] = oss
+            db.save_event(config)
+            try:
+                db.export_event_to_server(config)
+            except Exception as ex:
+                logger.warning(f"set_alarm_filter: falha ao exportar evento: {ex}")
+
+            global _active_event
+            if _active_event and _active_event.get("id") == event_id:
+                _active_event.setdefault("oss", {})["alarm_filter"] = names
+
+            # Reflete no coletor ativo (lê oss.alarm_filter a cada ciclo) e recoleta já.
+            if (scheduler.is_recording and scheduler._event_config
+                    and scheduler._event_config.get("id") == event_id):
+                scheduler._event_config.setdefault("oss", {})["alarm_filter"] = names
+                coll = scheduler._collector
+                if coll is not None and isinstance(getattr(coll, "event", None), dict):
+                    coll.event.setdefault("oss", {})["alarm_filter"] = names
+                try:
+                    scheduler.collect_alarms_now()
+                except Exception as ex:
+                    logger.warning(f"set_alarm_filter: falha ao recoletar alarmes: {ex}")
+            return {"ok": True, "names": names}
+        except Exception as e:
+            logger.error(f"set_alarm_filter error: {e}")
+            return {"ok": False, "error": str(e)}
+
+    def refresh_alarms(self, event_id: str) -> dict:
+        """Força uma coleta imediata de alarmes (botão de refresh do painel)."""
+        try:
+            if not scheduler.is_recording:
+                return {"ok": False, "error": "Coleta não está ativa para este evento."}
+            count = scheduler.collect_alarms_now()
+            return {"ok": True, "count": count}
+        except Exception as e:
+            logger.error(f"refresh_alarms error: {e}")
+            return {"ok": False, "error": str(e)}
+
     # ── Alertas ──────────────────────────────────────────────────────
 
     def get_alerts(self, event_id: str, timestamp: Optional[str] = None) -> list:
@@ -945,6 +1025,7 @@ class Api:
                 "recording":  scheduler.is_recording,
                 "kpi":        status["kpi"],
                 "vip":        status["vip"],
+                "alarms":     status.get("alarms"),
                 "session":    {"needs_interactive": needs_interactive, "region": region},
                 "now":        datetime.utcnow().isoformat(),
             }

@@ -131,7 +131,16 @@
       "Bash(git --no-pager diff main.spec build.py)",
       "PowerShell($py = if \\(Test-Path .venv\\\\Scripts\\\\python.exe\\) { \".venv\\\\Scripts\\\\python.exe\" } else { \"python\" }; & $py -c \"import py_compile; py_compile.compile\\('build.py', doraise=True\\); py_compile.compile\\('main.spec', doraise=True\\); print\\('OK build.py + main.spec'\\)\")",
       "PowerShell($py = if \\(Test-Path .venv\\\\Scripts\\\\python.exe\\) { \".venv\\\\Scripts\\\\python.exe\" } else { \"python\" }; & $py -c \"import PyInstaller, playwright; print\\('PyInstaller', PyInstaller.__version__, '| playwright OK'\\)\" 2>&1; $env:LOCALAPPDATA + '\\\\ms-playwright' | ForEach-Object { if \\(Test-Path $_\\) { Write-Output \\(\"chromium dirs: \" + \\(\\(Get-ChildItem $_ -Directory | Select-Object -ExpandProperty Name\\) -join ', '\\)\\) } else { Write-Output 'ms-playwright MISSING' } })",
-      "PowerShell($py = if \\(Test-Path .venv\\\\Scripts\\\\python.exe\\) { \".venv\\\\Scripts\\\\python.exe\" } else { \"python\" }; & $py build.py)"
+      "PowerShell($py = if \\(Test-Path .venv\\\\Scripts\\\\python.exe\\) { \".venv\\\\Scripts\\\\python.exe\" } else { \"python\" }; & $py build.py)",
+      "Bash(awk 'NR>=519 && NR<=524' lista-alarmes.csv)",
+      "Bash(awk -F',' 'NR>1{print $1\",\"$2}' \"Alarm Name20260630150657505.csv\")",
+      "Bash(awk -F, 'NR>1{print $NF}' 'Alarm Name20260630150657505.csv')",
+      "Bash(xxd)",
+      "Bash(python imaster_alarms.py)",
+      "PowerShell(Get-ChildItem \"alarms\" | Select-Object Name, Length; Write-Output \"---\"; Get-Content \"alarms\\\\catalogo-alarmes.csv\" -TotalCount 3; Write-Output \"---lines---\"; \\(Get-Content \"alarms\\\\catalogo-alarmes.csv\" | Measure-Object -Line\\).Lines)",
+      "PowerShell($files = @\\(\"frontend\\\\js\\\\alarms.js\",\"frontend\\\\js\\\\app.js\",\"frontend\\\\js\\\\bridge.js\",\"frontend\\\\js\\\\state.js\"\\); foreach \\($f in $files\\) { node --check $f; if \\($?\\) { Write-Output \"$f OK\" } })",
+      "PowerShell(python -m pytest tests/ -q 2>&1)",
+      "PowerShell(python -c \"import api.api, core.collector, core.scheduler, core.database, core.models; from core.collector import build_collector, _load_alarm_catalog; c=_load_alarm_catalog\\(\\); print\\('catalog names:', len\\(c\\)\\); print\\('imports OK'\\)\")"
     ],
     "additionalDirectories": [
       "c:\\Users\\a50057663\\Desktop\\Automações\\SmartEvents\\.claude"

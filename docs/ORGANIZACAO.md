@@ -36,7 +36,8 @@ SmartEvents/
 | Arquivo | Conteúdo |
 |---|---|
 | `ORGANIZACAO.md` | Este mapa. |
-| `coleta-de-dados.md` | Documento canônico do fluxo de coleta. Correções pós-escrita (ex.: CSRF double-submit de 2026-06-11) estão em `.claude/MEMORY.md` e `.claude/ERRORS.md`. |
+| `coleta-de-dados.md` | Documento canônico do fluxo de coleta de KPI/VIP. Correções pós-escrita (ex.: CSRF double-submit de 2026-06-11) estão em `.claude/MEMORY.md` e `.claude/ERRORS.md`. |
+| `coleta-de-alarmes.md` | Descobertas que viabilizaram a captura de alarmes (Current Alarms) filtrados: mecanismo `cmd 1102`/`1103`, pares `{alarmId, alarmGroupId}`, `bspSessionId=""`, reuso de sessão. Base de `imaster_alarms.py`. |
 | `evento-cadastro-e-petalas.md` | Fórmulas de plotagem das pétalas (SemiCircle vs SVG) e campos obrigatórios do JSON de evento. |
 | `guia-vm-servidor.md` | Passo a passo de VM Linux/VirtualBox para o servidor central. |
 | `smart-events.html` | Documentação técnica completa em HTML (a visão mais detalhada e atualizada da arquitetura). |

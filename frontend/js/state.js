@@ -12,6 +12,7 @@ const State = {
   sites:          [],
   vips:           [],
   alerts:         [],
+  alarms:         [],   // alarmes do iManager (filtrados por tipo)
 
   // ── Seleção e UI ─────────────────────────────────────────────────
   selectedSite:   null,   // site id

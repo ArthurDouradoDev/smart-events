@@ -63,6 +63,148 @@ _REGIONAL_BASE_URLS: dict[str, str] = {
 _DEFAULT_BASE_URL = "https://10.220.50.9:31943"  # fallback = SP
 
 
+# ── Coleta de alarmes (iMaster FM website) ───────────────────────────
+# Lógica portada de imaster_alarms.py (validada AO VIVO na VPN em 30/06): o cmd 1102
+# cria a "visão" filtrada (modelID) a partir dos pares {alarmId, alarmGroupId}; o cmd
+# 1103 pagina o resultado já filtrado. Mantemos o standalone intacto (sem import cruzado)
+# como fonte de referência; aqui reusamos a sessão 'monitoring' do session.json — o mesmo
+# host/sessão do OSS/PM serve ao endpoint /rest/fmwebsite (bspsession + roarand).
+_ALARM_ENDPOINT = "/rest/fmwebsite/v1/commands"
+_ALARM_PAGE = 148            # tamanho da janela (igual ao navegador)
+_ALARM_SLEEP = 0.3           # pausa entre páginas, para não martelar o servidor
+_DEFAULT_ALARM_NAMES = ["RF Unit VSWR Threshold Crossed", "Cell Unavailable"]
+
+_ALARM_SEVERITY = {1: "Critical", 2: "Major", 3: "Minor", 4: "Warning",
+                   5: "Indeterminate", 6: "Cleared"}
+
+# condition fixa: níveis/status/eventType que a tela "Current Alarms" sempre envia.
+_ALARM_BASE_CONDITION = {
+    "alarmLevel": ["CRITICAL", "MAJOR", "MINOR", "WARNING"],
+    "alarmStatus": [12, 10, 11, 13],
+    "eventType": {"value": [str(i) for i in range(1, 17)], "operation": "in"},
+    "specialAlarmStatus": {"value": ["0"], "operation": "in"},
+    "orders": [{"field": "ColArriveUtc", "order": 1}],
+}
+# additionalCondition fixa (igual nos HAR com e sem filtro).
+_ALARM_ADDITIONAL_CONDITION = {
+    "alarmGroupId": {"operation": "in", "value": []},
+    "soundInfoCond": [
+        {"severity": s, "alarmStatus": "1", "duration": 60} for s in (1, 2, 3, 4)
+    ],
+}
+
+# Catálogo (nome → pares {alarmId, alarmGroupId}) carregado 1× e cacheado em memória.
+_alarm_catalog_cache: Optional[dict] = None
+
+
+def _alarm_catalog_path() -> Path:
+    """Caminho do catálogo empacotado (recurso read-only).
+
+    frozen (.exe onedir) → sys._MEIPASS/alarms; dev → <repo>/alarms. NÃO usa a pasta
+    persistente data/ (o catálogo é recurso empacotado, não gravável)."""
+    if getattr(sys, "frozen", False):
+        base = Path(getattr(sys, "_MEIPASS", Path(sys.executable).parent))
+    else:
+        base = Path(__file__).parent.parent
+    return base / "alarms" / "catalogo-alarmes.csv"
+
+
+def _load_alarm_catalog() -> dict:
+    """Lê o catálogo {nome: [(alarmId, alarmGroupId), ...]} (cacheado em memória).
+
+    O CSV tem BOM e cabeçalho (Alarm Group ID, Alarm Group Name, Alarm ID, Alarm Name,
+    Alarm Severity). Um mesmo nome aparece em vários grupos (e até com alarmId diferente
+    por grupo), então acumulamos todos os pares por nome. Alguns nomes vêm com tabs/
+    espaços nas pontas, então normalizamos com strip()."""
+    global _alarm_catalog_cache
+    if _alarm_catalog_cache is not None:
+        return _alarm_catalog_cache
+    catalog: dict = {}
+    with open(_alarm_catalog_path(), encoding="utf-8-sig", newline="") as f:
+        reader = csv.DictReader(f)
+        for row in reader:
+            name = (row.get("Alarm Name") or "").strip()
+            alarm_id = (row.get("Alarm ID") or "").strip()
+            group_id = (row.get("Alarm Group ID") or "").strip()
+            if not (name and alarm_id and group_id):
+                continue
+            pair = (alarm_id, group_id)
+            pairs = catalog.setdefault(name, [])
+            if pair not in pairs:
+                pairs.append(pair)
+    _alarm_catalog_cache = catalog
+    return catalog
+
+
+def _resolve_alarm_pairs(names: List[str], catalog: dict):
+    """Traduz nomes → pares (alarmId, alarmGroupId), deduplicando entre nomes.
+
+    Diferente do standalone (que levanta em nome inexistente), aqui somos tolerantes:
+    o filtro vem da config do evento e pode ter um tipo obsoleto — ignoramos os nomes
+    ausentes e devolvemos (pares, faltando) para o chamador logar."""
+    pairs: list = []
+    missing: list = []
+    for name in names:
+        key = (name or "").strip()
+        if not key:
+            continue
+        if key in catalog:
+            for pair in catalog[key]:
+                if pair not in pairs:
+                    pairs.append(pair)
+        else:
+            missing.append(key)
+    return pairs, missing
+
+
+def _build_alarm_condition(pairs: list) -> str:
+    """Monta a condition (string JSON) do cmd 1102 com os pares filtrados."""
+    condition = dict(_ALARM_BASE_CONDITION)
+    if pairs:
+        value = [{"alarmId": aid, "alarmGroupId": gid} for aid, gid in pairs]
+        condition["alarmGroupId"] = {"operation": "in", "value": value}
+    return json.dumps(condition)
+
+
+def _extract_alarm_model_id(payload: dict):
+    """Procura o modelID novo na resposta do 1102 em vários caminhos possíveis."""
+    if not isinstance(payload, dict):
+        return None
+    params = payload.get("parameters", {})
+    for container in (params, payload):
+        if not isinstance(container, dict):
+            continue
+        mid = container.get("modelID") or container.get("modelId")
+        if mid:
+            return mid
+        result = container.get("result")
+        if isinstance(result, dict):
+            mid = result.get("modelID") or result.get("modelId")
+            if mid:
+                return mid
+    return None
+
+
+def _flatten_alarm(a: dict, event_id: str, collected_at: str) -> dict:
+    """Achata a linha crua do 1103 nos campos gravados na tabela `alarms`."""
+    ext = a.get("extParams") or {}
+    return {
+        "csn":             a.get("csn"),
+        "event_id":        event_id,
+        "alarm_id":        a.get("alarmId"),
+        "alarm_group_id":  a.get("alarmGroupId"),
+        "alarm_name":      a.get("alarmName"),
+        "severity":        _ALARM_SEVERITY.get(a.get("severity"), a.get("severity")),
+        "source":          a.get("meName") or ext.get("alarmSource"),
+        "ip":              a.get("address"),
+        "location":        a.get("subNet"),
+        "occur_time":      a.get("occurUtc") or a.get("firstOccurUtc"),
+        "arrive_time":     a.get("arriveUtc"),
+        "additional_info": a.get("additionalInformation"),
+        "collected_at":    collected_at,
+    }
+
+
 # ── Interface base ───────────────────────────────────────────────────
 
 class BaseCollector(ABC):
@@ -165,6 +307,11 @@ class BaseCollector(ABC):
         """Retorna última leitura de RSRP/RSRQ de cada VIP."""
         ...
 
+    @abstractmethod
+    def collect_alarms(self) -> List[dict]:
+        """Retorna alarmes correntes filtrados por tipo para inserção no banco."""
+        ...
+
     def start(self):
         self._running = True
 
@@ -240,6 +387,10 @@ class CsvCollector(BaseCollector):
         # cada VIP pelo task_id da sua task dedicada no iManager (via HTTP).
         # Se você ainda precisa importar trace de CSV, ele teria que carregar
         # uma coluna explícita com o nome do VIP.
+        return []
+
+    def collect_alarms(self) -> List[dict]:
+        # Coleta de alarmes por CSV está fora de escopo (só via HTTP no iManager).
         return []
 
     def _parse_kpi_csv(self, fpath: Path) -> List[dict]:
@@ -1599,6 +1750,146 @@ class HttpCollector(BaseCollector):
         visit(content)
         return rsrp, rsrq
 
+    # ── Alarmes (iMaster FM website) ─────────────────────────────────
+    def collect_alarms(self) -> List[dict]:
+        """Coleta alarmes correntes filtrados pelos tipos do evento (oss.alarm_filter).
+
+        Reusa a sessão 'monitoring' (bspsession+roarand do session.json); em sessão
+        expirada, renova 1× via a máquina existente (_renew_session) e re-tenta. Retorna
+        linhas achatadas prontas para db.insert_alarms_batch (dedup por csn já aplicado)."""
+        names = (self.event.get("oss", {}) or {}).get("alarm_filter") or _DEFAULT_ALARM_NAMES
+        try:
+            catalog = _load_alarm_catalog()
+        except Exception as e:
+            logger.error(f"Falha ao carregar o catálogo de alarmes: {e}")
+            return []
+        pairs, missing = _resolve_alarm_pairs(names, catalog)
+        if missing:
+            logger.warning(f"Tipos de alarme ignorados (ausentes no catálogo): {missing}")
+        if not pairs:
+            logger.warning("Filtro de alarmes vazio/inválido — coleta de alarmes ignorada.")
+            return []
+        condition = _build_alarm_condition(pairs)
+
+        retries = 2
+        renewed_this_call = False
+        for attempt in range(retries):
+            try:
+                model_id = self._create_alarm_model(condition)
+                raw = self._collect_alarm_pages(model_id)
+                return self._flatten_alarms(raw)
+            except SessionExpiredError as e:
+                logger.warning(f"Erro de sessão no collect_alarms: {e}")
+                if renewed_this_call:
+                    self._engage_backoff("monitoring")
+                    logger.error("Sessão monitoring renovada mas ainda inválida — "
+                                 "pausando coleta de alarmes (backoff).")
+                    return []
+                if attempt < retries - 1 and self._renew_session("monitoring"):
+                    renewed_this_call = True
+                    continue
+                return []
+            except (requests.exceptions.ConnectTimeout, requests.exceptions.ConnectionError,
+                    requests.exceptions.Timeout) as e:
+                logger.error(f"Erro de conexão ao coletar alarmes: {e}")
+                return []
+            except Exception as e:
+                logger.error(f"Erro ao coletar alarmes: {e}")
+                return []
+        return []
+
+    def _alarm_post(self, body: dict, cmd: int) -> dict:
+        """POST no endpoint de comandos do FM website (sessão monitoring).
+
+        Trata redirecionamento SSO/CSRF como sessão inválida (SessionExpiredError) e
+        atualiza o roarand quando o servidor o rotaciona, como o standalone faz."""
+        params = {"_t": int(time.time() * 1000), "_cmd": cmd}
+        url = f"{self.base_url}{_ALARM_ENDPOINT}"
+        s = self._get_session("monitoring")
+        resp = s.post(url, params=params, json=body, timeout=30,
+                      headers={"x-non-renewal-session": "true"}, allow_redirects=False)
+        if not self._check_session_valid(resp, "monitoring"):
+            raise SessionExpiredError(f"Sessão monitoring inválida no cmd {cmd} de alarmes")
+        resp.raise_for_status()
+        new_rand = resp.headers.get("roarand") or s.cookies.get("roarand")
+        if new_rand:
+            s.headers["roarand"] = new_rand
+        return resp.json()
+
+    def _create_alarm_model(self, condition: str) -> str:
+        """cmd 1102 — cria a visão filtrada no servidor e devolve o modelID."""
+        body = {
+            "cmd": 1102,
+            "parameters": {
+                "modelID": None,
+                "bspSessionId": "",
+                "showStatistic": False,
+                "additionalCondition": json.dumps(_ALARM_ADDITIONAL_CONDITION),
+                "timeMode": 3,
+                "urlCondition": None,
+                "expression": "",
+                "autoRefresh": False,   # foto estável
+                "isScrollLock": False,
+                "condition": condition,
+            },
+        }
+        payload = self._alarm_post(body, 1102)
+        model_id = _extract_alarm_model_id(payload)
+        if not model_id:
+            raise RuntimeError(
+                "modelID não encontrado na resposta do cmd 1102. "
+                f"Resposta: {json.dumps(payload)[:300]}"
+            )
+        return model_id
+
+    def _fetch_alarm_page(self, model_id: str, frm: int, to: int) -> dict:
+        """cmd 1103 — lê uma página do resultado já filtrado."""
+        body = {
+            "cmd": 1103,
+            "parameters": {
+                "modelID": model_id,
+                "bspSessionId": "",
+                "timeMode": 3,
+                "versionFlag": False,
+                "csns": [],
+                "autoRefresh": False,   # foto estável para o bulk
+                "scrollLock": False,
+                "from": frm,
+                "to": to,
+            },
+        }
+        payload = self._alarm_post(body, 1103)
+        return payload.get("parameters", payload)
+
+    def _collect_alarm_pages(self, model_id: str) -> List[dict]:
+        """Pagina o cmd 1103 até esgotar o total informado na primeira resposta."""
+        first = self._fetch_alarm_page(model_id, 1, _ALARM_PAGE)
+        total = int(first.get("total", 0))
+        rows = list(first.get("data", []))
+        frm = _ALARM_PAGE + 1
+        while len(rows) < total:
+            to = frm + _ALARM_PAGE - 1
+            page = self._fetch_alarm_page(model_id, frm, to)
+            batch = page.get("data", [])
+            if not batch:
+                break
+            rows.extend(batch)
+            frm += _ALARM_PAGE
+            time.sleep(_ALARM_SLEEP)
+        logger.info(f"Alarmes: {len(rows)}/{total} coletados (filtro por tipo).")
+        return rows
+
+    def _flatten_alarms(self, raw: List[dict]) -> List[dict]:
+        """Achata + injeta event_id/collected_at e deduplica por csn (lista viva)."""
+        collected_at = datetime.utcnow().strftime('%Y-%m-%dT%H:%M:%SZ')
+        out = {}
+        for a in raw:
+            csn = a.get("csn")
+            if csn is None:
+                continue
+            out[csn] = _flatten_alarm(a, self.event_id, collected_at)
+        return list(out.values())
+
 
 # ── Mock (desenvolvimento e testes) ──────────────────────────────────
 
@@ -1663,6 +1954,38 @@ class MockCollector(BaseCollector):
             })
         return rows
 
+    def collect_alarms(self) -> List[dict]:
+        """Alarmes sintéticos (Cell Unavailable / VSWR) para dev em --mock/navegador."""
+        from datetime import timedelta
+        now = datetime.utcnow()
+        collected_at = now.strftime('%Y-%m-%dT%H:%M:%SZ')
+        base_csn = int(now.timestamp())
+        types = [
+            ("Cell Unavailable", "Major", "3600", "268435456"),
+            ("RF Unit VSWR Threshold Crossed", "Critical", "26529", "268435456"),
+        ]
+        sites = self.event.get("sites", []) or [{"id": "DEMO", "name": "Site Demo"}]
+        rows = []
+        for i, site in enumerate(sites[:6]):
+            name, sev, aid, gid = types[i % len(types)]
+            ts = (now - timedelta(minutes=i * 3)).strftime('%Y-%m-%dT%H:%M:%SZ')
+            rows.append({
+                "csn":             base_csn + i,
+                "event_id":        self.event_id,
+                "alarm_id":        aid,
+                "alarm_group_id":  gid,
+                "alarm_name":      name,
+                "severity":        sev,
+                "source":          f"SR-{site['id']}",
+                "ip":              f"10.0.0.{10 + i}",
+                "location":        site.get("name", ""),
+                "occur_time":      ts,
+                "arrive_time":     ts,
+                "additional_info": "mock",
+                "collected_at":    collected_at,
+            })
+        return rows
+
 
 # ── NullCollector (produção sem fonte configurada) ───────────────────
 
@@ -1672,6 +1995,9 @@ class NullCollector(BaseCollector):
         return []
 
     def collect_vips(self, mode: str = "express") -> List[dict]:
+        return []
+
+    def collect_alarms(self) -> List[dict]:
         return []
 
 

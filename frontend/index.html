@@ -73,6 +73,14 @@
         </svg>
         <span id="alert-count" class="badge badge-danger hidden">0</span>
       </button>
+      <button id="alarms-btn" class="icon-btn" title="Alarmes do iManager">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"></path>
+          <line x1="12" y1="9" x2="12" y2="13"></line>
+          <line x1="12" y1="17" x2="12.01" y2="17"></line>
+        </svg>
+        <span id="alarms-count" class="badge badge-danger hidden">0</span>
+      </button>
 <button id="server-btn" class="icon-btn" title="Abrir painel do servidor (editar eventos e VIPs)">
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
           <rect x="2" y="3" width="20" height="6" rx="1" />
@@ -306,6 +314,33 @@
     </div>
     <div id="alert-list">
       <!-- Renderizado por alerts.js -->
+    </div>
+  </div>
+
+  <!-- ── PAINEL DE ALARMES (drawer) ─────────────────────────────── -->
+  <div id="alarms-drawer" class="drawer hidden">
+    <div class="drawer-header">
+      <span class="panel-label">Alarmes</span>
+      <div style="display: flex; align-items: center; gap: 8px;">
+        <span id="alarms-summary" class="panel-meta"></span>
+        <button id="alarms-refresh-btn" class="icon-btn" title="Atualizar alarmes agora">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M23 4v6h-6"></path>
+            <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"></path>
+          </svg>
+        </button>
+        <button id="alarms-drawer-close" class="icon-btn">&#10005;</button>
+      </div>
+    </div>
+    <div id="alarms-filter">
+      <button id="alarms-filter-toggle" class="btn btn-ghost btn-sm">Tipos de alarme ▾</button>
+      <div id="alarms-filter-panel" class="hidden">
+        <input type="text" id="alarms-filter-search" class="site-search-input" placeholder="Filtrar tipos...">
+        <div id="alarms-filter-options"><!-- checkboxes renderizados por alarms.js --></div>
+      </div>
+    </div>
+    <div id="alarms-list">
+      <!-- Renderizado por alarms.js -->
     </div>
   </div>
 

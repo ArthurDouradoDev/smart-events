@@ -178,6 +178,34 @@ const _mock = {
     { id:1, severity:"CRITICAL", site_id:"ERB-07", cell_id:"ERB-07-A2", message:"Utilização crítica: 91% em ERB-07", timestamp:new Date().toISOString() },
     { id:2, severity:"WARNING",  site_id:"ERB-07", cell_id:"ERB-07",    message:"RSRP baixo para Ana Rodrigues: -97 dBm", timestamp:new Date().toISOString() },
   ]),
+  get_alarms: (event_id, timestamp=null) => {
+    const now = Date.now();
+    const mk = (i, name, sev, src) => ({
+      csn: 90000 + i, event_id, alarm_id: String(3600 + i), alarm_group_id: "268435456",
+      alarm_name: name, severity: sev, source: src, ip: `10.0.0.${10 + i}`,
+      location: "Interlagos", occur_time: new Date(now - i * 6 * 60000).toISOString(),
+      arrive_time: new Date(now - i * 6 * 60000).toISOString(), additional_info: "mock",
+      collected_at: new Date(now).toISOString(),
+    });
+    return [
+      mk(0, "RF Unit VSWR Threshold Crossed", "Critical", "SR-ERB07"),
+      mk(1, "Cell Unavailable", "Major", "SR-ERB03"),
+      mk(2, "Cell Unavailable", "Major", "SR-ERB11"),
+      mk(3, "RF Unit VSWR Threshold Crossed", "Critical", "SR-ERB15"),
+    ];
+  },
+  get_alarm_catalog: () => ({
+    ok: true,
+    names: [
+      "Cell Unavailable", "Link Fault", "RF Unit VSWR Threshold Crossed",
+      "Temperature Unacceptable", "-48V Power too High Alarm", "Board Hardware Fault",
+    ],
+  }),
+  get_alarm_filter: (event_id) => ({
+    ok: true, names: ["RF Unit VSWR Threshold Crossed", "Cell Unavailable"],
+  }),
+  set_alarm_filter: (event_id, names) => ({ ok: true, names }),
+  refresh_alarms: (event_id) => ({ ok: true, count: 4 }),
   get_app_status: () => ({ recording:true, db_size_mb:4.2, now:new Date().toISOString() }),
   get_collection_status: () => {
     const now = Date.now();
@@ -186,6 +214,7 @@ const _mock = {
       recording: true,
       kpi: { state:"ok", last_success:new Date(now - 12000).toISOString(), last_count:24, duration_s:0.84, error:null, interval_s:120 },
       vip: { state:"ok", last_success:new Date(now - 6000).toISOString(),  last_count:30, duration_s:1.20, error:null, interval_s:60, mode:"express", vips_total:5, vips_with_data:4 },
+      alarms: { state:"ok", last_success:new Date(now - 20000).toISOString(), last_count:4, duration_s:0.55, error:null, interval_s:180 },
       session: { needs_interactive:false, region:"SP" },
       now: new Date(now).toISOString(),
     };
@@ -326,6 +355,11 @@ const API = {
   getKpiSeries:     (eventId, siteId, m, w, cellId=null) => API.call("get_kpi_series", eventId, siteId, m, w, cellId),
   getVips:          (eventId, timestamp=null) => API.call("get_vips", eventId, timestamp),
   refreshVips:      (eventId)                 => API.call("refresh_vips", eventId),
+  getAlarms:        (eventId, timestamp=null) => API.call("get_alarms", eventId, timestamp),
+  getAlarmCatalog:  ()                        => API.call("get_alarm_catalog"),
+  getAlarmFilter:   (eventId)                 => API.call("get_alarm_filter", eventId),
+  setAlarmFilter:   (eventId, names)          => API.call("set_alarm_filter", eventId, names),
+  refreshAlarms:    (eventId)                 => API.call("refresh_alarms", eventId),
   getAlerts:        (eventId, timestamp=null) => API.call("get_alerts", eventId, timestamp),
   acknowledgeAlert: (id)                    => API.call("acknowledge_alert", id),
   acknowledgeAllAlerts: (eventId)           => API.call("acknowledge_all_alerts", eventId),

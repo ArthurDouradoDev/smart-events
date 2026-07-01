@@ -53,6 +53,7 @@ a = Analysis(
         ('server_frontend', 'server_frontend'),
         ('server_data', 'server_data'),  # semente: evento Rio + VIPs finalizados
         ('core/session_renew.py', 'core'),  # garante o módulo de renovação no bundle
+        ('alarms/catalogo-alarmes.csv', 'alarms'),  # catálogo nome→pares (coleta de alarmes)
     ] + _cred_seed + collect_data_files('certifi') + _pw_datas + _browser_datas,
     hiddenimports=[
         'server',  # importado por main.py no modo --serve

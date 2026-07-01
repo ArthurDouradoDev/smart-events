@@ -51,6 +51,11 @@ class OssConfig:
     base_url: str = ""
     region: str = ""
     import_folder: str = ""  # pasta onde exports CSV chegam (fase 1)
+    # Tipos de alarme (nomes do catálogo) coletados para este evento. Default =
+    # VSWR + Cell Unavailable. Ver core.collector._DEFAULT_ALARM_NAMES.
+    alarm_filter: List[str] = field(default_factory=lambda: [
+        "RF Unit VSWR Threshold Crossed", "Cell Unavailable"
+    ])
 
 
 @dataclass

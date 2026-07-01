@@ -92,6 +92,22 @@ class TestHttpCollectVips:
         assert isinstance(vips, list)
 
 
+class TestHttpCollectAlarms:
+    def test_collect_alarms_returns_list(self, http_col_sp, event_in_db):
+        """Coleta de alarmes real — espelha o teste ao vivo de 30/06.
+
+        Deve retornar uma lista com ≥1 alarme e conter APENAS os tipos filtrados
+        (VSWR + Cell Unavailable, o default de oss.alarm_filter)."""
+        alarms = http_col_sp.collect_alarms()
+        assert isinstance(alarms, list)
+        assert len(alarms) >= 1, "nenhum alarme retornado — filtro/sessão?"
+        allowed = {"RF Unit VSWR Threshold Crossed", "Cell Unavailable"}
+        names = {a.get("alarm_name") for a in alarms}
+        assert names.issubset(allowed), f"tipos fora do filtro: {names - allowed}"
+        csns = [a["csn"] for a in alarms]
+        assert len(csns) == len(set(csns)), "csn duplicado (dedup falhou)"
+
+
 class TestHttpCsrfHeaders:
     def test_roarand_header_matches_cookie(self, http_col_sp):
         """Anti-CSRF: header roarand deve ecoar o cookie roarand (double-submit)."""
