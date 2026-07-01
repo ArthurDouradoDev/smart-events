@@ -70,8 +70,9 @@ export function initMap() {
   _map = L.map("map", {
     center: [-23.55, -46.63],
     zoom: 13,
-    zoomControl: true,
+    zoomControl: false,  // recriado no canto inferior direito (evita o drawer de alarmes à esquerda)
   });
+  L.control.zoom({ position: "bottomright" }).addTo(_map);
 
   _osmLayer = L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
     maxZoom: 19,

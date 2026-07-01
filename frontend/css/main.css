@@ -944,8 +944,15 @@ input[type="range"] {
 #logs-drawer { width: 480px; }
 #logs-list { flex: 1; overflow-y: auto; background: var(--bg-base); }
 
-/* ── Drawer de Alarmes ─────────────────────────────────────────── */
-#alarms-drawer { width: 380px; }
+/* ── Drawer de Alarmes (lado esquerdo) ─────────────────────────── */
+#alarms-drawer {
+  width: 380px;
+  left: 0;
+  right: auto;
+  border-left: none;
+  border-right: 1px solid var(--border);
+}
+#alarms-drawer.hidden { transform: translateX(-100%); }
 #alarms-list { flex: 1; overflow-y: auto; }
 #alarms-filter {
   padding: 8px 12px;
@@ -984,6 +991,10 @@ input[type="range"] {
 }
 .alarm-item.clickable { cursor: pointer; }
 .alarm-item.clickable:hover { background: var(--bg-hover); }
+
+/* Indicador de alarme na lista de sites (ao lado do 👑 de VIP) */
+.site-alarm { font-size: 11px; color: var(--warning); }
+.site-alarm.critical { color: var(--danger); }
 .alarm-item-top {
   display: flex;
   justify-content: space-between;

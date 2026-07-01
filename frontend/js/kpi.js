@@ -76,6 +76,7 @@ export function initKpi() {
 
   State.on("change:sites",          _renderSiteList);
   State.on("change:vips",           () => _renderSiteList(State.sites || []));
+  State.on("change:alarms",         () => _renderSiteList(State.sites || []));
   State.on("change:selectedSite",   _onSiteSelected);
   State.on("change:selectedMetric", _refreshChart);
   State.on("change:selectedCell",   _refreshChart);
@@ -204,9 +205,15 @@ function _renderSiteList(sites) {
 
     const hasVip = (State.vips || []).some(v => v.in_event && v.serving_site === site.id);
 
+    const siteAlarms = (State.alarms || []).filter(a => a.in_event && a.serving_site === site.id);
+    const hasCritical = siteAlarms.some(a => a.severity === "Critical");
+    const alarmTag = siteAlarms.length
+      ? ` <span class="site-alarm${hasCritical ? " critical" : ""}" title="${siteAlarms.length} alarme(s)">⚠</span>`
+      : "";
+
     item.innerHTML = `
       <span class="site-dot" style="background:${STATUS_COLORS[site.status]}"></span>
-      <span class="site-name">${_esc(site.name)}${hasVip ? ' <span class="vip-crown">👑</span>' : ""}</span>
+      <span class="site-name">${_esc(site.name)}${hasVip ? ' <span class="vip-crown">👑</span>' : ""}${alarmTag}</span>
       <span class="site-util ${displayClass}">${displayVal}</span>`;
 
     item.addEventListener("click", () => State.set("selectedSite", site.id));
