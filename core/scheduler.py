@@ -176,6 +176,14 @@ class Scheduler:
             result.duplicate = max(result.duplicate, len(measurements) - inserted)
             if evaluate:
                 evaluate(measurements)
+        # Checkpoints pertencem ao lote: só avançam depois de a persistência
+        # idempotente terminar, inclusive quando o lote é um replay completo.
+        if result.cursors and collector == "kpi":
+            oss = ((self._event_config or {}).get("oss", {}).get("region") or "").upper()
+            db.save_collection_checkpoints(
+                (self._event_config or {}).get("id", ""), result.cursors,
+                collector="monitoring", oss=oss,
+            )
 
         now = datetime.utcnow().isoformat()
         status = self._status[collector]

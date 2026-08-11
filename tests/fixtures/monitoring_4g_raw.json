@@ -1,0 +1,18 @@
+{
+  "data": [{
+    "taskId": 747,
+    "execTime": 1700000000000,
+    "objNoExecTimes": [{"objNo": 1, "preExecTime": 1700000000000}],
+    "results": [{"execTime": 1700000000000, "period": 5, "objRes": [{
+      "obj": {"objNo": 1, "objName": "Cell Name=4G-CELL"},
+      "counterRes": [
+        {"name": "L.RRC.ConnReq.Att", "value": "10", "reliable": 1},
+        {"name": "L.RRC.ConnReq.Succ", "value": "10", "reliable": 1},
+        {"name": "L.E-RAB.SuccEst", "value": "10", "reliable": 1},
+        {"name": "L.E-RAB.AttEst", "value": "10", "reliable": 1},
+        {"name": "L.S1Sig.ConnEst.Att", "value": "10", "reliable": 1},
+        {"name": "L.S1Sig.ConnEst.Succ", "value": "10", "reliable": 1}
+      ], "counterExpRes": []
+    }]}]
+  }]
+}

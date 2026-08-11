@@ -1,0 +1,45 @@
+{
+  "data": [{
+    "taskId": 748,
+    "execTime": 1700000000000,
+    "objNoExecTimes": [{"objNo": 2, "preExecTime": 1700000000000}],
+    "results": [{"execTime": 1700000000000, "period": 5, "objRes": [{
+      "obj": {"objNo": 2, "objName": "Cell Name=5G-CELL"},
+      "counterRes": [
+        {"name": "N.RRC.SetupReq.Att", "value": "10", "reliable": 1},
+        {"name": "N.RRC.SetupReq.Succ", "value": "10", "reliable": 1},
+        {"name": "N.RRC.ResumeReq.Att", "value": "0", "reliable": 1},
+        {"name": "N.RRC.ResumeReq.Succ", "value": "0", "reliable": 1},
+        {"name": "N.NGSig.ConnEst.Att", "value": "10", "reliable": 1},
+        {"name": "N.NGSig.ConnEst.Succ", "value": "10", "reliable": 1},
+        {"name": "N.QosFlow.Est.Succ", "value": "10", "reliable": 1},
+        {"name": "N.QosFlow.Est.Att.EPSFB", "value": "0", "reliable": 1},
+        {"name": "N.QosFlow.Est.Att.EmcFB", "value": "0", "reliable": 1},
+        {"name": "N.QosFlow.FailEst.Conflict", "value": "0", "reliable": 1},
+        {"name": "N.QosFlow.Resume.Succ", "value": "0", "reliable": 1},
+        {"name": "N.QosFlow.Est.Att", "value": "10", "reliable": 1},
+        {"name": "N.QosFlow.FailEst.AMF.SyntaxError", "value": "0", "reliable": 1},
+        {"name": "N.QosFlow.Resume.Att", "value": "0", "reliable": 1},
+        {"name": "N.QosFlow.AbnormRel", "value": "1", "reliable": 1},
+        {"name": "N.QosFlow.NormRel", "value": "9", "reliable": 1},
+        {"name": "N.QosFlow.RrcInactiveToIdle.Rel", "value": "0", "reliable": 1},
+        {"name": "N.QosFlow.RrcConnToInactive.Suspend", "value": "0", "reliable": 1},
+        {"name": "N.PRB.DL.Used.Avg", "value": "20", "reliable": 1},
+        {"name": "N.PRB.DL.Avail.Avg", "value": "100", "reliable": 1},
+        {"name": "N.PRB.UL.Used.Avg", "value": "25", "reliable": 1},
+        {"name": "N.PRB.UL.Avail.Avg", "value": "100", "reliable": 1},
+        {"name": "N.ThpVol.DL", "value": "1000", "reliable": 1},
+        {"name": "N.ThpVol.DL.LastSlot", "value": "100", "reliable": 1},
+        {"name": "N.ThpTime.DL.RmvLastSlot", "value": "10", "reliable": 1},
+        {"name": "N.ThpVol.UL", "value": "500", "reliable": 1},
+        {"name": "N.ThpVol.UE.UL.SmallPkt", "value": "50", "reliable": 1},
+        {"name": "N.ThpTime.UE.UL.RmvSmallPkt", "value": "10", "reliable": 1},
+        {"name": "N.NSA.ThpVol.DL", "value": "200", "reliable": 1},
+        {"name": "N.NSA.ThpVol.UL", "value": "100", "reliable": 1},
+        {"name": "N.User.RRCConn.Avg", "value": "7", "reliable": 1},
+        {"name": "N.Cell.Avail.Dur", "value": "300", "reliable": 1},
+        {"name": "N.UL.NI.Avg", "value": "-110", "reliable": 1}
+      ], "counterExpRes": []
+    }]}]
+  }]
+}

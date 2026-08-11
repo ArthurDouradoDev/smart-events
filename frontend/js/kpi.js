@@ -18,6 +18,7 @@ const METRIC_LABELS = {
   user_count:        "Usuários Ativos",
   accessibility:     "Acessibilidade (%)",
 };
+let KPI_CATALOG = [];
 
 const STATUS_COLORS = {
   healthy:  "#3FB950",
@@ -49,6 +50,7 @@ function hexToRgba(hex, alpha) {
 export function initKpi() {
   _initChart();
   _initPopupChart();
+  _loadKpiCatalog();
 
   const popupModal = document.getElementById("chart-popup-modal");
   const popupCloseBtn = document.getElementById("popup-chart-close");
@@ -141,6 +143,49 @@ export function initKpi() {
   });
 }
 
+async function _loadKpiCatalog() {
+  const response = await API.getKpiCatalog();
+  if (!response?.ok || !Array.isArray(response.metrics)) return;
+  KPI_CATALOG = response.metrics;
+  const selector = document.getElementById("metric-selector");
+  if (!selector) return;
+  const current = State.selectedMetric || selector.value;
+  const groups = new Map([["common", { label: "Métricas comuns", entries: [] }],
+                          ["4G", { label: "Adicionais 4G", entries: [] }],
+                          ["5G", { label: "5G SA / NSA", entries: [] }]]);
+  // O identificador canônico pode existir em ambas tecnologias. Uma opção comum
+  // continua sendo uma métrica só; o backend decide as séries disponíveis.
+  const seen = new Set();
+  response.metrics.forEach(meta => {
+    if (seen.has(meta.id)) return;
+    seen.add(meta.id);
+    const common = response.metrics.some(other => other.id === meta.id && other.technology !== meta.technology);
+    groups.get(common ? "common" : meta.technology)?.entries.push(meta);
+    METRIC_LABELS[meta.id] = `${meta.name} (${meta.unit})`;
+  });
+  selector.innerHTML = "";
+  groups.forEach(group => {
+    if (!group.entries.length) return;
+    const optgroup = document.createElement("optgroup");
+    optgroup.label = group.label;
+    group.entries.forEach(meta => {
+      const option = document.createElement("option");
+      option.value = meta.id;
+      const techLabel = commonMetricTechnologies(meta.id);
+      option.textContent = `${meta.name} · ${techLabel} · ${meta.unit}`;
+      option.title = `Tecnologia: ${techLabel}. Site completo: ${meta.site_aggregation}`;
+      optgroup.appendChild(option);
+    });
+    selector.appendChild(optgroup);
+  });
+  selector.value = [...selector.options].some(option => option.value === current) ? current : selector.options[0]?.value;
+  if (selector.value && selector.value !== State.selectedMetric) State.set("selectedMetric", selector.value);
+}
+
+function commonMetricTechnologies(metricId) {
+  return [...new Set(KPI_CATALOG.filter(item => item.id === metricId).map(item => item.technology))].join("/");
+}
+
 // ── Lista de sites ────────────────────────────────────────────────
 
 function _renderSiteList(sites) {
@@ -223,6 +268,8 @@ function _renderSiteList(sites) {
 
 // Helper para sufixo de unidade
 function _getMetricSuffix(metric) {
+  const meta = KPI_CATALOG.find(item => item.id === metric);
+  if (meta?.unit) return ` ${meta.unit}`;
   if (metric.includes("utilization") || metric === "accessibility") return "%";
   if (metric.includes("throughput")) return " Mbps";
   if (metric.includes("traffic_volume")) return " MB";

@@ -184,6 +184,7 @@ def run(headless: bool = True, module: str = "both",
         session_data[section].setdefault("task_id", None)
         session_data[section].setdefault("cookies", [])
     session_data["monitoring"].setdefault("obj_nos", [])
+    session_data["monitoring"].setdefault("tasks", [])
     reset_sections = ("trace", "monitoring") if module == "both" else (module,)
     for section in reset_sections:
         session_data[section]["task_id"] = None
@@ -191,6 +192,7 @@ def run(headless: bool = True, module: str = "both",
         session_data[section]["cookies"] = []
         if section == "monitoring":
             session_data[section]["obj_nos"] = []
+            session_data[section]["tasks"] = []
 
     def monitor_requests(request: "Request"):
         url = request.url
@@ -221,6 +223,8 @@ def run(headless: bool = True, module: str = "both",
                         if isinstance(item, dict):
                             if "taskId" in item:
                                 session_data["monitoring"]["task_id"] = item["taskId"]
+                                if item["taskId"] not in session_data["monitoring"]["tasks"]:
+                                    session_data["monitoring"]["tasks"].append(item["taskId"])
                             if "objNoExecTimes" in item:
                                 obj_nos = [x["objNo"] for x in item["objNoExecTimes"] if "objNo" in x]
                                 current = set(session_data["monitoring"]["obj_nos"])

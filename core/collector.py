@@ -45,6 +45,7 @@ import urllib3
 from core import database as db
 from core import credentials
 from core.collection_result import CollectionResult
+from core.kpi_formulas import InvalidKpi, calculate as calculate_kpi, definitions_for
 from core.session_renew import (
     EXIT_SUCCESS,
     EXIT_GENERIC_FAIL,
@@ -298,8 +299,124 @@ class BaseCollector(ABC):
                 
         return False
 
-    @abstractmethod
+    @staticmethod
+    def _normalize_cell_technology(value, cell_id: str = "") -> Optional[str]:
+        text = f"{value or ''} {cell_id or ''}".upper()
+        has_4g = bool(re.search(r"(^|[^A-Z0-9])(?:4G|LTE)([^A-Z0-9]|$)", text))
+        has_5g = bool(re.search(r"(^|[^A-Z0-9])(?:5G|NR|NCI)([^A-Z0-9]|$)", text))
+        if has_4g and has_5g:
+            return None
+        if has_4g:
+            return "4G"
+        if has_5g:
+            return "5G"
+        return None
+
+    @staticmethod
+    def _normalized_name(value) -> str:
+        return re.sub(r"[^A-Z0-9]", "", str(value or "").upper())
+
+    def _configured_pm_tasks(self, session_data: dict) -> list[dict]:
+        """Resolve tasks por tecnologia, sem trocar silenciosamente 4G por 5G."""
+        integration = self.event.get("integration", {}) or {}
+        configured = integration.get("pm_tasks") or []
+        if isinstance(configured, dict):
+            configured = [{"tech": tech, "task_id": task} for tech, task in configured.items()]
+        tasks = []
+        for item in configured:
+            if not isinstance(item, dict) or item.get("task_id") is None:
+                continue
+            tech = self._normalize_cell_technology(item.get("tech"))
+            if tech:
+                tasks.append({"task_id": int(item["task_id"]), "technology": tech})
+        if not tasks:
+            fallback = integration.get("pm_task_id") or session_data.get("monitoring", {}).get("task_id")
+            if fallback is not None:
+                tasks.append({"task_id": int(fallback), "technology": "4G"})
+        # Uma task por tecnologia; duplicidade de configuração é ambígua e deve falhar visivelmente.
+        seen = set()
+        unique = []
+        for item in tasks:
+            if item["technology"] in seen:
+                raise ValueError(f"Mais de uma task PM configurada para {item['technology']}")
+            seen.add(item["technology"])
+            unique.append(item)
+        return unique
+
+    def _request_objects_for_task(self, task: dict) -> list[int]:
+        tech = task["technology"]
+        known = [obj for obj, info in self._obj_to_cell.items()
+                 if info.get("technology") == tech or (tech == "4G" and info.get("technology") is None)]
+        # Descoberta aberta ocorre no máximo uma vez por task nesta instância. Depois,
+        # células ainda não mapeadas viram cobertura parcial, não uma consulta crescente.
+        if not known and str(task["task_id"]) not in self._discovered_pm_tasks:
+            return []
+        return known
+
+    def _collect_kpis_v2(self) -> CollectionResult:
+        session_data = self._load_session_data()
+        tasks = self._configured_pm_tasks(session_data)
+        if not tasks:
+            return CollectionResult.partial(cause="Nenhuma task PM foi configurada para as tecnologias do evento.",
+                                            coverage={"cells_mapped": 0, "cells_expected": len(self.cell_ids)})
+        oss = (self._region or self.base_url).upper()
+        payload = []
+        for task in tasks:
+            checkpoints = db.get_collection_checkpoints(self.event_id, "monitoring", task["task_id"], oss)
+            objects = self._request_objects_for_task(task)
+            fallback = checkpoints.get("")
+            payload.append({
+                "taskId": task["task_id"],
+                "preExecTime": int(fallback) if fallback and str(fallback).isdigit() else 0,
+                "objNoExecTimes": [
+                    {"objNo": obj_no, "preExecTime": int(checkpoints.get(str(obj_no), fallback or 0))}
+                    for obj_no in objects
+                ],
+            })
+        url = f"{self.base_url}/rest/oss/access/pm/v1/monitor/task/result"
+        renewed = False
+        for attempt in range(2):
+            try:
+                response = self._get_session("monitoring").post(
+                    url, json=payload, timeout=30, headers={"x-non-renewal-session": "true"}, allow_redirects=False)
+                if not self._check_session_valid(response, "monitoring"):
+                    raise SessionExpiredError("Sessão Monitoring expirada")
+                response.raise_for_status()
+                parsed = self._parse_monitoring_response(response.json(), {str(t["task_id"]): t["technology"] for t in tasks})
+                for task in tasks:
+                    self._discovered_pm_tasks.add(str(task["task_id"]))
+                coverage = {
+                    "cells_mapped": len(self._obj_to_cell), "cells_expected": len(self.cell_ids),
+                    "unmapped_objects": parsed["unmapped"], "unmapped_cells": parsed["unmapped_cells"],
+                }
+                partial = bool(parsed["unmapped"] or parsed["invalid"] or len(self._obj_to_cell) < len(self.cell_ids))
+                kwargs = dict(cursors=parsed["cursors"], received=parsed["received"],
+                              calculated=len(parsed["rows"]), invalid=parsed["invalid"],
+                              diagnostics=parsed["diagnostics"], coverage=coverage,
+                              latest_data_at=parsed["latest_data_at"])
+                if partial:
+                    return CollectionResult.partial(parsed["rows"], cause="Cobertura ou fórmulas de Monitoring parciais.", **kwargs)
+                if parsed["rows"]:
+                    return CollectionResult.data(parsed["rows"], **kwargs)
+                return CollectionResult.empty("Monitoring respondeu sem medições novas.", **kwargs)
+            except SessionExpiredError:
+                if renewed or attempt:
+                    return CollectionResult.auth_required("A sessão de Monitoring continuou inválida após a renovação.")
+                if not self._renew_session("monitoring"):
+                    return CollectionResult.auth_required("Não foi possível renovar a sessão de Monitoring.")
+                renewed = True
+            except (requests.exceptions.ConnectTimeout, requests.exceptions.ConnectionError, requests.exceptions.Timeout) as error:
+                return CollectionResult.error(f"Falha de conexão ao consultar KPIs: {error}", code="network")
+            except requests.exceptions.HTTPError as error:
+                return CollectionResult.error(f"Falha HTTP ao consultar KPIs: {error}", code="http")
+            except (ValueError, TypeError, KeyError) as error:
+                return CollectionResult.error(f"Resposta inválida do Monitoring: {error}", stage="parsing", code="contract")
+        return CollectionResult.error("Monitoring terminou sem resposta.", code="unknown")
+
     def collect_kpis(self) -> CollectionResult:
+        return self._collect_kpis_v2()
+
+    def _legacy_collect_kpis(self) -> CollectionResult:
         """Coleta KPIs e descreve explicitamente o resultado do ciclo."""
         ...
 
@@ -525,17 +642,22 @@ class HttpCollector(BaseCollector):
         self._obj_to_cell = {}
         self._static_obj_nos: set = set()
         self._cell_to_site = {}
+        self._cell_metadata = {}
+        self._discovered_pm_tasks: set[str] = set()
         for site in event_config.get("sites", []):
             for cell in site.get("cells", []):
                 c_id = cell if isinstance(cell, str) else cell.get("id")
                 if c_id:
                     self._cell_to_site[c_id] = site["id"]
+                    tech = self._normalize_cell_technology(cell.get("tech") if isinstance(cell, dict) else None, c_id)
+                    self._cell_metadata[c_id] = {"site_id": site["id"], "technology": tech}
                     if isinstance(cell, dict) and "obj_no" in cell:
                         obj_no = int(cell["obj_no"])
                         self._static_obj_nos.add(obj_no)
                         self._obj_to_cell[obj_no] = {
                             "cell_id": c_id,
-                            "site_id": site["id"]
+                            "site_id": site["id"],
+                            "technology": tech,
                         }
 
     @staticmethod
@@ -1065,7 +1187,7 @@ class HttpCollector(BaseCollector):
                 )
                 return False
 
-    def collect_kpis(self) -> CollectionResult:
+    def _legacy_collect_kpis(self) -> CollectionResult:
         integration = self.event.get("integration", {})
         sess_data = self._load_session_data()
         # Prioritize event-specific pm_task_id over session task_id to prevent mixups
@@ -1162,6 +1284,161 @@ class HttpCollector(BaseCollector):
                 logger.error(f"Resposta inválida do Monitoring: {e}")
                 return CollectionResult.error(f"Resposta inválida do Monitoring: {e}", stage="parsing", code="contract")
         return CollectionResult.error("Monitoring terminou sem resposta.", code="unknown")
+
+    def _resolve_monitoring_cell(self, obj_no: int, obj_name: str, technology: Optional[str]) -> Optional[dict]:
+        known = self._obj_to_cell.get(obj_no)
+        if known:
+            return known
+        if not technology:
+            return None
+        # O nome do objeto contém diversos atributos. Consideramos somente o valor
+        # explícito de "Cell Name", comparado após normalização estável; não há
+        # matching amplo por substring de site/célula.
+        match = re.search(r"Cell Name\s*=\s*([^,]+)", obj_name or "", re.I)
+        candidate = self._normalized_name(match.group(1) if match else obj_name)
+        choices = [cell_id for cell_id, metadata in self._cell_metadata.items()
+                   if metadata.get("technology") == technology and self._normalized_name(cell_id) == candidate]
+        if len(choices) != 1:
+            return None
+        cell_id = choices[0]
+        result = {"cell_id": cell_id, **self._cell_metadata[cell_id]}
+        self._obj_to_cell[obj_no] = result
+        return result
+
+    @staticmethod
+    def _counter_map(counter_res) -> tuple[dict[str, float], dict[str, str]]:
+        values, invalid = {}, {}
+        for counter in counter_res or []:
+            if not isinstance(counter, dict) or not counter.get("name"):
+                continue
+            name = str(counter["name"])
+            reliable = counter.get("reliable", 1)
+            if reliable not in (1, 1.0, True, "1", "1.0", "true", "True"):
+                invalid[name] = "contador não confiável"
+                continue
+            try:
+                values[name] = float(counter["value"])
+            except (KeyError, TypeError, ValueError):
+                invalid[name] = "contador não numérico"
+        return values, invalid
+
+    @staticmethod
+    def _timestamp_from_exec_time(exec_time) -> str:
+        if exec_time:
+            return datetime.utcfromtimestamp(float(exec_time) / 1000.0).strftime("%Y-%m-%dT%H:%M:%SZ")
+        return datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ")
+
+    def _site_rows(self, source: list[dict]) -> list[dict]:
+        grouped = {}
+        for row in source:
+            key = (row["site_id"], row["timestamp"], row["technology"], row["metric"])
+            grouped.setdefault(key, []).append(row)
+        rows = []
+        for (site_id, timestamp, technology, metric), items in grouped.items():
+            definition = next((item for item in definitions_for(technology) if item.id == metric), None)
+            if not definition:
+                continue
+            values = [item["value"] for item in items]
+            # Para percentuais compostos, ``source`` recebe o resultado de cada
+            # célula; o parser recalcula-os antes de chegar aqui quando há raw
+            # counters homogêneos. As demais regras são matematicamente definidas.
+            if definition.site_aggregation == "sum":
+                value = sum(values)
+            elif definition.site_aggregation == "mean":
+                value = sum(values) / len(values)
+            else:
+                # Percentuais compostos são adicionados pelo parser a partir dos
+                # contadores somados; nunca use média simples de percentuais.
+                continue
+            rows.append({"event_id": self.event_id, "site_id": site_id, "cell_id": "__site__",
+                         "timestamp": timestamp, "metric": metric, "value": value,
+                         "scope": "SITE", "technology": technology})
+        return rows
+
+    def _parse_monitoring_response(self, response_json: dict, task_technologies: dict[str, str]) -> dict:
+        from core.collection_result import CollectionDiagnostic
+
+        rows, source, diagnostics, cursors = [], [], [], {}
+        site_counter_groups = {}
+        received = invalid = unmapped = 0
+        unmapped_cells = []
+        latest_data_at = None
+        for task_data in response_json.get("data") or []:
+            task_id = task_data.get("taskId")
+            technology = task_technologies.get(str(task_id))
+            if not technology:
+                diagnostics.append(CollectionDiagnostic("contract", f"Task PM inesperada: {task_id}", "unknown_task"))
+                continue
+            task_cursor = task_data.get("execTime")
+            if task_cursor is not None:
+                cursors[f"{task_id}:"] = {"task_id": task_id, "object_key": "", "cursor": task_cursor}
+            for checkpoint in task_data.get("objNoExecTimes") or []:
+                if checkpoint.get("objNo") is not None and checkpoint.get("preExecTime") is not None:
+                    cursors[f"{task_id}:{checkpoint['objNo']}"] = {"task_id": task_id, "object_key": str(checkpoint["objNo"]), "cursor": checkpoint["preExecTime"]}
+            for result in task_data.get("results") or []:
+                timestamp = self._timestamp_from_exec_time(result.get("execTime") or task_cursor)
+                latest_data_at = max(latest_data_at or timestamp, timestamp)
+                items = result.get("objRes", []) if "objRes" in result else [result]
+                for item in items:
+                    obj = item.get("obj") or {}
+                    obj_no = item.get("objNo") or obj.get("objNo")
+                    try:
+                        obj_no = int(obj_no)
+                    except (TypeError, ValueError):
+                        invalid += 1
+                        diagnostics.append(CollectionDiagnostic("parsing", "Objeto Monitoring sem objNo válido", "missing_obj_no"))
+                        continue
+                    received += 1
+                    info = self._resolve_monitoring_cell(obj_no, item.get("objName") or obj.get("objName") or "", technology)
+                    if not info:
+                        unmapped += 1
+                        unmapped_cells.append(str(obj.get("objName") or obj_no))
+                        continue
+                    counters, counter_errors = self._counter_map(item.get("counterRes"))
+                    period = result.get("period") or task_data.get("period")
+                    site_counter_groups.setdefault((info["site_id"], timestamp, technology), []).append((counters, period))
+                    per_metric = []
+                    for definition in definitions_for(technology):
+                        try:
+                            value = calculate_kpi(definition, counters, float(period) if period is not None else None)
+                        except InvalidKpi as error:
+                            invalid += 1
+                            diagnostics.append(CollectionDiagnostic("formula", str(error), "invalid_formula", {
+                                "metric": definition.id, "cell_id": info["cell_id"], "technology": technology,
+                            }))
+                            continue
+                        measurement = {"event_id": self.event_id, "site_id": info["site_id"], "cell_id": info["cell_id"],
+                                       "timestamp": timestamp, "metric": definition.id, "value": value,
+                                       "scope": "CELL", "technology": technology}
+                        rows.append(measurement)
+                        per_metric.append((definition, measurement))
+                    for name, reason in counter_errors.items():
+                        diagnostics.append(CollectionDiagnostic("counter", reason, "invalid_counter", {"counter": name, "cell_id": info["cell_id"]}))
+                    source.extend(per_metric)
+        rows.extend(self._site_rows([row for _, row in source]))
+        # Percentuais compostos usam os contadores somados no mesmo timestamp.
+        # ``period`` é multiplicado pelo número de células para availability,
+        # preservando GP/SP devolvido pelo OSS em vez do intervalo local.
+        for (site_id, timestamp, technology), samples in site_counter_groups.items():
+            summed = {}
+            for counters, _ in samples:
+                for name, value in counters.items():
+                    summed[name] = summed.get(name, 0.0) + value
+            periods = [float(period) for _, period in samples if period is not None]
+            site_period = periods[0] * len(samples) if periods else None
+            for definition in definitions_for(technology):
+                if definition.site_aggregation != "recalculate":
+                    continue
+                try:
+                    value = calculate_kpi(definition, summed, site_period)
+                except InvalidKpi:
+                    continue
+                rows.append({"event_id": self.event_id, "site_id": site_id, "cell_id": "__site__",
+                             "timestamp": timestamp, "metric": definition.id, "value": value,
+                             "scope": "SITE", "technology": technology})
+        return {"rows": rows, "received": received, "invalid": invalid, "unmapped": unmapped,
+                "unmapped_cells": sorted(set(unmapped_cells)), "diagnostics": diagnostics,
+                "cursors": cursors, "latest_data_at": latest_data_at}
 
     def _parse_kpi_response(self, response_json: dict) -> List[dict]:
         rows = []

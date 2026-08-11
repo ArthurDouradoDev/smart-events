@@ -74,11 +74,24 @@ def init_event_db(conn: sqlite3.Connection):
             event_id  TEXT NOT NULL,
             timestamp TEXT NOT NULL,
             metric    TEXT NOT NULL,
-            value     REAL
+            value     REAL,
+            scope     TEXT NOT NULL DEFAULT 'CELL',
+            technology TEXT NOT NULL DEFAULT ''
         );
 
         CREATE INDEX IF NOT EXISTS idx_kpi_site_time
             ON kpi_measurements(site_id, metric, timestamp);
+
+        CREATE TABLE IF NOT EXISTS collection_checkpoints (
+            event_id   TEXT NOT NULL,
+            oss        TEXT NOT NULL DEFAULT '',
+            collector  TEXT NOT NULL,
+            task_id    TEXT NOT NULL,
+            object_key TEXT NOT NULL DEFAULT '',
+            cursor     TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            PRIMARY KEY (event_id, oss, collector, task_id, object_key)
+        );
 
         CREATE TABLE IF NOT EXISTS alerts (
             id           INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -121,6 +134,27 @@ def init_event_db(conn: sqlite3.Connection):
 
         CREATE INDEX IF NOT EXISTS idx_alarms_arrive ON alarms(arrive_time);
         CREATE INDEX IF NOT EXISTS idx_alarms_name ON alarms(alarm_name);
+    """)
+    # Bancos de eventos criados antes da Fase 2 não possuem ``scope``. A
+    # migração é aditiva e mantém os históricos como linhas de célula.
+    columns = {row["name"] for row in conn.execute("PRAGMA table_info(kpi_measurements)")}
+    if "scope" not in columns:
+        conn.execute("ALTER TABLE kpi_measurements ADD COLUMN scope TEXT NOT NULL DEFAULT 'CELL'")
+    if "technology" not in columns:
+        conn.execute("ALTER TABLE kpi_measurements ADD COLUMN technology TEXT NOT NULL DEFAULT ''")
+    # Replays são esperados após uma queda antes de salvar o cursor. Conserva a
+    # primeira ocorrência de qualquer duplicata histórica e torna o replay seguro.
+    conn.execute("""
+        DELETE FROM kpi_measurements
+        WHERE id NOT IN (
+            SELECT MIN(id) FROM kpi_measurements
+            GROUP BY event_id, site_id, cell_id, timestamp, metric, scope, technology
+        )
+    """)
+    conn.execute("DROP INDEX IF EXISTS uq_kpi_measurement_replay")
+    conn.execute("""
+        CREATE UNIQUE INDEX uq_kpi_measurement_replay
+        ON kpi_measurements(event_id, site_id, cell_id, timestamp, metric, scope, technology)
     """)
     conn.commit()
 
@@ -466,16 +500,63 @@ def delete_event(event_id: str):
 # ── KPI Measurements ────────────────────────────────────────────────
 
 def insert_kpi_batch(measurements: List[dict]):
-    """Insere lote de medições de KPI."""
+    """Insere KPIs idempotentemente e devolve inseridos/duplicados."""
     if not measurements:
-        return
+        return {"inserted": 0, "duplicate": 0}
     event_id = measurements[0]["event_id"]
     conn = get_event_conn(event_id)
+    rows = [{**item, "scope": item.get("scope", "CELL"), "technology": item.get("technology", "")} for item in measurements]
+    before = conn.total_changes
     conn.executemany("""
         INSERT INTO kpi_measurements
-            (site_id, cell_id, event_id, timestamp, metric, value)
-        VALUES (:site_id, :cell_id, :event_id, :timestamp, :metric, :value)
-    """, measurements)
+            (site_id, cell_id, event_id, timestamp, metric, value, scope, technology)
+        VALUES (:site_id, :cell_id, :event_id, :timestamp, :metric, :value, :scope, :technology)
+        ON CONFLICT(event_id, site_id, cell_id, timestamp, metric, scope, technology) DO NOTHING
+    """, rows)
+    conn.commit()
+    inserted = conn.total_changes - before
+    return {"inserted": inserted, "duplicate": len(rows) - inserted}
+
+
+def get_collection_checkpoints(event_id: str, collector: str, task_id, oss: str = "") -> dict[str, str]:
+    """Retorna cursores confirmados, isolados por evento/OSS/task/objeto."""
+    conn = get_event_conn(event_id)
+    rows = conn.execute("""
+        SELECT object_key, cursor FROM collection_checkpoints
+        WHERE event_id = ? AND oss = ? AND collector = ? AND task_id = ?
+    """, (event_id, oss or "", collector, str(task_id))).fetchall()
+    return {row["object_key"]: row["cursor"] for row in rows}
+
+
+def save_collection_checkpoints(event_id: str, cursors: dict, collector: str = "monitoring", oss: str = "") -> None:
+    """Persiste checkpoints somente quando chamado após gravar o lote correspondente.
+
+    ``cursors`` aceita ``{(task_id, object_key): cursor}`` ou a forma serializável
+    ``{"task:obj": {"task_id": ..., "object_key": ..., "cursor": ...}}``.
+    """
+    if not cursors:
+        return
+    conn = get_event_conn(event_id)
+    now = datetime.utcnow().isoformat() + "Z"
+    rows = []
+    for key, value in cursors.items():
+        if isinstance(value, dict):
+            task_id = value.get("task_id")
+            object_key = value.get("object_key", "")
+            cursor = value.get("cursor")
+        elif isinstance(key, tuple) and len(key) == 2:
+            task_id, object_key, cursor = key[0], key[1], value
+        else:
+            continue
+        if task_id is None or cursor is None:
+            continue
+        rows.append((event_id, oss or "", collector, str(task_id), str(object_key or ""), str(cursor), now))
+    conn.executemany("""
+        INSERT INTO collection_checkpoints(event_id, oss, collector, task_id, object_key, cursor, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(event_id, oss, collector, task_id, object_key)
+        DO UPDATE SET cursor = excluded.cursor, updated_at = excluded.updated_at
+    """, rows)
     conn.commit()
 
 
@@ -493,7 +574,7 @@ def get_kpi_series(
             FROM kpi_measurements
             WHERE event_id = ?
               AND site_id  = ?
-              AND metric   = ?
+              AND metric   = ? AND scope = 'CELL'
               AND timestamp >= strftime('%Y-%m-%dT%H:%M:%SZ', 'now', ? || ' minutes')
             ORDER BY timestamp ASC
         """, (event_id, site_id, metric, f"-{minutes}")).fetchall()
@@ -503,7 +584,7 @@ def get_kpi_series(
             FROM kpi_measurements
             WHERE event_id = ?
               AND site_id  = ?
-              AND metric   = ?
+              AND metric   = ? AND scope = 'CELL'
             ORDER BY timestamp ASC
         """, (event_id, site_id, metric)).fetchall()
     return [dict(r) for r in rows]
@@ -531,7 +612,7 @@ def get_kpi_series_by_cell(
             WHERE event_id = ?
               AND site_id  = ?
               AND cell_id  = ?
-              AND metric   = ?
+              AND metric   = ? AND scope = 'CELL'
               AND timestamp >= strftime('%Y-%m-%dT%H:%M:%SZ', 'now', ? || ' minutes')
             ORDER BY timestamp ASC
         """, (event_id, site_id, cell_id, metric, f"-{minutes}")).fetchall()
@@ -542,10 +623,47 @@ def get_kpi_series_by_cell(
             WHERE event_id = ?
               AND site_id  = ?
               AND cell_id  = ?
-              AND metric   = ?
+              AND metric   = ? AND scope = 'CELL'
             ORDER BY timestamp ASC
         """, (event_id, site_id, cell_id, metric)).fetchall()
     return [dict(r) for r in rows]
+
+
+def get_kpi_site_series(event_id: str, site_id: str, metric: str, minutes: int = 60,
+                        technology: str | None = None) -> List[dict]:
+    """Série já agregada e persistida para ``Site completo`` (nunca média ad-hoc)."""
+    conn = get_event_conn(event_id)
+    conditions = ["event_id = ?", "site_id = ?", "metric = ?", "scope = 'SITE'"]
+    params = [event_id, site_id, metric]
+    if technology:
+        conditions.append("technology = ?")
+        params.append(technology)
+    if minutes and minutes > 0:
+        conditions.append("timestamp >= strftime('%Y-%m-%dT%H:%M:%SZ', 'now', ? || ' minutes')")
+        params.append(f"-{minutes}")
+    rows = conn.execute(
+        "SELECT cell_id, timestamp, value, technology FROM kpi_measurements WHERE "
+        + " AND ".join(conditions) + " ORDER BY timestamp ASC", params).fetchall()
+    return [dict(row) for row in rows]
+
+
+def get_latest_site_kpi_by_metric(event_id: str, metric: str, max_timestamp: Optional[str] = None) -> List[dict]:
+    """Última linha SITE de cada site/tecnologia para listas e mapas."""
+    conn = get_event_conn(event_id)
+    ts_sql = " AND timestamp <= ?" if max_timestamp else ""
+    params = [event_id, metric] + ([max_timestamp] if max_timestamp else []) + [event_id, metric]
+    rows = conn.execute(f"""
+        SELECT k.site_id, k.cell_id, k.metric, k.value, k.timestamp, k.technology, k.scope
+        FROM kpi_measurements k
+        INNER JOIN (
+            SELECT site_id, technology, MAX(timestamp) max_ts
+            FROM kpi_measurements
+            WHERE event_id = ? AND metric = ? AND scope = 'SITE' {ts_sql}
+            GROUP BY site_id, technology
+        ) latest ON latest.site_id = k.site_id AND latest.technology = k.technology AND latest.max_ts = k.timestamp
+        WHERE k.event_id = ? AND k.metric = ? AND k.scope = 'SITE'
+    """, params).fetchall()
+    return [dict(row) for row in rows]
 
 
 def get_latest_kpi_by_metric(

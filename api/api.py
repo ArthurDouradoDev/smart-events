@@ -16,6 +16,7 @@ from core import database as db
 from core import credentials
 from core.scheduler import scheduler
 from core.log_buffer import log_buffer
+from core.kpi_formulas import catalog_for_api
 
 logger = logging.getLogger(__name__)
 
@@ -368,6 +369,11 @@ class Api:
                 latest_metric = latest  # reusa os dados já carregados
 
             metric_by_site = self._aggregate_metric_for_list(latest_metric, metric)
+            # Dados novos possuem uma linha SITE; ela é a fonte de verdade e
+            # substitui qualquer regra antiga de agregação da lista.
+            persisted_metric = db.get_latest_site_kpi_by_metric(event_id, metric, timestamp)
+            for row in persisted_metric:
+                metric_by_site[row["site_id"]] = row["value"]
 
             sites_out = []
             thresholds = config.get("thresholds", {})
@@ -394,7 +400,7 @@ class Api:
                     "status":          status,
                     "utilization":     round(util, 1) if util is not None else None,
                     "metric_value":    metric_by_site.get(site["id"]),
-                    "metric_is_share": metric in VOLUME_METRICS,
+                    "metric_is_share": False,
                     "is_event_site":   site.get("is_event_site", True),
                 })
 
@@ -434,10 +440,26 @@ class Api:
 
     # ── KPI / gráfico ────────────────────────────────────────────────
 
+    def get_kpi_catalog(self) -> dict:
+        """Metadados únicos usados por seletor, gráfico, lista e tooltip."""
+        return {"ok": True, "metrics": catalog_for_api()}
+
     def get_kpi_series(self, event_id: str, site_id: str, metric: str,
-                       minutes: int = 60, cell_id: str = "__all__") -> dict:
+                       minutes: int = 60, cell_id: str = "__all__", technology: str = None) -> dict:
         """Retorna série temporal para o gráfico de KPIs."""
         try:
+            if cell_id == "__all__":
+                site_rows = db.get_kpi_site_series(event_id, site_id, metric, minutes, technology)
+                if site_rows:
+                    labels = [row["timestamp"] for row in site_rows]
+                    return {
+                        "ok": True, "labels": labels, "values": [row["value"] for row in site_rows],
+                        "cells_data": {}, "gaps": self._detect_gaps(labels, max_gap_seconds=90),
+                        "technology": technology, "persisted_site_aggregate": True,
+                        "thresholds": self._metric_thresholds(event_id, metric),
+                    }
+            # Compatibilidade com históricos pré-Fase 2; novas linhas de Site
+            # completo retornam acima e não são agregadas por médias na API.
             # 1. Obter medições brutas
             if metric == "utilization":
                 rows = db.get_kpi_series(event_id, site_id, "utilization", minutes)
@@ -537,6 +559,14 @@ class Api:
         except Exception as e:
             logger.error(f"get_kpi_series error: {e}")
             return {"ok": False, "labels": [], "values": [], "gaps": []}
+
+    def _metric_thresholds(self, event_id: str, metric: str) -> dict:
+        config = db.get_event(event_id) or _active_event or {}
+        thresholds = config.get("thresholds", {})
+        return {
+            "warning": thresholds.get(f"{metric}_warning", thresholds.get("utilization_warning") if "utilization" in metric else None),
+            "critical": thresholds.get(f"{metric}_critical", thresholds.get("utilization_critical") if "utilization" in metric else None),
+        }
 
     # ── VIPs (cadastro global) ───────────────────────────────────────
 

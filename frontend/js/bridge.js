@@ -135,6 +135,14 @@ const _mock = {
       metric_is_share: ["user_count","traffic_volume_dl","traffic_volume_ul"].includes(metric),
     }));
   },
+  get_kpi_catalog: () => ({ ok: true, metrics: [
+    {id:"accessibility", technology:"4G", name:"Acessibilidade de Dados", unit:"%", site_aggregation:"recalculate"},
+    {id:"availability", technology:"4G", name:"Availability", unit:"%", site_aggregation:"recalculate"},
+    {id:"drop_rate", technology:"4G", name:"Drop Dados", unit:"%", site_aggregation:"recalculate"},
+    {id:"utilization_dl", technology:"4G", name:"DL PRB Utility", unit:"%", site_aggregation:"recalculate"},
+    {id:"utilization_dl", technology:"5G", name:"DL PRB Utility", unit:"%", site_aggregation:"recalculate"},
+    {id:"throughput_dl", technology:"4G", name:"Throughput DL", unit:"Mbit/s", site_aggregation:"sum"},
+  ]}),
   get_site_cells: async (event_id, site_id) => {
     return [
       { id: `${site_id}-A`, label: `${site_id}-A`, tech: "LTE", freq: "1800" },
@@ -373,6 +381,7 @@ const API = {
   getSites:         (eventId, timestamp=null, metric=null) => API.call("get_sites", eventId, timestamp, metric),
   getSiteCells:     (eventId, siteId)        => API.call("get_site_cells", eventId, siteId),
   getKpiSeries:     (eventId, siteId, m, w, cellId=null) => API.call("get_kpi_series", eventId, siteId, m, w, cellId),
+  getKpiCatalog:    ()                       => API.call("get_kpi_catalog"),
   getVips:          (eventId, timestamp=null) => API.call("get_vips", eventId, timestamp),
   refreshVips:      (eventId)                 => API.call("refresh_vips", eventId),
   getAlarms:        (eventId, timestamp=null) => API.call("get_alarms", eventId, timestamp),
