@@ -110,6 +110,22 @@ Os VIPs são identificados pelo `task_id` da Signaling Trace dedicada no iManage
 - **Circuit breaker:** `collector._renew_session` retorna `bool`; módulo bloqueado entra em `_needs_interactive` e a coleta pausa (sem loop) até o operador reautenticar. Caso "renovou mas continua inválido" engata backoff (`_engage_backoff`). Detecção de sessão em cache obsoleta via `_session_built_roarand` (relê o `session.json` novo sem rodar Playwright).
 - **Credenciais por Cliente → Regional** (ver Sessão 2026-06-25): fonte única em `core/credentials.py`. Catálogo `Cliente→Regional→IP` em `data/clientes.json` (editável). Credenciais em `data/credentials.json` indexadas por cliente, com `_shared` por cliente. Precedência `resolve_credentials(cliente, region)`: `[CLIENTE][REGIÃO]` → `[CLIENTE]["_shared"]` → vazio (sem fallback hardcoded). `cliente`/`region` vêm do `oss.cliente`/`oss.region` do evento e são propagados via `--cliente`/`--region` ao renovador. `session_renew._resolve_credentials` delega a esse módulo.
 
+### 12. Catálogo prioritário de contadores 4G (limite de 25)
+*(Decisão de planejamento 2026-08-11 — intenção registrada; coleta e cálculo ainda não implementados.)*
+- **Objetivo:** evoluir o SmartEvents para coletar contadores brutos 4G e calcular localmente os KPIs confirmados, preservando os resultados finais em `kpi_measurements` e, futuramente, os valores brutos em armazenamento auditável.
+- **Limite operacional:** a seleção aceita no máximo 25 contadores. A escolha prioritária usa **24 contadores**, cobrindo integralmente os nove KPIs confirmados. O 25º espaço deve permanecer livre; um contador RTT isolado não permite calcular o KPI.
+- **Acessibilidade de Dados (6):** `L.RRC.ConnReq.Succ`, `L.RRC.ConnReq.Att`, `L.E-RAB.SuccEst`, `L.E-RAB.AttEst`, `L.S1Sig.ConnEst.Succ`, `L.S1Sig.ConnEst.Att`.
+- **Availability (2):** `L.Cell.Unavail.Dur.Sys`, `L.Cell.Unavail.Dur.Manual`. O cálculo também depende do parâmetro de granularidade `GP`.
+- **Drop de Dados (4):** `L.E-RAB.AbnormRel`, `L.E-RAB.AbnormRel.MME`, `L.E-RAB.NormRel`, `L.E-RAB.Rel.MME`.
+- **Utilização PRB DL (2):** `L.ChMeas.PRB.DL.Used.Avg`, `L.ChMeas.PRB.DL.Avail`.
+- **Utilização PRB UL (2):** `L.ChMeas.PRB.UL.Used.Avg`, `L.ChMeas.PRB.UL.Avail`.
+- **Throughput DL (3):** `L.Thrp.bits.DL`, `L.Thrp.bits.DL.LastTTI`, `L.Thrp.Time.DL.RmvLastTTI`.
+- **Throughput UL (3):** `L.Thrp.bits.UL`, `L.Thrp.bits.UE.UL.LastTTI`, `L.Thrp.Time.UE.UL.RmvLastTTI`.
+- **UE médio (1):** `L.Traffic.User.Avg`.
+- **Interferência UL (1):** `L.UL.Interference.Avg`.
+- **RTTs adiados (fórmulas pendentes de confirmação):** não selecionar inicialmente `L.PDCP.TCP.time.RANRtt.ConnSetup`, `L.PDCP.TCP.RANRtt.ConnSetup`, `L.PDCP.TCP.Time.TerrestrialRtt.ConnSetup` nem `L.PDCP.TCP.TerrestrialRtt.ConnSetup`. Cada RTT exige seu par numerador/denominador; portanto, não usar o 25º espaço com apenas um deles.
+- **Regra semântica:** Acessibilidade de Dados e Availability são KPIs distintos e devem ter chaves, fórmulas e thresholds separados. Não mapear `Disponibilidade` como alias de `accessibility`.
+
 ---
 
 ## Detalhes da Coleta de Dados

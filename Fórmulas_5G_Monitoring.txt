@@ -1,0 +1,41 @@
+KPIs 5G SA
+
+Acessibilidade de Dados 5G SA (%) considerando RRC Inactive:
+(N.RRC.SetupReq.Succ + N.RRC.ResumeReq.Succ)/(N.RRC.SetupReq.Att + N.RRC.ResumeReq.Att) x (N.NGSig.ConnEst.Succ/N.NGSig.ConnEst.Att) x (N.QosFlow.Est.Succ + N.QosFlow.Est.Att.EPSFB + N.QosFlow.Est.Att.EmcFB +
+N.QosFlow.FailEst.Conflict + N.QosFlow.Resume.Succ)/(N.QosFlow.Est.Att – N.QosFlow.FailEst.AMF.SyntaxError + N.QosFlow.Resume.Att) x 100%
+
+Drop Dados (%) considerando RRC Inactive:
+N.QosFlow.AbnormRel/(N.QosFlow.AbnormRel + N.QosFlow.NormRel - N.QosFlow.RrcInactiveToIdle.Rel + N.QosFlow.RrcConnToInactive.Suspend) x 100%
+
+DL PRB Utility 5G (%) (DU CELL)
+N.PRB.DL.Used.Avg/N.PRB.DL.Avail.Avg × 100%
+
+UL PRB Utility 5G (%) (DU CELL)
+N.PRB.UL.Used.Avg/N.PRB.UL.Avail.Avg × 100%
+
+Throughput DL 5G (DU CELL)
+(N.ThpVol.DL - N.ThpVol.DL.LastSlot)/N.ThpTime.DL.RmvLastSlot
+
+Throughput UL 5G (DU CELL)
+(N.ThpVol.UL - N.ThpVol.UE.UL.SmallPkt)/N.ThpTime.UE.UL.RmvSmallPkt
+
+Downlink Traffic Volume 5G SA (DU CELL)
+N.ThpVol.DL - N.NSA.ThpVol.DL
+
+Downlink Traffic Volume 5G NSA (DU CELL)
+N.NSA.ThpVol.DL
+
+Uplink Traffic Volume 5G SA (DU CELL)
+N.ThpVol.UL - N.NSA.ThpVol.UL
+
+Uplink Traffic Volume 5G NSA (DU CELL)
+N.NSA.ThpVol.UL
+
+User Medio 5G
+N.User.RRCConn.Avg
+
+Availability (%)
+ΣN.Cell.Avail.Dur/(Number of cells x {SP} x 60) x 100%
+
+UL Interference Medio (DU CELL)
+N.UL.NI.Avg

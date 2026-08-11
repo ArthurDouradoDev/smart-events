@@ -1,0 +1,40 @@
+Monitoring:
+
+
+Acessibilidade de Dados (%)
+{100}*([L.RRC.ConnReq.Succ]/[L.RRC.ConnReq.Att])*([L.E-RAB.SuccEst]/[L.E-RAB.AttEst])*([L.S1Sig.ConnEst.Succ]/[L.S1Sig.ConnEst.Att])
+
+Availability (%)
+({1}-(([L.Cell.Unavail.Dur.Sys]+[L.Cell.Unavail.Dur.Manual])/({60}*{GP})))*{100}
+
+Drop Dados (%)
+{100}*([L.E-RAB.AbnormRel]+[L.E-RAB.AbnormRel.MME]) / ([L.E-RAB.AbnormRel]+[L.E-RAB.AbnormRel.MME]+[L.E-RAB.NormRel]+[L.E-RAB.Rel.MME])
+
+DL PRB Utility (%)
+([L.ChMeas.PRB.DL.Used.Avg]/[L.ChMeas.PRB.DL.Avail])*{100}
+
+Interferência (dBm)
+[L.UL.Interference.Avg]
+
+Throughput DL (Mbit/s)
+(([L.Thrp.bits.DL]-[L.Thrp.bits.DL.LastTTI])/[L.Thrp.Time.DL.RmvLastTTI])/{1000}
+
+Throughput UL (Mbit/s)
+(([L.Thrp.bits.UL]-[L.Thrp.bits.UE.UL.LastTTI])/[L.Thrp.Time.UE.UL.RmvLastTTI])/{1000}
+
+UE médio
+[L.Traffic.User.Avg]
+
+UL PRB Utility (%)
+([L.ChMeas.PRB.UL.Used.Avg]/[L.ChMeas.PRB.UL.Avail])*{100}
+
+
+
+Adicionar:
+
+
+RAN RTT based on TCP Three Way Handshake
+Wireless RTT (ms) = ([L.PDCP.TCP.time.RANRtt.ConnSetup])/([L.PDCP.TCP.RANRtt.ConnSetup])
+
+Terrestrial RTT based on TCP Three Way Handshake
+Terrestrial RTT (ms) = ([L.PDCP.TCP.Time.TerrestrialRtt.ConnSetup])/([L.PDCP.TCP.TerrestrialRtt.ConnSetup])

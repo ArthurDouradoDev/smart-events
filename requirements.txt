@@ -1,7 +1,17 @@
-pywebview>=4.4.1
-requests>=2.31.0
-schedule>=1.2.1
-watchdog>=3.0.0
-playwright>=1.40.0
-fastapi>=0.100.0
-uvicorn>=0.22.0
+# Aplicação desktop e coleta HTTP
+pywebview>=5.3.0
+requests>=2.32.3
+urllib3>=2.2.2
+playwright>=1.48.0
+
+# Servidor central e importação de planilhas
+fastapi>=0.115.0
+uvicorn>=0.30.0
+python-multipart>=0.0.18
+pandas>=2.2.0
+openpyxl>=3.1.5
+xlrd>=2.0.1
+
+# Desenvolvimento e empacotamento
+pytest>=8.3.0
+PyInstaller>=6.11.0
