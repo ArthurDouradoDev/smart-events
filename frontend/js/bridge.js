@@ -63,6 +63,35 @@ document.addEventListener("DOMContentLoaded", () => {
 
 
 // ── Mock data para desenvolvimento frontend ───────────────────────
+// Cenários reproduzíveis: use `?collectionScenario=partial` (data, empty,
+// partial, error, auth_required ou stale) ao abrir o frontend sem pywebview.
+const _mockCollectionScenario = new URLSearchParams(window.location.search).get("collectionScenario") || "data";
+function _mockCollectionStatus() {
+  const now = Date.now();
+  const state = _mockCollectionScenario;
+  const age = state === "stale" ? 8 * 60 * 1000 : 12000;
+  const item = (interval, count) => ({
+    state, last_attempt_at: new Date(now - 3000).toISOString(),
+    last_cycle_ok_at: ["data", "empty", "stale"].includes(state) ? new Date(now - age).toISOString() : null,
+    last_data_at: ["data", "empty", "stale"].includes(state) ? new Date(now - age).toISOString() : null,
+    last_success: null, last_count: count, received: count, calculated: count,
+    invalid: state === "partial" ? 2 : 0, duplicate: 0, inserted: count,
+    coverage: { cells_mapped: state === "partial" ? 4 : 6, cells_expected: 6 },
+    duration_s: 0.84, error: state === "error" ? "HTTP 500 no iManager" : null,
+    cause: state === "auth_required" ? "Sessão expirada; o retry ainda não foi confirmado." : (state === "partial" ? "Duas células configuradas não responderam." : null),
+    interval_s: interval,
+  });
+  const kpi = item(120, state === "data" ? 24 : 0);
+  const vip = { ...item(60, state === "data" ? 5 : 0), mode: "express", vips_total: 5, vips_with_data: state === "data" ? 5 : 0 };
+  return {
+    ok: true, recording: true, overall_state: state, kpi, vip, alarms: { ...item(180, 4), state: "data" },
+    session: { needs_interactive: state === "auth_required", region: "SP",
+      monitoring: { state: state === "auth_required" ? "auth_required" : "data" },
+      trace: { state: state === "auth_required" ? "auth_required" : "data" } },
+    now: new Date(now).toISOString(),
+  };
+}
+
 const _mock = {
   get_active_event: () => ({
     ok: true,
@@ -209,18 +238,7 @@ const _mock = {
   set_alarm_filter: (event_id, names) => ({ ok: true, names }),
   refresh_alarms: (event_id) => ({ ok: true, count: 4 }),
   get_app_status: () => ({ recording:true, db_size_mb:4.2, now:new Date().toISOString() }),
-  get_collection_status: () => {
-    const now = Date.now();
-    return {
-      ok: true,
-      recording: true,
-      kpi: { state:"ok", last_success:new Date(now - 12000).toISOString(), last_count:24, duration_s:0.84, error:null, interval_s:120 },
-      vip: { state:"ok", last_success:new Date(now - 6000).toISOString(),  last_count:30, duration_s:1.20, error:null, interval_s:60, mode:"express", vips_total:5, vips_with_data:4 },
-      alarms: { state:"ok", last_success:new Date(now - 20000).toISOString(), last_count:4, duration_s:0.55, error:null, interval_s:180 },
-      session: { needs_interactive:false, region:"SP" },
-      now: new Date(now).toISOString(),
-    };
-  },
+  get_collection_status: () => _mockCollectionStatus(),
   activate_event: (id, mock) => _mock.get_active_event(),
   acknowledge_alert: (id) => ({ ok:true }),
   acknowledge_all_alerts: (eventId) => ({ ok:true }),

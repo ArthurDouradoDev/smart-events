@@ -10,6 +10,7 @@ from datetime import datetime
 from typing import Callable, Optional
 
 from core import database as db
+from core.collection_result import CollectionResult
 from core.collector import BaseCollector, build_collector
 
 logger = logging.getLogger(__name__)
@@ -37,31 +38,49 @@ class Scheduler:
         # de filtro) para não rodarem em paralelo sobre a mesma sessão HTTP.
         self._alarms_lock = threading.Lock()
         self._last_vip_full_time = 0.0  # timestamp da última coleta VIP completa
-        # Estado das coletas para o indicador de sincronização do frontend.
-        # state: "idle" | "running" | "ok" | "error".
+        # Estado operacional. ``last_cycle_ok_at`` e ``last_data_at`` têm
+        # significados distintos: uma resposta vazia válida não inventa dado novo.
         self._status = {
             "kpi": {
-                "state": "idle", "last_success": None, "last_count": 0,
-                "duration_s": None, "error": None, "interval_s": INTERVAL_KPI_SECONDS,
+                **self._new_status(INTERVAL_KPI_SECONDS),
             },
             "vip": {
-                "state": "idle", "last_success": None, "last_count": 0,
-                "duration_s": None, "error": None, "interval_s": INTERVAL_VIP_SECONDS,
+                **self._new_status(INTERVAL_VIP_SECONDS),
                 "mode": None, "vips_total": 0, "vips_with_data": 0,
             },
             "alarms": {
-                "state": "idle", "last_success": None, "last_count": 0,
-                "duration_s": None, "error": None, "interval_s": INTERVAL_ALARMS_SECONDS,
+                **self._new_status(INTERVAL_ALARMS_SECONDS),
             },
+        }
+
+    @staticmethod
+    def _new_status(interval_s: int) -> dict:
+        return {
+            "state": "idle", "last_attempt_at": None, "last_cycle_ok_at": None,
+            "last_data_at": None, "last_success": None,  # compatibilidade com clientes antigos
+            "last_count": 0, "received": 0, "calculated": 0, "invalid": 0,
+            "duplicate": 0, "inserted": 0, "coverage": {}, "diagnostics": [],
+            "duration_s": None, "error": None, "cause": None, "interval_s": interval_s,
         }
 
     def get_status(self) -> dict:
         """Snapshot do estado das coletas (KPI/VIP/alarmes) para o indicador de sincronização."""
-        return {
-            "kpi": dict(self._status["kpi"]),
-            "vip": dict(self._status["vip"]),
-            "alarms": dict(self._status["alarms"]),
-        }
+        return {key: self._status_snapshot(value) for key, value in self._status.items()}
+
+    @staticmethod
+    def _status_snapshot(status: dict) -> dict:
+        snapshot = dict(status)
+        state = snapshot.get("state")
+        if state in {"data", "empty"} and snapshot.get("last_data_at"):
+            try:
+                age_s = (datetime.utcnow() - datetime.fromisoformat(
+                    snapshot["last_data_at"].replace("Z", "+00:00").replace("+00:00", "")
+                )).total_seconds()
+                if age_s > max(snapshot.get("interval_s", 0) * 2, 1):
+                    snapshot["state"] = "stale"
+            except (TypeError, ValueError):
+                pass
+        return snapshot
 
     def set_update_callback(self, fn: Callable):
         """Define função chamada após cada coleta bem-sucedida."""
@@ -79,7 +98,10 @@ class Scheduler:
 
         # Zera o estado das coletas ao (re)iniciar para não exibir dados do evento anterior.
         for k in ("kpi", "vip", "alarms"):
-            self._status[k].update({"state": "idle", "error": None})
+            interval = self._status[k]["interval_s"]
+            extra = {key: value for key, value in self._status[k].items()
+                     if key in {"mode", "vips_total", "vips_with_data"}}
+            self._status[k] = {**self._new_status(interval), **extra}
 
         # VIPs iniciam primeiro; os KPIs (sites) entram com um pequeno atraso
         # inicial para garantir que a coleta de VIP arranque antes na abertura.
@@ -127,30 +149,75 @@ class Scheduler:
                 logger.error(f"Erro na coleta: {e}")
             self._stop_event.wait(interval)
 
+    def _mark_attempt(self, collector: str, **extra) -> None:
+        self._status[collector].update({
+            "state": "running",
+            "last_attempt_at": datetime.utcnow().isoformat(),
+            **extra,
+        })
+
+    @staticmethod
+    def _insert_count(insert_response, attempted: int) -> int:
+        """Aceita os retornos atuais (None) e futuros do repositório."""
+        if isinstance(insert_response, int):
+            return max(0, min(insert_response, attempted))
+        if isinstance(insert_response, dict):
+            return max(0, min(int(insert_response.get("inserted", attempted)), attempted))
+        return attempted
+
+    def _apply_result(self, collector: str, result: CollectionResult, started_at: float,
+                      persist: Callable, evaluate: Optional[Callable] = None) -> None:
+        if not isinstance(result, CollectionResult):
+            raise TypeError(f"{collector} retornou {type(result).__name__}, esperado CollectionResult")
+        measurements = result.measurements
+        if measurements:
+            inserted = self._insert_count(persist(measurements), len(measurements))
+            result.inserted = inserted
+            result.duplicate = max(result.duplicate, len(measurements) - inserted)
+            if evaluate:
+                evaluate(measurements)
+
+        now = datetime.utcnow().isoformat()
+        status = self._status[collector]
+        healthy = result.state in {"data", "empty"}
+        if healthy:
+            status["error"] = None
+        elif result.state in {"error", "auth_required"}:
+            status["error"] = result.cause
+
+        if healthy:
+            status["last_cycle_ok_at"] = now
+            status["last_success"] = now  # cliente legado
+        if result.state in {"data", "partial"} and (result.latest_data_at or measurements):
+            status["last_data_at"] = result.latest_data_at or now
+
+        status.update({
+            "state": result.state,
+            "last_count": len(measurements),
+            "duration_s": round(time.time() - started_at, 2),
+            **result.as_status_fields(),
+        })
+        # O resultado contém os contadores depois da inserção; restaura-os pois
+        # as chaves de status foram expandidas pelo update acima.
+        status["inserted"] = result.inserted
+        status["duplicate"] = result.duplicate
+
+    def _apply_unexpected_error(self, collector: str, error: Exception, started_at: float) -> None:
+        self._status[collector].update({
+            "state": "error", "duration_s": round(time.time() - started_at, 2),
+            "error": str(error), "cause": str(error),
+        })
+
     def _collect_kpis(self):
         if not self._collector:
             return
-        self._status["kpi"]["state"] = "running"
+        self._mark_attempt("kpi")
         t0 = time.time()
         try:
-            data = self._collector.collect_kpis()
-            if data:
-                db.insert_kpi_batch(data)
-                self._evaluate_kpi_alerts(data)
-                logger.debug(f"{len(data)} medições de KPI inseridas")
-            self._status["kpi"].update({
-                "state": "ok",
-                "last_success": datetime.utcnow().isoformat(),
-                "last_count": len(data) if data else 0,
-                "duration_s": round(time.time() - t0, 2),
-                "error": None,
-            })
+            result = self._collector.collect_kpis()
+            self._apply_result("kpi", result, t0, db.insert_kpi_batch, self._evaluate_kpi_alerts)
         except Exception as e:
-            self._status["kpi"].update({
-                "state": "error",
-                "duration_s": round(time.time() - t0, 2),
-                "error": str(e),
-            })
+            self._apply_unexpected_error("kpi", e, t0)
             raise
 
     def _collect_vips(self, mode: str = None) -> int:
@@ -165,39 +232,22 @@ class Scheduler:
                 else:
                     mode = "express"
 
-            self._status["vip"].update({"state": "running", "mode": mode})
+            self._mark_attempt("vip", mode=mode)
             t0 = time.time()
             try:
                 logger.info(f"Iniciando coleta de VIPs no modo: {mode}")
-                data = self._collector.collect_vips(mode=mode)
-                if data:
-                    db.insert_vip_batch(data)
-                    self._evaluate_vip_alerts(data)
-                    logger.debug(f"{len(data)} medições de VIP inseridas (modo: {mode})")
-                else:
-                    logger.warning(f"Coleta de VIPs (modo: {mode}) retornou vazio — nenhuma medição inserida neste ciclo")
-
-                if mode == "full":
+                result = self._collector.collect_vips(mode=mode)
+                self._apply_result("vip", result, t0, db.insert_vip_batch, self._evaluate_vip_alerts)
+                if mode == "full" and result.state in {"data", "empty"}:
                     self._last_vip_full_time = time.time()
-
-                vips_total = len(getattr(self._collector, "vips_by_task", {}) or {})
-                vips_with_data = len({m["vip_name"] for m in data}) if data else 0
+                coverage = result.coverage
                 self._status["vip"].update({
-                    "state": "ok",
-                    "last_success": datetime.utcnow().isoformat(),
-                    "last_count": len(data),
-                    "duration_s": round(time.time() - t0, 2),
-                    "error": None,
-                    "vips_total": vips_total,
-                    "vips_with_data": vips_with_data,
+                    "vips_total": coverage.get("vips_configured", len(getattr(self._collector, "vips_by_task", {}) or {})),
+                    "vips_with_data": coverage.get("vips_with_data", 0),
                 })
-                return len(data)
+                return result.inserted
             except Exception as e:
-                self._status["vip"].update({
-                    "state": "error",
-                    "duration_s": round(time.time() - t0, 2),
-                    "error": str(e),
-                })
+                self._apply_unexpected_error("vip", e, t0)
                 raise
 
     def collect_vips_now(self) -> int:
@@ -218,27 +268,14 @@ class Scheduler:
         if not self._collector:
             return 0
         with self._alarms_lock:
-            self._status["alarms"]["state"] = "running"
+            self._mark_attempt("alarms")
             t0 = time.time()
             try:
-                data = self._collector.collect_alarms()
-                if data:
-                    db.insert_alarms_batch(data)
-                    logger.debug(f"{len(data)} alarmes inseridos")
-                self._status["alarms"].update({
-                    "state": "ok",
-                    "last_success": datetime.utcnow().isoformat(),
-                    "last_count": len(data) if data else 0,
-                    "duration_s": round(time.time() - t0, 2),
-                    "error": None,
-                })
-                return len(data) if data else 0
+                result = self._collector.collect_alarms()
+                self._apply_result("alarms", result, t0, db.insert_alarms_batch)
+                return result.inserted
             except Exception as e:
-                self._status["alarms"].update({
-                    "state": "error",
-                    "duration_s": round(time.time() - t0, 2),
-                    "error": str(e),
-                })
+                self._apply_unexpected_error("alarms", e, t0)
                 raise
 
     def collect_alarms_now(self) -> int:

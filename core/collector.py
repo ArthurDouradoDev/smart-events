@@ -44,6 +44,7 @@ import urllib3
 
 from core import database as db
 from core import credentials
+from core.collection_result import CollectionResult
 from core.session_renew import (
     EXIT_SUCCESS,
     EXIT_GENERIC_FAIL,
@@ -298,18 +299,18 @@ class BaseCollector(ABC):
         return False
 
     @abstractmethod
-    def collect_kpis(self) -> List[dict]:
-        """Retorna lista de medições de KPI para inserção no banco."""
+    def collect_kpis(self) -> CollectionResult:
+        """Coleta KPIs e descreve explicitamente o resultado do ciclo."""
         ...
 
     @abstractmethod
-    def collect_vips(self, mode: str = "express") -> List[dict]:
-        """Retorna última leitura de RSRP/RSRQ de cada VIP."""
+    def collect_vips(self, mode: str = "express") -> CollectionResult:
+        """Coleta traces de VIP e descreve explicitamente o resultado do ciclo."""
         ...
 
     @abstractmethod
-    def collect_alarms(self) -> List[dict]:
-        """Retorna alarmes correntes filtrados por tipo para inserção no banco."""
+    def collect_alarms(self) -> CollectionResult:
+        """Coleta alarmes e descreve explicitamente o resultado do ciclo."""
         ...
 
     def start(self):
@@ -366,9 +367,10 @@ class CsvCollector(BaseCollector):
         self.import_folder = Path(import_folder)
         self._processed = set()
 
-    def collect_kpis(self) -> List[dict]:
+    def collect_kpis(self) -> CollectionResult:
         kpi_files = list(self.import_folder.glob("kpi_*.csv"))
         measurements = []
+        diagnostics = []
 
         for fpath in kpi_files:
             if fpath.name in self._processed:
@@ -379,19 +381,27 @@ class CsvCollector(BaseCollector):
                 logger.info(f"KPI CSV processado: {fpath.name}")
             except Exception as e:
                 logger.error(f"Erro ao processar {fpath.name}: {e}")
+                diagnostics.append((fpath.name, str(e)))
 
-        return measurements
+        if diagnostics:
+            return CollectionResult.partial(
+                measurements, cause="Um ou mais arquivos CSV não puderam ser processados.",
+                coverage={"files_failed": len(diagnostics), "files_processed": len(self._processed)},
+            )
+        if measurements:
+            return CollectionResult.data(measurements, coverage={"files_processed": len(self._processed)})
+        return CollectionResult.empty("Nenhum CSV novo de KPI encontrado.")
 
-    def collect_vips(self, mode: str = "express") -> List[dict]:
+    def collect_vips(self, mode: str = "express") -> CollectionResult:
         # CSV de trace de VIPs foi descontinuado: o esquema atual identifica
         # cada VIP pelo task_id da sua task dedicada no iManager (via HTTP).
         # Se você ainda precisa importar trace de CSV, ele teria que carregar
         # uma coluna explícita com o nome do VIP.
-        return []
+        return CollectionResult.empty("Importação de trace por CSV não está configurada.")
 
-    def collect_alarms(self) -> List[dict]:
+    def collect_alarms(self) -> CollectionResult:
         # Coleta de alarmes por CSV está fora de escopo (só via HTTP no iManager).
-        return []
+        return CollectionResult.empty("Importação de alarmes por CSV não está configurada.")
 
     def _parse_kpi_csv(self, fpath: Path) -> List[dict]:
         rows = []
@@ -1005,7 +1015,11 @@ class HttpCollector(BaseCollector):
                     HttpCollector._renew_failures[module] = 0
                     HttpCollector._renew_backoff_until.pop(module, None)
                     self._clear_interactive_state(module)
-                    self._invalidate_session(module)
+                    # Cookies são compartilhados, mas cada módulo mantém seu
+                    # próprio requests.Session. Reconstrói ambos para não deixar
+                    # o outro worker usando headers/cookies anteriores.
+                    self._invalidate_session("monitoring")
+                    self._invalidate_session("trace")
                     return True
 
                 if result.returncode == EXIT_NEEDS_INTERACTIVE:
@@ -1051,7 +1065,7 @@ class HttpCollector(BaseCollector):
                 )
                 return False
 
-    def collect_kpis(self) -> List[dict]:
+    def collect_kpis(self) -> CollectionResult:
         integration = self.event.get("integration", {})
         sess_data = self._load_session_data()
         # Prioritize event-specific pm_task_id over session task_id to prevent mixups
@@ -1087,7 +1101,24 @@ class HttpCollector(BaseCollector):
                     raise SessionExpiredError(f"Redirecionamento para SSO detectado no módulo monitoring")
                 resp.raise_for_status()
                 data = resp.json()
-                return self._parse_kpi_response(data)
+                measurements = self._parse_kpi_response(data)
+                coverage = {
+                    "cells_mapped": len(self._obj_to_cell),
+                    "cells_expected": len(self.cell_ids),
+                }
+                latest_data_at = max((m.get("timestamp") for m in measurements), default=None)
+                if len(self._obj_to_cell) < len(self.cell_ids):
+                    return CollectionResult.partial(
+                        measurements,
+                        cause="Nem todas as células configuradas foram localizadas no Monitoring.",
+                        coverage=coverage,
+                        latest_data_at=latest_data_at,
+                    )
+                if measurements:
+                    return CollectionResult.data(measurements, coverage=coverage,
+                                                 latest_data_at=latest_data_at)
+                return CollectionResult.empty("Monitoring respondeu sem medições novas.",
+                                              coverage=coverage)
             except SessionExpiredError as e:
                 logger.warning(f"Erro de sessão no collect_kpis: {e}")
                 if renewed_this_call:
@@ -1095,15 +1126,17 @@ class HttpCollector(BaseCollector):
                     # Não renovar de novo (evita loop): engata backoff e para por aqui.
                     self._engage_backoff("monitoring")
                     logger.error("Sessão monitoring renovada mas ainda inválida — pausando coleta de KPIs (backoff).")
-                    return []
+                    return CollectionResult.auth_required(
+                        "A sessão de Monitoring continuou inválida após a renovação.")
                 if attempt < retries - 1:
                     logger.warning("Sessão do módulo monitoring expirada. Iniciando renovação automática...")
                     if self._renew_session("monitoring"):
                         renewed_this_call = True
                         continue
                     # Renovação não efetiva (backoff/CAPTCHA): não adianta retentar agora.
-                    return []
-                return []
+                    return CollectionResult.auth_required(
+                        "Não foi possível renovar a sessão de Monitoring.")
+                return CollectionResult.auth_required("A sessão de Monitoring expirou.")
             except (requests.exceptions.ConnectTimeout, requests.exceptions.ConnectionError, requests.exceptions.Timeout) as e:
                 logger.error(f"Erro de conexão ao consultar KPIs: {e}")
                 try:
@@ -1121,11 +1154,14 @@ class HttpCollector(BaseCollector):
                         })
                 except Exception as alert_ex:
                     logger.warning(f"Não foi possível inserir alerta de conexão: {alert_ex}")
-                return []
-            except Exception as e:
-                logger.error(f"Erro ao consultar KPIs: {e}")
-                return []
-        return []
+                return CollectionResult.error(f"Falha de conexão ao consultar KPIs: {e}", code="network")
+            except requests.exceptions.HTTPError as e:
+                logger.error(f"HTTP ao consultar KPIs: {e}")
+                return CollectionResult.error(f"Falha HTTP ao consultar KPIs: {e}", code="http")
+            except (ValueError, TypeError, KeyError) as e:
+                logger.error(f"Resposta inválida do Monitoring: {e}")
+                return CollectionResult.error(f"Resposta inválida do Monitoring: {e}", stage="parsing", code="contract")
+        return CollectionResult.error("Monitoring terminou sem resposta.", code="unknown")
 
     def _parse_kpi_response(self, response_json: dict) -> List[dict]:
         rows = []
@@ -1266,11 +1302,11 @@ class HttpCollector(BaseCollector):
                 raise SessionExpiredError("Sessão trace expirada no worker (pre-check)")
             if pre_resp.status_code >= 400:
                 self._handle_trace_error(task_id, "pre-check", pre_resp)
-                return []
+                raise requests.exceptions.HTTPError(f"pre-check HTTP {pre_resp.status_code}")
             pre_data = pre_resp.json() if pre_resp.content else {}
             if not pre_data.get("checkState", False):
                 logger.warning(f"pre-check falhou para task {task_id}: {pre_data}")
-                return []
+                raise ValueError(f"pre-check recusou a task {task_id}")
 
             # 2) query/result para obter sess_msg_id
             result_url = f"{self.base_url}/rest/oss/access/fars/v1/traceresult/query/result"
@@ -1287,17 +1323,17 @@ class HttpCollector(BaseCollector):
                 raise SessionExpiredError("Sessão trace expirada no worker (query/result)")
             if result_resp.status_code >= 400:
                 self._handle_trace_error(task_id, "query/result", result_resp)
-                return []
+                raise requests.exceptions.HTTPError(f"query/result HTTP {result_resp.status_code}")
 
             result_data = result_resp.json() if result_resp.content else {}
             data_block = result_data.get("data") or {}
             if isinstance(data_block, list):
                 logger.warning(f"query/result retornou lista para task {task_id} — sem sess_msg_id")
-                return []
+                raise ValueError("query/result retornou contrato sem msgId")
             sess_msg_id = data_block.get("msgId")
             if not sess_msg_id:
                 logger.warning(f"Sem sess_msg_id para task {task_id}: {data_block}")
-                return []
+                raise ValueError("query/result não retornou msgId")
 
             # 3) filter-by-cols — RRC_MEAS_RPRT, mais recente primeiro
             filter_url = f"{self.base_url}/rest/oss/access/fars/v1/traceresult/query/filter-by-cols"
@@ -1343,7 +1379,7 @@ class HttpCollector(BaseCollector):
                 raise SessionExpiredError("Sessão trace expirada no worker (filter-by-cols)")
             if filter_resp.status_code >= 400:
                 self._handle_trace_error(task_id, "filter-by-cols", filter_resp)
-                return []
+                raise requests.exceptions.HTTPError(f"filter-by-cols HTTP {filter_resp.status_code}")
 
             # 4) parsing + msg-explain-info para RSRP/RSRQ
             max_decodes = self._VIP_DECODES_EXPRESS if mode == "express" else self._VIP_DECODES_FULL
@@ -1368,13 +1404,14 @@ class HttpCollector(BaseCollector):
                     })
             except Exception as alert_ex:
                 logger.warning(f"Não foi possível inserir alerta de conexão VIP: {alert_ex}")
-            return []
+            raise requests.exceptions.ConnectionError(
+                f"Falha de conexão ao consultar VIP {vip_name}: {e}") from e
         except Exception as e:
             if not isinstance(e, SessionExpiredError):
                 logger.error(f"Erro ao consultar VIP {vip_name} (taskId={task_id}): {e}")
             raise
 
-    def collect_vips(self, mode: str = "express") -> List[dict]:
+    def collect_vips(self, mode: str = "express") -> CollectionResult:
         """
         Coleta resultados de trace via fluxo paralelo com ThreadPoolExecutor.
         Antes da execução paralela, faz um preflight sequencial para garantir e/ou renovar a sessão.
@@ -1388,7 +1425,10 @@ class HttpCollector(BaseCollector):
                 "Nenhum VIP com task_id configurado — sem coleta de trace. "
                 "Defina 'task_id' em cada VIP do evento."
             )
-            return []
+            return CollectionResult.empty(
+                "Nenhum VIP com task configurada para coleta de trace.",
+                coverage={"vips_configured": 0, "vips_with_data": 0},
+            )
 
         # 1) Preflight sequencial: garante que a sessão 'trace' está ativa.
         # Tenta fazer pre-check com o primeiro task_id do pool.
@@ -1408,6 +1448,7 @@ class HttpCollector(BaseCollector):
                 }, timeout=30)
                 if not self._check_session_valid(pre_resp, "trace"):
                     raise SessionExpiredError("Sessão trace expirada no preflight")
+                pre_resp.raise_for_status()
                 preflight_ok = True
                 break
             except SessionExpiredError as e:
@@ -1424,17 +1465,17 @@ class HttpCollector(BaseCollector):
                     break
                 break
             except Exception as e:
-                logger.warning(f"Erro inesperado no preflight de trace: {e}")
-                preflight_ok = True
-                break
+                logger.warning(f"Erro no preflight de trace: {e}")
+                return CollectionResult.error(f"Preflight do Trace falhou: {e}", code="http")
                 
         if not preflight_ok:
             logger.error("Preflight de trace falhou. Abortando ciclo de VIPs.")
-            return []
+            return CollectionResult.auth_required("A sessão de Trace não pôde ser validada.")
 
         # 2) Execução paralela com ThreadPoolExecutor
         import concurrent.futures
         measurements = []
+        worker_errors = []
         workers = self._VIP_MAX_WORKERS
         
         with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as executor:
@@ -1451,8 +1492,10 @@ class HttpCollector(BaseCollector):
                         measurements.extend(res)
                 except SessionExpiredError as e:
                     logger.warning(f"Worker reportou expiração de sessão para VIP {vip_name}: {e}")
-                except Exception:
-                    pass
+                    worker_errors.append((vip_name, "auth_required", str(e)))
+                except Exception as e:
+                    logger.exception(f"Falha ao coletar VIP {vip_name}")
+                    worker_errors.append((vip_name, "error", str(e)))
 
         # Calcular contadores de log-resumo
         elapsed = time.time() - start_time
@@ -1473,7 +1516,28 @@ class HttpCollector(BaseCollector):
             f"{total_meas} medições, {in_event_count} no evento, em {elapsed:.2f}s."
         )
                     
-        return measurements
+        coverage = {"vips_configured": total_vips, "vips_with_data": num_vips_with_data}
+        latest_data_at = max((m.get("timestamp") for m in measurements), default=None)
+        if worker_errors:
+            all_auth = all(kind == "auth_required" for _, kind, _ in worker_errors)
+            if not measurements and all_auth:
+                return CollectionResult.auth_required(
+                    "A sessão de Trace expirou durante a coleta de VIPs.", coverage=coverage)
+            if not measurements:
+                return CollectionResult.error(
+                    "Nenhum VIP pôde ser coletado; verifique o Trace/iManager.",
+                    stage="trace", code="request",
+                    coverage={**coverage, "vips_failed": len(worker_errors)},
+                )
+            return CollectionResult.partial(
+                measurements,
+                cause=f"{len(worker_errors)} VIP(s) não puderam ser processados.",
+                coverage={**coverage, "vips_failed": len(worker_errors)},
+                latest_data_at=latest_data_at,
+            )
+        if measurements:
+            return CollectionResult.data(measurements, coverage=coverage, latest_data_at=latest_data_at)
+        return CollectionResult.empty("Trace respondeu sem novas medições de VIP.", coverage=coverage)
 
     def _handle_trace_error(self, task_id, step: str, resp: requests.Response):
         """Loga e alerta para erros HTTP do fluxo FARS."""
@@ -1751,7 +1815,7 @@ class HttpCollector(BaseCollector):
         return rsrp, rsrq
 
     # ── Alarmes (iMaster FM website) ─────────────────────────────────
-    def collect_alarms(self) -> List[dict]:
+    def collect_alarms(self) -> CollectionResult:
         """Coleta alarmes correntes filtrados pelos tipos do evento (oss.alarm_filter).
 
         Reusa a sessão 'monitoring' (bspsession+roarand do session.json); em sessão
@@ -1762,13 +1826,14 @@ class HttpCollector(BaseCollector):
             catalog = _load_alarm_catalog()
         except Exception as e:
             logger.error(f"Falha ao carregar o catálogo de alarmes: {e}")
-            return []
+            return CollectionResult.error(f"Falha ao carregar o catálogo de alarmes: {e}",
+                                          stage="configuration", code="catalog")
         pairs, missing = _resolve_alarm_pairs(names, catalog)
         if missing:
             logger.warning(f"Tipos de alarme ignorados (ausentes no catálogo): {missing}")
         if not pairs:
             logger.warning("Filtro de alarmes vazio/inválido — coleta de alarmes ignorada.")
-            return []
+            return CollectionResult.empty("Nenhum tipo de alarme válido foi configurado.")
         condition = _build_alarm_condition(pairs)
 
         retries = 2
@@ -1777,26 +1842,32 @@ class HttpCollector(BaseCollector):
             try:
                 model_id = self._create_alarm_model(condition)
                 raw = self._collect_alarm_pages(model_id)
-                return self._flatten_alarms(raw)
+                measurements = self._flatten_alarms(raw)
+                if measurements:
+                    return CollectionResult.data(measurements,
+                                                 latest_data_at=max((m.get("arrive_time") for m in measurements), default=None))
+                return CollectionResult.empty("Nenhum alarme novo retornado pelo iManager.")
             except SessionExpiredError as e:
                 logger.warning(f"Erro de sessão no collect_alarms: {e}")
                 if renewed_this_call:
                     self._engage_backoff("monitoring")
                     logger.error("Sessão monitoring renovada mas ainda inválida — "
                                  "pausando coleta de alarmes (backoff).")
-                    return []
+                    return CollectionResult.auth_required(
+                        "A sessão de alarmes continuou inválida após a renovação.")
                 if attempt < retries - 1 and self._renew_session("monitoring"):
                     renewed_this_call = True
                     continue
-                return []
+                return CollectionResult.auth_required("Não foi possível renovar a sessão de alarmes.")
             except (requests.exceptions.ConnectTimeout, requests.exceptions.ConnectionError,
                     requests.exceptions.Timeout) as e:
                 logger.error(f"Erro de conexão ao coletar alarmes: {e}")
-                return []
-            except Exception as e:
-                logger.error(f"Erro ao coletar alarmes: {e}")
-                return []
-        return []
+                return CollectionResult.error(f"Falha de conexão ao coletar alarmes: {e}", code="network")
+            except requests.exceptions.HTTPError as e:
+                return CollectionResult.error(f"Falha HTTP ao coletar alarmes: {e}", code="http")
+            except (ValueError, TypeError, KeyError) as e:
+                return CollectionResult.error(f"Resposta inválida de alarmes: {e}", stage="parsing", code="contract")
+        return CollectionResult.error("Coleta de alarmes terminou sem resposta.", code="unknown")
 
     def _alarm_post(self, body: dict, cmd: int) -> dict:
         """POST no endpoint de comandos do FM website (sessão monitoring).
@@ -1908,7 +1979,7 @@ class MockCollector(BaseCollector):
 
     import random as _random
 
-    def collect_kpis(self) -> List[dict]:
+    def collect_kpis(self) -> CollectionResult:
         import random
         rows = []
         now = datetime.utcnow().strftime('%Y-%m-%dT%H:%M:%SZ')
@@ -1934,9 +2005,11 @@ class MockCollector(BaseCollector):
                         "metric":    metric,
                         "value":     round(value, 2),
                     })
-        return rows
+        if rows:
+            return CollectionResult.data(rows, latest_data_at=now)
+        return CollectionResult.empty("O evento não possui células para gerar dados de demonstração.")
 
-    def collect_vips(self, mode: str = "express") -> List[dict]:
+    def collect_vips(self, mode: str = "express") -> CollectionResult:
         import random
         rows = []
         now = datetime.utcnow().strftime('%Y-%m-%dT%H:%M:%SZ')
@@ -1962,9 +2035,12 @@ class MockCollector(BaseCollector):
                 "rsrq":        rsrq,
                 "in_event":    1 if in_event else 0,
             })
-        return rows
+        coverage = {"vips_configured": len(event_vips), "vips_with_data": len(rows)}
+        if rows:
+            return CollectionResult.data(rows, coverage=coverage, latest_data_at=now)
+        return CollectionResult.empty("Nenhum VIP configurado para demonstração.", coverage=coverage)
 
-    def collect_alarms(self) -> List[dict]:
+    def collect_alarms(self) -> CollectionResult:
         """Alarmes sintéticos (Cell Unavailable / VSWR) para dev em --mock/navegador."""
         from datetime import timedelta
         now = datetime.utcnow()
@@ -1994,21 +2070,21 @@ class MockCollector(BaseCollector):
                 "additional_info": "mock",
                 "collected_at":    collected_at,
             })
-        return rows
+        return CollectionResult.data(rows, latest_data_at=collected_at)
 
 
 # ── NullCollector (produção sem fonte configurada) ───────────────────
 
 class NullCollector(BaseCollector):
-    """Retorna listas vazias para evitar geração de dados mockados em produção."""
-    def collect_kpis(self) -> List[dict]:
-        return []
+    """Reporta ausência de fonte sem fingir uma coleta saudável com dados."""
+    def collect_kpis(self) -> CollectionResult:
+        return CollectionResult.empty("Nenhuma fonte de KPI foi configurada.")
 
-    def collect_vips(self, mode: str = "express") -> List[dict]:
-        return []
+    def collect_vips(self, mode: str = "express") -> CollectionResult:
+        return CollectionResult.empty("Nenhuma fonte de VIP foi configurada.")
 
-    def collect_alarms(self) -> List[dict]:
-        return []
+    def collect_alarms(self) -> CollectionResult:
+        return CollectionResult.empty("Nenhuma fonte de alarmes foi configurada.")
 
 
 # ── Factory ──────────────────────────────────────────────────────────

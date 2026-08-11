@@ -911,8 +911,9 @@ function _renderSyncIndicator(st) {
   if (!el) return;
   el.classList.remove("hidden");
 
-  const running = st.kpi.state === "running" || st.vip.state === "running";
-  const needsAuth = !!(st.session && st.session.needs_interactive);
+  const overall = st.overall_state || "idle";
+  const running = overall === "running" || st.kpi.state === "running" || st.vip.state === "running";
+  const needsAuth = overall === "auth_required" || !!(st.session && st.session.needs_interactive);
   const label = document.getElementById("sync-label");
 
   el.classList.toggle("syncing", running && !needsAuth);
@@ -929,8 +930,15 @@ function _renderSyncIndicator(st) {
     return;
   }
 
-  const k = _parseUtc(st.kpi.last_success);
-  const v = _parseUtc(st.vip.last_success);
+  const stateLabel = _stateInfo(overall).label;
+  if (["error", "partial", "stale"].includes(overall)) {
+    label.textContent = stateLabel;
+    el.title = "Coleta requer atenção — clique para detalhes";
+    return;
+  }
+
+  const k = _parseUtc(st.kpi.last_data_at || st.kpi.last_success);
+  const v = _parseUtc(st.vip.last_data_at || st.vip.last_success);
   if (v && (!k || v >= k)) label.textContent = `VIP ${_agoLabel(v)}`;
   else if (k) label.textContent = `KPI ${_agoLabel(k)}`;
   else label.textContent = "—";
@@ -940,8 +948,13 @@ function _renderSyncIndicator(st) {
 function _stateInfo(state) {
   switch (state) {
     case "running": return { cls: "st-running", label: "Coletando…" };
-    case "ok":      return { cls: "st-ok",      label: "OK" };
+    case "data":
+    case "ok":      return { cls: "st-data",    label: "Com dados" };
+    case "empty":   return { cls: "st-empty",   label: "Sem novidade" };
+    case "partial": return { cls: "st-partial", label: "Parcial" };
     case "error":   return { cls: "st-error",   label: "Erro" };
+    case "auth_required": return { cls: "st-auth", label: "Reautenticação necessária" };
+    case "stale":   return { cls: "st-stale",   label: "Desatualizado" };
     default:        return { cls: "st-idle",    label: "Aguardando" };
   }
 }
@@ -951,7 +964,7 @@ function _syncRow(label, valueHtml) {
 }
 
 function _nextCycleText(s) {
-  const last = _parseUtc(s.last_success);
+  const last = _parseUtc(s.last_attempt_at || s.last_cycle_ok_at || s.last_success);
   if (!last || !s.interval_s) return "—";
   const rem = Math.round((last.getTime() + s.interval_s * 1000 - Date.now()) / 1000);
   return rem <= 0 ? "agora" : `em ~${rem}s`;
@@ -959,7 +972,7 @@ function _nextCycleText(s) {
 
 function _syncSection(title, s, isVip) {
   const info = _stateInfo(s.state);
-  const last = _parseUtc(s.last_success);
+  const last = _parseUtc(s.last_cycle_ok_at || s.last_success);
   let rows = _syncRow("Status",
     `<span class="sync-dot ${info.cls}"></span>${info.label}${last ? " · " + _agoLabel(last) : ""}`);
   if (isVip) {
@@ -967,22 +980,37 @@ function _syncSection(title, s, isVip) {
     rows += _syncRow("Modo", modeLabel);
     rows += _syncRow("VIPs com dados", `${s.vips_with_data}/${s.vips_total}`);
   }
-  const meas = `${s.last_count}${s.duration_s != null ? " · " + s.duration_s + "s" : ""}`;
-  rows += _syncRow("Medições", meas);
+  const meas = `${s.inserted ?? s.last_count ?? 0} inseridas · ${s.invalid ?? 0} inválidas`;
+  rows += _syncRow("Medições", meas + (s.duration_s != null ? " · " + s.duration_s + "s" : ""));
+  rows += _syncRow("Última tentativa", _formatStatusTime(s.last_attempt_at));
+  rows += _syncRow("Último ciclo válido", _formatStatusTime(s.last_cycle_ok_at || s.last_success));
+  rows += _syncRow("Último dado", _formatStatusTime(s.last_data_at));
+  if (s.coverage && Object.keys(s.coverage).length) {
+    const coverage = Object.entries(s.coverage).map(([key, value]) => `${_esc(key.replaceAll("_", " "))}: ${_esc(value)}`).join(" · ");
+    rows += _syncRow("Cobertura", coverage);
+  }
   rows += _syncRow("Próximo ciclo", _nextCycleText(s));
-  if (s.error) rows += _syncRow("Erro", `<span class="sync-err">${_esc(s.error)}</span>`);
+  if (s.error || (["partial", "error", "auth_required"].includes(s.state) && s.cause)) {
+    rows += _syncRow("Diagnóstico", `<span class="sync-err">${_esc(s.error || s.cause)}</span>`);
+  }
   return `<div class="sync-section"><div class="sync-section-title">${title}</div>${rows}</div>`;
+}
+
+function _formatStatusTime(iso) {
+  const date = _parseUtc(iso);
+  return date ? `${date.toLocaleString()} (${_agoLabel(date)})` : "—";
 }
 
 function _syncSessionSection(sess) {
   if (!sess) return "";
   const region = sess.region ? _esc(sess.region) : "—";
   const needsAuth = !!sess.needs_interactive;
-  const stateVal = needsAuth
-    ? `<span class="sync-dot st-error"></span>Reautenticação necessária`
-    : `<span class="sync-dot st-ok"></span>OK`;
+  const monitoring = _stateInfo(sess.monitoring?.state || (needsAuth ? "auth_required" : "idle"));
+  const trace = _stateInfo(sess.trace?.state || (needsAuth ? "auth_required" : "idle"));
   let html = `<div class="sync-section"><div class="sync-section-title">Sessão</div>` +
-    _syncRow("Região", region) + _syncRow("Estado", stateVal);
+    _syncRow("Região", region) +
+    _syncRow("Monitoring/Alarmes", `<span class="sync-dot ${monitoring.cls}"></span>${monitoring.label}`) +
+    _syncRow("Trace", `<span class="sync-dot ${trace.cls}"></span>${trace.label}`);
   if (needsAuth) {
     html += `<div class="sync-reauth-wrap"><button class="btn btn-primary sync-reauth">Reconectar sessão</button></div>`;
   }

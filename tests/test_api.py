@@ -112,12 +112,23 @@ class TestApiSettings:
 
 class TestApiCollectionStatus:
     def test_get_collection_status_structure(self, api):
-        # get_collection_status retorna {"ok", "recording", "kpi", "vip", "session", "now"}
         status = api.get_collection_status()
         assert status.get("ok") is True
         assert "recording" in status
         assert "kpi" in status
         assert "vip" in status
+        assert "overall_state" in status
+
+    def test_collection_status_ok_is_local_envelope_not_health(self, api, monkeypatch):
+        from core import scheduler as sched_module
+        monkeypatch.setattr(sched_module.scheduler, "get_status", lambda: {
+            "kpi": {"state": "error", "error": "HTTP 500"},
+            "vip": {"state": "data"},
+            "alarms": {"state": "empty"},
+        })
+        status = api.get_collection_status()
+        assert status["ok"] is True
+        assert status["overall_state"] == "error"
 
     def test_collection_status_not_recording_by_default(self, api):
         status = api.get_collection_status()

@@ -1038,25 +1038,52 @@ class Api:
         }
 
     def get_collection_status(self) -> dict:
-        """Estado das coletas (KPI/VIP) + sessão, para o indicador de sincronização do header."""
+        """Contrato operacional da coleta; ``ok`` só descreve esta chamada local."""
         try:
             status = scheduler.get_status()
             coll = scheduler._collector
             region = getattr(coll, "_region", "") or ""
             needs_interactive = False
+            interactive_modules = set()
             try:
                 from core.collector import HttpCollector
                 if isinstance(coll, HttpCollector):
-                    needs_interactive = bool(HttpCollector._needs_interactive)
+                    interactive_modules = set(HttpCollector._needs_interactive)
+                    needs_interactive = bool(interactive_modules)
             except Exception:
                 pass
+            kpi = status.get("kpi", {"state": "idle"})
+            vip = status.get("vip", {"state": "idle"})
+            alarms = status.get("alarms", {"state": "idle"})
+
+            def module_state(names, fallback):
+                if any(name in interactive_modules for name in names):
+                    return "auth_required"
+                states = [item.get("state", "idle") for item in fallback]
+                for state in ("auth_required", "error", "stale", "partial", "running", "data", "empty"):
+                    if state in states:
+                        return state
+                return "idle"
+
+            monitoring_state = module_state(("monitoring",), (kpi, alarms))
+            trace_state = module_state(("trace",), (vip,))
+            states = [kpi.get("state"), vip.get("state"), alarms.get("state"), monitoring_state, trace_state]
+            overall_state = next((candidate for candidate in
+                                  ("auth_required", "error", "stale", "partial", "running", "data", "empty")
+                                  if candidate in states), "idle")
             return {
                 "ok":         True,
                 "recording":  scheduler.is_recording,
-                "kpi":        status["kpi"],
-                "vip":        status["vip"],
-                "alarms":     status.get("alarms"),
-                "session":    {"needs_interactive": needs_interactive, "region": region},
+                "overall_state": overall_state,
+                "kpi":        kpi,
+                "vip":        vip,
+                "alarms":     alarms,
+                "session":    {
+                    "needs_interactive": needs_interactive,
+                    "region": region,
+                    "monitoring": {"state": monitoring_state},
+                    "trace": {"state": trace_state},
+                },
                 "now":        datetime.utcnow().isoformat(),
             }
         except Exception as e:

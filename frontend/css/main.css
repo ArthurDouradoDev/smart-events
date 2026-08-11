@@ -325,7 +325,11 @@ input[type="range"] {
   gap: 5px;
 }
 .sync-dot { width: 7px; height: 7px; border-radius: 50%; display: inline-block; flex-shrink: 0; }
-.sync-dot.st-ok { background: var(--success); }
+.sync-dot.st-ok, .sync-dot.st-data { background: var(--success); }
+.sync-dot.st-empty { background: var(--text-secondary); }
+.sync-dot.st-partial { background: var(--warning); }
+.sync-dot.st-auth { background: var(--warning); animation: pulse-rec 1.4s ease infinite; }
+.sync-dot.st-stale { background: #a879e6; }
 .sync-dot.st-error { background: var(--danger); }
 .sync-dot.st-running { background: var(--accent); animation: pulse-rec 1.2s ease infinite; }
 .sync-dot.st-idle { background: var(--text-muted); }

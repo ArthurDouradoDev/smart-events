@@ -16,6 +16,7 @@ import os
 import sys
 import time
 import logging
+import tempfile
 from urllib.parse import urlparse, parse_qs
 from pathlib import Path
 
@@ -170,14 +171,26 @@ def run(headless: bool = True, module: str = "both",
     except Exception:
         pass
 
+    # Metadados de task/objeto são uma observação da SPA, não uma configuração.
+    # Ao renovar um módulo, nunca os reapresentamos como se tivessem sido
+    # recapturados: a nova execução precisa observá-los novamente no Network.
     session_data = {
-        "trace": existing.get("trace", {
-            "bspsession": None, "roarand": None, "task_id": None, "cookies": []
-        }),
-        "monitoring": existing.get("monitoring", {
-            "bspsession": None, "roarand": None, "task_id": None, "obj_nos": [], "cookies": []
-        }),
+        "trace": dict(existing.get("trace") or {}),
+        "monitoring": dict(existing.get("monitoring") or {}),
     }
+    for section in ("trace", "monitoring"):
+        session_data[section].setdefault("bspsession", None)
+        session_data[section].setdefault("roarand", None)
+        session_data[section].setdefault("task_id", None)
+        session_data[section].setdefault("cookies", [])
+    session_data["monitoring"].setdefault("obj_nos", [])
+    reset_sections = ("trace", "monitoring") if module == "both" else (module,)
+    for section in reset_sections:
+        session_data[section]["task_id"] = None
+        session_data[section]["roarand"] = None
+        session_data[section]["cookies"] = []
+        if section == "monitoring":
+            session_data[section]["obj_nos"] = []
 
     def monitor_requests(request: "Request"):
         url = request.url
@@ -467,7 +480,19 @@ def run(headless: bool = True, module: str = "both",
                 pass
             return EXIT_NEEDS_INTERACTIVE
 
-        session_path.write_text(json.dumps(session_data, indent=4), encoding="utf-8")
+        # Só publica uma sessão depois de cookies, token CSRF e sonda REST terem
+        # sido confirmados. ``replace`` é atômico no mesmo volume, evitando que
+        # outro worker leia JSON parcial durante a renovação.
+        fd, temp_name = tempfile.mkstemp(prefix="session-", suffix=".tmp", dir=session_path.parent)
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as temp_file:
+                json.dump(session_data, temp_file, indent=4)
+                temp_file.flush()
+                os.fsync(temp_file.fileno())
+            os.replace(temp_name, session_path)
+        finally:
+            if os.path.exists(temp_name):
+                os.unlink(temp_name)
         logger.info(f"Sessão renovada e autenticada com sucesso em {session_path}")
         if not headless:
             print(f"[SUCESSO] Sessão salva em: {session_path.absolute()}")

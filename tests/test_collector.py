@@ -15,6 +15,7 @@ from core.collector import (
     NullCollector,
     build_collector,
 )
+from core.collection_result import CollectionResult
 
 
 @pytest.fixture
@@ -102,10 +103,11 @@ class TestMockCollector:
     def test_collect_kpis_returns_list_of_dicts(self, event_in_db, sample_event, monkeypatch):
         monkeypatch.setattr(db, "get_event_vips", lambda *a, **k: [])
         c = MockCollector(sample_event)
-        kpis = c.collect_kpis()
-        assert len(kpis) > 0
-        # Collectors retornam dicts, não dataclasses
-        first = kpis[0]
+        result = c.collect_kpis()
+        assert isinstance(result, CollectionResult)
+        assert result.state == "data"
+        assert len(result.measurements) > 0
+        first = result.measurements[0]
         assert isinstance(first, dict)
         assert "event_id" in first
         assert "metric" in first
@@ -115,8 +117,8 @@ class TestMockCollector:
     def test_collect_kpis_covers_expected_metrics(self, event_in_db, sample_event, monkeypatch):
         monkeypatch.setattr(db, "get_event_vips", lambda *a, **k: [])
         c = MockCollector(sample_event)
-        kpis = c.collect_kpis()
-        metrics = {k["metric"] for k in kpis}
+        result = c.collect_kpis()
+        metrics = {k["metric"] for k in result.measurements}
         # Nomes reais do MockCollector — mapeados conforme KPI_COLUMN_MAP
         expected = {"utilization_dl", "traffic_volume_dl", "traffic_volume_ul", "accessibility"}
         assert expected.issubset(metrics)
@@ -124,15 +126,14 @@ class TestMockCollector:
     def test_collect_vips_empty_when_no_vips(self, event_in_db, sample_event, monkeypatch):
         monkeypatch.setattr(db, "get_event_vips", lambda *a, **k: [])
         c = MockCollector(sample_event)
-        vips = c.collect_vips()
-        assert isinstance(vips, list)
+        assert c.collect_vips().state == "empty"
 
     def test_collect_vips_with_vips(self, event_in_db, sample_event, monkeypatch):
         fake_vips = [{"id": "vip-teste", "name": "Teste VIP", "task_id": "T001"}]
         monkeypatch.setattr(db, "get_event_vips", lambda *a, **k: fake_vips)
         c = MockCollector(sample_event)
-        vips = c.collect_vips()
-        assert isinstance(vips, list)
+        result = c.collect_vips()
+        assert isinstance(result, CollectionResult)
 
 
 # ── NullCollector ─────────────────────────────────────────────────────
@@ -141,12 +142,12 @@ class TestNullCollector:
     def test_collect_kpis_empty(self, sample_event, monkeypatch):
         monkeypatch.setattr(db, "get_event_vips", lambda *a, **k: [])
         c = NullCollector(sample_event)
-        assert c.collect_kpis() == []
+        assert c.collect_kpis().state == "empty"
 
     def test_collect_vips_empty(self, sample_event, monkeypatch):
         monkeypatch.setattr(db, "get_event_vips", lambda *a, **k: [])
         c = NullCollector(sample_event)
-        assert c.collect_vips() == []
+        assert c.collect_vips().state == "empty"
 
 
 # ── CsvCollector ──────────────────────────────────────────────────────
@@ -156,7 +157,9 @@ class TestCsvCollector:
         monkeypatch.setattr(db, "get_event_vips", lambda *a, **k: [])
         # CsvCollector(event_config, import_folder) — dois argumentos posicionais
         c = CsvCollector(sample_event, str(csv_kpi_dir))
-        kpis = c.collect_kpis()
+        result = c.collect_kpis()
+        kpis = result.measurements
+        assert result.state == "data"
         assert len(kpis) > 0
         metrics = {k["metric"] for k in kpis}
         # "DL PRB USAGE" → "utilization_dl" conforme KPI_COLUMN_MAP
@@ -165,14 +168,14 @@ class TestCsvCollector:
     def test_collect_vips_returns_empty(self, event_in_db, sample_event, csv_kpi_dir, monkeypatch):
         monkeypatch.setattr(db, "get_event_vips", lambda *a, **k: [])
         c = CsvCollector(sample_event, str(csv_kpi_dir))
-        assert c.collect_vips() == []
+        assert c.collect_vips().state == "empty"
 
     def test_csv_empty_dir(self, event_in_db, sample_event, tmp_path, monkeypatch):
         monkeypatch.setattr(db, "get_event_vips", lambda *a, **k: [])
         empty = tmp_path / "empty_imports"
         empty.mkdir()
         c = CsvCollector(sample_event, str(empty))
-        assert c.collect_kpis() == []
+        assert c.collect_kpis().state == "empty"
 
 
 # ── build_collector factory ────────────────────────────────────────────
