@@ -1,0 +1,3862 @@
+[
+ {
+  "serialNo": 64454,
+  "messageBody": "02 08 26 37 7C 42 00 19 28 A9 7D 24 D0 00",
+  "time": "2026-08-11 12:28:33 (849)",
+  "expected": {
+   "meas_id": 13,
+   "rsrp": -85.0,
+   "rsrq": -4.0
+  }
+ },
+ {
+  "serialNo": 64457,
+  "messageBody": "02 08 33 B2 84 06 F5 26 10 80 06 4A 2A 5F 49 34 00",
+  "time": "2026-08-11 12:28:34 (416)",
+  "expected": {
+   "meas_id": 8,
+   "rsrp": -90.0,
+   "rsrq": -3.0
+  }
+ },
+ {
+  "serialNo": 64476,
+  "messageBody": "02 08 35 2F 88 02 E1 2B 10 80 06 4A 29 5B 49 23 A0",
+  "time": "2026-08-11 12:28:36 (224)",
+  "expected": {
+   "meas_id": 11,
+   "rsrp": -93.0,
+   "rsrq": -2.5
+  }
+ },
+ {
+  "serialNo": 64477,
+  "messageBody": "02 08 35 AF 88 02 E1 26 10 80 06 4A 29 5B 49 23 A0",
+  "time": "2026-08-11 12:28:36 (224)",
+  "expected": {
+   "meas_id": 12,
+   "rsrp": -93.0,
+   "rsrq": -2.5
+  }
+ },
+ {
+  "serialNo": 64478,
+  "messageBody": "02 08 36 AF 88 02 E1 A6 64 42 00 19 28 A5 6D 24 8E 80",
+  "time": "2026-08-11 12:28:36 (224)",
+  "expected": {
+   "meas_id": 14,
+   "rsrp": -93.0,
+   "rsrq": -2.5
+  }
+ },
+ {
+  "serialNo": 64523,
+  "messageBody": "02 08 36 32 88 06 F5 A4 78 42 00 19 28 A8 79 25 0F 00",
+  "time": "2026-08-11 12:28:38 (981)",
+  "expected": {
+   "meas_id": 13,
+   "rsrp": -90.0,
+   "rsrq": -2.5
+  }
+ },
+ {
+  "serialNo": 64572,
+  "messageBody": "02 08 24 31 74 42 00 19 28 B0 71 25 AF 00",
+  "time": "2026-08-11 12:28:46 (329)",
+  "expected": {
+   "meas_id": 9,
+   "rsrp": -91.0,
+   "rsrq": -5.0
+  }
+ },
+ {
+  "serialNo": 64575,
+  "messageBody": "02 08 33 AF 80 06 F5 2B 10 80 06 4A 2C 9E 49 7C 00",
+  "time": "2026-08-11 12:28:46 (698)",
+  "expected": {
+   "meas_id": 8,
+   "rsrp": -93.0,
+   "rsrq": -3.5
+  }
+ },
+ {
+  "serialNo": 64578,
+  "messageBody": "02 08 33 AF 80 16 F5 2B 71 52 11 08 00 64 A2 CD E4 98 40 00",
+  "time": "2026-08-11 12:28:46 (778)",
+  "expected": {
+   "meas_id": 8,
+   "rsrp": -93.0,
+   "rsrq": -3.5
+  }
+ },
+ {
+  "serialNo": 64579,
+  "messageBody": "02 08 36 AF 84 02 E1 AD 80 42 00 19 28 B4 7D 26 10 00",
+  "time": "2026-08-11 12:28:47 (98)",
+  "expected": {
+   "meas_id": 14,
+   "rsrp": -93.0,
+   "rsrq": -3.0
+  }
+ },
+ {
+  "serialNo": 64584,
+  "messageBody": "02 08 31 2F 84 06 F5 A9 80 42 00 2D 2C B4 7D 70 95 D6 98 40 B8 5B 00",
+  "time": "2026-08-11 12:28:47 (179)",
+  "expected": {
+   "meas_id": 3,
+   "rsrp": -93.0,
+   "rsrq": -3.0
+  }
+ },
+ {
+  "serialNo": 64587,
+  "messageBody": "02 08 36 B0 84 12 E1 AB 79 C5 68 8F 10 80 06 4A 2C DF 49 73 E0",
+  "time": "2026-08-11 12:28:47 (501)",
+  "expected": {
+   "meas_id": 14,
+   "rsrp": -92.0,
+   "rsrq": -3.0
+  }
+ },
+ {
+  "serialNo": 64602,
+  "messageBody": "02 08 36 AD 88 12 E1 AB 78 8B 68 C9 10 80 06 4A 2B A0 49 74 00",
+  "time": "2026-08-11 12:28:48 (507)",
+  "expected": {
+   "meas_id": 14,
+   "rsrp": -95.0,
+   "rsrq": -2.5
+  }
+ },
+ {
+  "serialNo": 64647,
+  "messageBody": "02 08 34 31 7C 06 F5 A5 70 42 00 19 28 AF 79 25 6F 80",
+  "time": "2026-08-11 12:28:51 (459)",
+  "expected": {
+   "meas_id": 9,
+   "rsrp": -91.0,
+   "rsrq": -4.0
+  }
+ },
+ {
+  "serialNo": 64648,
+  "messageBody": "02 08 21 31 7C 42 00 2D 2C AF 79 70 A5 B6 94 BE B8 52 D8",
+  "time": "2026-08-11 12:28:51 (995)",
+  "expected": {
+   "meas_id": 3,
+   "rsrp": -91.0,
+   "rsrq": -4.0
+  }
+ },
+ {
+  "serialNo": 64665,
+  "messageBody": "02 08 31 2D 80 06 F5 A7 78 42 00 2D 2C AD 79 70 A5 D6 95 3E B8 52 E8",
+  "time": "2026-08-11 12:28:53 (196)",
+  "expected": {
+   "meas_id": 3,
+   "rsrp": -95.0,
+   "rsrq": -3.5
+  }
+ },
+ {
+  "serialNo": 64688,
+  "messageBody": "02 08 36 2D 7C 02 E1 2B 10 80 06 4A 2B 1D 49 33 A0",
+  "time": "2026-08-11 12:28:55 (117)",
+  "expected": {
+   "meas_id": 13,
+   "rsrp": -95.0,
+   "rsrq": -4.0
+  }
+ },
+ {
+  "serialNo": 64715,
+  "messageBody": "02 08 34 2E 78 06 F5 A9 68 42 00 19 28 AA 69 24 C7 00",
+  "time": "2026-08-11 12:28:56 (579)",
+  "expected": {
+   "meas_id": 9,
+   "rsrp": -94.0,
+   "rsrq": -4.5
+  }
+ },
+ {
+  "serialNo": 64730,
+  "messageBody": "02 08 35 AA 88 02 E1 2A 10 80 06 4A 29 E0 49 13 A0",
+  "time": "2026-08-11 12:28:57 (704)",
+  "expected": {
+   "meas_id": 12,
+   "rsrp": -98.0,
+   "rsrq": -2.5
+  }
+ },
+ {
+  "serialNo": 64737,
+  "messageBody": "02 08 32 A7 8A 00 14 20 42 27 00 08 42 00 19 28 A6 81 24 2E 00",
+  "time": "2026-08-11 12:28:58 (86)",
+  "expected": {
+   "meas_id": 6,
+   "rsrp": -101.0,
+   "rsrq": -2.5
+  }
+ },
+ {
+  "serialNo": 64740,
+  "messageBody": "02 08 21 A7 88 42 00 19 28 A6 81 24 2E 00",
+  "time": "2026-08-11 12:28:58 (138)",
+  "expected": {
+   "meas_id": 4,
+   "rsrp": -101.0,
+   "rsrq": -2.5
+  }
+ },
+ {
+  "serialNo": 64741,
+  "messageBody": "02 08 32 A7 8A 00 14 20 42 27 00 08 42 00 19 28 A6 81 24 2E 00",
+  "time": "2026-08-11 12:28:58 (139)",
+  "expected": {
+   "meas_id": 6,
+   "rsrp": -101.0,
+   "rsrq": -2.5
+  }
+ },
+ {
+  "serialNo": 64744,
+  "messageBody": "02 08 34 28 88 06 F5 A9 80 42 00 19 28 A7 81 24 6D 80",
+  "time": "2026-08-11 12:28:58 (156)",
+  "expected": {
+   "meas_id": 9,
+   "rsrp": -100.0,
+   "rsrq": -2.5
+  }
+ },
+ {
+  "serialNo": 64751,
+  "messageBody": "02 08 21 A7 70 42 00 19 28 A5 5D 24 A9 80",
+  "time": "2026-08-11 12:28:58 (794)",
+  "expected": {
+   "meas_id": 4,
+   "rsrp": -101.0,
+   "rsrq": -5.5
+  }
+ },
+ {
+  "serialNo": 64752,
+  "messageBody": "02 08 31 27 70 06 F5 AE 74 42 00 2D 2C A5 5D 70 B1 C6 92 A6 B8 58 D8",
+  "time": "2026-08-11 12:28:58 (795)",
+  "expected": {
+   "meas_id": 3,
+   "rsrp": -101.0,
+   "rsrq": -5.5
+  }
+ },
+ {
+  "serialNo": 64753,
+  "messageBody": "02 08 30 27 6C 06 F5 2F 10 80 0B 4B 29 57 5C 2C 71 A4 A9 2E 16 38",
+  "time": "2026-08-11 12:28:58 (874)",
+  "expected": {
+   "meas_id": 1,
+   "rsrp": -101.0,
+   "rsrq": -6.0
+  }
+ },
+ {
+  "serialNo": 64760,
+  "messageBody": "02 08 35 A6 6C 12 E1 2D 2E 52 91 08 00 64 A2 99 64 92 1E 00",
+  "time": "2026-08-11 12:28:59 (74)",
+  "expected": {
+   "meas_id": 12,
+   "rsrp": -102.0,
+   "rsrq": -6.0
+  }
+ },
+ {
+  "serialNo": 64761,
+  "messageBody": "02 08 30 26 6C 06 F5 2F 10 80 0B 4B 29 96 5C 2D 6D A4 87 AE 16 B6",
+  "time": "2026-08-11 12:28:59 (123)",
+  "expected": {
+   "meas_id": 1,
+   "rsrp": -102.0,
+   "rsrq": -6.0
+  }
+ },
+ {
+  "serialNo": 64766,
+  "messageBody": "02 08 30 25 60 06 F5 2D 10 80 0B 4B 29 55 5C 30 75 A4 67 2E 18 3A",
+  "time": "2026-08-11 12:28:59 (354)",
+  "expected": {
+   "meas_id": 1,
+   "rsrp": -103.0,
+   "rsrq": -7.5
+  }
+ },
+ {
+  "serialNo": 64775,
+  "messageBody": "02 08 30 28 6C 06 F5 2D 10 80 0B 4B 29 58 5C 30 79 A4 27 AE 18 3C",
+  "time": "2026-08-11 12:28:59 (606)",
+  "expected": {
+   "meas_id": 1,
+   "rsrp": -100.0,
+   "rsrq": -6.0
+  }
+ },
+ {
+  "serialNo": 64776,
+  "messageBody": "02 08 30 28 6C 06 F5 2C 10 80 0B 4B 28 D6 5C 31 7D A4 27 2E 18 BE",
+  "time": "2026-08-11 12:28:59 (841)",
+  "expected": {
+   "meas_id": 1,
+   "rsrp": -100.0,
+   "rsrq": -6.0
+  }
+ },
+ {
+  "serialNo": 64781,
+  "messageBody": "02 08 30 29 68 06 F5 2B 10 80 0B 4B 28 95 5C 32 7D A4 27 2E 19 3E",
+  "time": "2026-08-11 12:29:00 (81)",
+  "expected": {
+   "meas_id": 1,
+   "rsrp": -99.0,
+   "rsrq": -6.5
+  }
+ },
+ {
+  "serialNo": 64782,
+  "messageBody": "02 08 23 29 68 42 00 19 28 A2 55 24 27 00",
+  "time": "2026-08-11 12:29:00 (111)",
+  "expected": {
+   "meas_id": 7,
+   "rsrp": -99.0,
+   "rsrq": -6.5
+  }
+ },
+ {
+  "serialNo": 64791,
+  "messageBody": "02 08 30 28 64 06 F5 2E 10 80 0B 4B 29 15 5C 31 79 A4 27 2E 18 BC",
+  "time": "2026-08-11 12:29:00 (319)",
+  "expected": {
+   "meas_id": 1,
+   "rsrp": -100.0,
+   "rsrq": -7.0
+  }
+ },
+ {
+  "serialNo": 64819,
+  "messageBody": "02 08 2C AD 6C 42 00 19 29 B3 79 45 EF 00",
+  "time": "2026-08-11 12:29:00 (600)",
+  "expected": {
+   "meas_id": 26,
+   "rsrp": -95.0,
+   "rsrq": -6.0
+  }
+ },
+ {
+  "serialNo": 64824,
+  "messageBody": "02 08 3C 2F 74 05 7D 23 10 80 06 4A 6C E0 51 84 20",
+  "time": "2026-08-11 12:29:01 (165)",
+  "expected": {
+   "meas_id": 25,
+   "rsrp": -93.0,
+   "rsrq": -5.0
+  }
+ },
+ {
+  "serialNo": 64838,
+  "messageBody": "02 08 3C 31 84 05 7D 25 10 80 06 4A 6D 1F 51 94 00",
+  "time": "2026-08-11 12:29:01 (995)",
+  "expected": {
+   "meas_id": 25,
+   "rsrp": -91.0,
+   "rsrq": -3.0
+  }
+ },
+ {
+  "serialNo": 64867,
+  "messageBody": "02 08 3C 34 80 05 7D 27 10 80 06 4A 6E 21 51 BC 20",
+  "time": "2026-08-11 12:29:03 (985)",
+  "expected": {
+   "meas_id": 25,
+   "rsrp": -88.0,
+   "rsrq": -3.5
+  }
+ },
+ {
+  "serialNo": 64898,
+  "messageBody": "02 08 3C B9 74 05 7D AB 7C 42 00 19 29 B9 85 47 8F 80",
+  "time": "2026-08-11 12:29:05 (735)",
+  "expected": {
+   "meas_id": 26,
+   "rsrp": -83.0,
+   "rsrq": -5.0
+  }
+ },
+ {
+  "serialNo": 64962,
+  "messageBody": "02 08 3C BF 7C 05 7D A6 64 42 00 19 29 BF 85 47 2F 00",
+  "time": "2026-08-11 12:29:10 (850)",
+  "expected": {
+   "meas_id": 26,
+   "rsrp": -77.0,
+   "rsrq": -4.0
+  }
+ },
+ {
+  "serialNo": 64987,
+  "messageBody": "02 08 30 3D 86 00 14 2B 62 25 00 00 42 00 19 29 BC 85 47 30 80",
+  "time": "2026-08-11 12:29:12 (725)",
+  "expected": {
+   "meas_id": 1,
+   "rsrp": -79.0,
+   "rsrq": -3.0
+  }
+ },
+ {
+  "serialNo": 65009,
+  "messageBody": "02 08 1C BD 80 05 7D A9 74",
+  "time": "2026-08-11 12:29:12 (876)",
+  "expected": {
+   "meas_id": 26,
+   "rsrp": -79.0,
+   "rsrq": -3.5
+  }
+ },
+ {
+  "serialNo": 65043,
+  "messageBody": "02 08 31 40 7C 14 01 9A 44 CD 64 C7 10 04 0E 80 89 AC E0 56 C7 62 F9 B8 10 1D 8B D6 80",
+  "time": "2026-08-11 12:29:13 (770)",
+  "expected": {
+   "meas_id": 3,
+   "rsrp": -76.0,
+   "rsrq": -4.0
+  }
+ },
+ {
+  "serialNo": 65044,
+  "messageBody": "02 08 00 BE 7C",
+  "time": "2026-08-11 12:29:13 (905)",
+  "expected": {
+   "meas_id": 2,
+   "rsrp": -78.0,
+   "rsrq": -4.0
+  }
+ },
+ {
+  "serialNo": 65051,
+  "messageBody": "02 08 31 BC 7A 00 14 2B 62 33 00 00 40 10 3A 02 26 B3 81 5B 1D 9B F7 60 40 76 6F DD 80",
+  "time": "2026-08-11 12:29:14 (245)",
+  "expected": {
+   "meas_id": 4,
+   "rsrp": -80.0,
+   "rsrq": -4.5
+  }
+ },
+ {
+  "serialNo": 65548,
+  "messageBody": "02 08 28 C5 7C 42 00 0D 08 C6 80",
+  "time": "2026-08-11 12:30:05 (433)",
+  "expected": {
+   "meas_id": 18,
+   "rsrp": -71.0,
+   "rsrq": -4.0
+  }
+ },
+ {
+  "serialNo": 65551,
+  "messageBody": "02 08 35 45 7C 10 D1 9A 20 C5 66 05 10 80 03 42 31 A0",
+  "time": "2026-08-11 12:30:05 (522)",
+  "expected": {
+   "meas_id": 11,
+   "rsrp": -71.0,
+   "rsrq": -4.0
+  }
+ },
+ {
+  "serialNo": 65557,
+  "messageBody": "02 08 24 3E 7C 42 00 0D 08 C6 80",
+  "time": "2026-08-11 12:30:06 (470)",
+  "expected": {
+   "meas_id": 9,
+   "rsrp": -78.0,
+   "rsrq": -4.0
+  }
+ },
+ {
+  "serialNo": 65558,
+  "messageBody": "02 08 35 40 84 00 D1 93 0C 42 00 0D 08 BD 84",
+  "time": "2026-08-11 12:30:07 (50)",
+  "expected": {
+   "meas_id": 11,
+   "rsrp": -76.0,
+   "rsrq": -3.0
+  }
+ },
+ {
+  "serialNo": 65571,
+  "messageBody": "02 08 34 BE 7C 00 D1 89 10 42 00 0D 08 BD 84",
+  "time": "2026-08-11 12:30:07 (610)",
+  "expected": {
+   "meas_id": 10,
+   "rsrp": -78.0,
+   "rsrq": -4.0
+  }
+ },
+ {
+  "serialNo": 65616,
+  "messageBody": "02 08 28 BB 78 42 00 0D 08 B9 84",
+  "time": "2026-08-11 12:30:10 (570)",
+  "expected": {
+   "meas_id": 18,
+   "rsrp": -81.0,
+   "rsrq": -4.5
+  }
+ },
+ {
+  "serialNo": 65677,
+  "messageBody": "02 08 28 B4 84 42 00 0D 08 AE 84",
+  "time": "2026-08-11 12:30:15 (680)",
+  "expected": {
+   "meas_id": 18,
+   "rsrp": -88.0,
+   "rsrq": -3.0
+  }
+ },
+ {
+  "serialNo": 65744,
+  "messageBody": "02 08 32 B3 82 00 14 20 42 33 00 00 42 00 0D 08 AF 7C",
+  "time": "2026-08-11 12:30:20 (765)",
+  "expected": {
+   "meas_id": 6,
+   "rsrp": -89.0,
+   "rsrq": -3.5
+  }
+ },
+ {
+  "serialNo": 65747,
+  "messageBody": "02 08 28 B3 80 42 00 0D 08 AF 7C",
+  "time": "2026-08-11 12:30:20 (805)",
+  "expected": {
+   "meas_id": 18,
+   "rsrp": -89.0,
+   "rsrq": -3.5
+  }
+ },
+ {
+  "serialNo": 65758,
+  "messageBody": "02 08 32 B4 7E 00 14 20 42 33 00 00 42 00 0D 08 AD 7C",
+  "time": "2026-08-11 12:30:21 (410)",
+  "expected": {
+   "meas_id": 6,
+   "rsrp": -88.0,
+   "rsrq": -4.0
+  }
+ },
+ {
+  "serialNo": 65761,
+  "messageBody": "02 08 31 31 78 02 E5 B2 50 42 00 0D 08 AD 7C",
+  "time": "2026-08-11 12:30:21 (655)",
+  "expected": {
+   "meas_id": 3,
+   "rsrp": -91.0,
+   "rsrq": -4.5
+  }
+ },
+ {
+  "serialNo": 65776,
+  "messageBody": "02 08 23 2C 5C 42 00 0D 08 A5 74",
+  "time": "2026-08-11 12:30:22 (800)",
+  "expected": {
+   "meas_id": 7,
+   "rsrp": -96.0,
+   "rsrq": -8.0
+  }
+ },
+ {
+  "serialNo": 65791,
+  "messageBody": "02 08 21 2F 7C 42 00 0D 08 A6 68",
+  "time": "2026-08-11 12:30:23 (595)",
+  "expected": {
+   "meas_id": 3,
+   "rsrp": -93.0,
+   "rsrq": -4.0
+  }
+ },
+ {
+  "serialNo": 97227,
+  "messageBody": "02 08 28 2C 80 42 00 0D 08 A7 84",
+  "time": "2026-08-11 13:29:06 (643)",
+  "expected": {
+   "meas_id": 17,
+   "rsrp": -96.0,
+   "rsrq": -3.5
+  }
+ },
+ {
+  "serialNo": 97228,
+  "messageBody": "02 08 35 2C 80 07 15 A8 80 42 00 0D 08 A7 84",
+  "time": "2026-08-11 13:29:06 (812)",
+  "expected": {
+   "meas_id": 11,
+   "rsrp": -96.0,
+   "rsrq": -3.5
+  }
+ },
+ {
+  "serialNo": 97237,
+  "messageBody": "02 08 24 A9 7C 42 00 0D 08 A9 84",
+  "time": "2026-08-11 13:29:07 (657)",
+  "expected": {
+   "meas_id": 10,
+   "rsrp": -99.0,
+   "rsrq": -4.0
+  }
+ },
+ {
+  "serialNo": 97286,
+  "messageBody": "02 08 28 29 80 42 00 19 28 AD 89 25 70 00",
+  "time": "2026-08-11 13:29:11 (783)",
+  "expected": {
+   "meas_id": 17,
+   "rsrp": -99.0,
+   "rsrq": -3.5
+  }
+ },
+ {
+  "serialNo": 97349,
+  "messageBody": "02 08 28 2D 84 42 00 19 28 A7 85 25 10 80",
+  "time": "2026-08-11 13:29:16 (882)",
+  "expected": {
+   "meas_id": 17,
+   "rsrp": -95.0,
+   "rsrq": -3.0
+  }
+ },
+ {
+  "serialNo": 97372,
+  "messageBody": "02 08 33 2C 86 00 14 2B 62 2C 00 08 42 00 19 28 A9 85 25 D0 80",
+  "time": "2026-08-11 13:29:18 (692)",
+  "expected": {
+   "meas_id": 7,
+   "rsrp": -96.0,
+   "rsrq": -3.0
+  }
+ },
+ {
+  "serialNo": 97394,
+  "messageBody": "02 08 08 2D 84",
+  "time": "2026-08-11 13:29:18 (885)",
+  "expected": {
+   "meas_id": 17,
+   "rsrp": -95.0,
+   "rsrq": -3.0
+  }
+ },
+ {
+  "serialNo": 97411,
+  "messageBody": "02 08 03 B3 80",
+  "time": "2026-08-11 13:29:19 (917)",
+  "expected": {
+   "meas_id": 8,
+   "rsrp": -89.0,
+   "rsrq": -3.5
+  }
+ },
+ {
+  "serialNo": 97432,
+  "messageBody": "02 08 34 B2 86 00 14 2B 62 2E 00 08 40 10 3A 02 26 B3 81 5B 1D 7C 08 40 41 75 D0 21 00",
+  "time": "2026-08-11 13:29:21 (840)",
+  "expected": {
+   "meas_id": 10,
+   "rsrp": -90.0,
+   "rsrq": -3.0
+  }
+ },
+ {
+  "serialNo": 97480,
+  "messageBody": "02 08 28 2B 7C 42 00 0D 08 A6 7C",
+  "time": "2026-08-11 13:29:29 (685)",
+  "expected": {
+   "meas_id": 17,
+   "rsrp": -97.0,
+   "rsrq": -4.0
+  }
+ },
+ {
+  "serialNo": 97481,
+  "messageBody": "02 08 35 2B 80 07 15 AB 84 42 00 0D 08 A6 7C",
+  "time": "2026-08-11 13:29:29 (869)",
+  "expected": {
+   "meas_id": 11,
+   "rsrp": -97.0,
+   "rsrq": -3.5
+  }
+ },
+ {
+  "serialNo": 97488,
+  "messageBody": "02 08 24 AD 80 42 00 0D 08 A6 7C",
+  "time": "2026-08-11 13:29:30 (719)",
+  "expected": {
+   "meas_id": 10,
+   "rsrp": -95.0,
+   "rsrq": -3.5
+  }
+ },
+ {
+  "serialNo": 97539,
+  "messageBody": "02 08 28 32 84 42 00 19 28 A7 85 25 F0 80",
+  "time": "2026-08-11 13:29:34 (809)",
+  "expected": {
+   "meas_id": 17,
+   "rsrp": -90.0,
+   "rsrq": -3.0
+  }
+ },
+ {
+  "serialNo": 98339,
+  "messageBody": "02 08 06 26 78",
+  "time": "2026-08-11 13:31:01 (826)",
+  "expected": {
+   "meas_id": 13,
+   "rsrp": -102.0,
+   "rsrq": -4.5
+  }
+ },
+ {
+  "serialNo": 98340,
+  "messageBody": "02 08 13 A5 7C 05 7D 23",
+  "time": "2026-08-11 13:31:02 (45)",
+  "expected": {
+   "meas_id": 8,
+   "rsrp": -103.0,
+   "rsrq": -4.0
+  }
+ },
+ {
+  "serialNo": 98343,
+  "messageBody": "02 08 01 A2 80",
+  "time": "2026-08-11 13:31:02 (496)",
+  "expected": {
+   "meas_id": 4,
+   "rsrp": -106.0,
+   "rsrq": -3.5
+  }
+ },
+ {
+  "serialNo": 98345,
+  "messageBody": "02 08 11 22 80 05 7D A3 84",
+  "time": "2026-08-11 13:31:02 (519)",
+  "expected": {
+   "meas_id": 3,
+   "rsrp": -106.0,
+   "rsrq": -3.5
+  }
+ },
+ {
+  "serialNo": 98347,
+  "messageBody": "02 08 16 22 80 05 7D A3 84",
+  "time": "2026-08-11 13:31:02 (524)",
+  "expected": {
+   "meas_id": 13,
+   "rsrp": -106.0,
+   "rsrq": -3.5
+  }
+ },
+ {
+  "serialNo": 98348,
+  "messageBody": "02 08 13 A1 80 05 7D 23",
+  "time": "2026-08-11 13:31:02 (690)",
+  "expected": {
+   "meas_id": 8,
+   "rsrp": -107.0,
+   "rsrq": -3.5
+  }
+ },
+ {
+  "serialNo": 98351,
+  "messageBody": "02 08 01 9F 78",
+  "time": "2026-08-11 13:31:03 (170)",
+  "expected": {
+   "meas_id": 4,
+   "rsrp": -109.0,
+   "rsrq": -4.5
+  }
+ },
+ {
+  "serialNo": 98352,
+  "messageBody": "02 08 11 1F 78 05 7D A7 84",
+  "time": "2026-08-11 13:31:03 (170)",
+  "expected": {
+   "meas_id": 3,
+   "rsrp": -109.0,
+   "rsrq": -4.5
+  }
+ },
+ {
+  "serialNo": 98353,
+  "messageBody": "02 08 10 1F 70 05 7D 28",
+  "time": "2026-08-11 13:31:03 (370)",
+  "expected": {
+   "meas_id": 1,
+   "rsrp": -109.0,
+   "rsrq": -5.5
+  }
+ },
+ {
+  "serialNo": 98383,
+  "messageBody": "02 08 2F A8 80 42 00 19 29 A0 79 44 2F 00",
+  "time": "2026-08-11 13:31:03 (659)",
+  "expected": {
+   "meas_id": 32,
+   "rsrp": -100.0,
+   "rsrq": -3.5
+  }
+ },
+ {
+  "serialNo": 98386,
+  "messageBody": "02 08 3F 29 80 06 F5 20 10 80 06 4A 68 1E 51 0B C0",
+  "time": "2026-08-11 13:31:04 (20)",
+  "expected": {
+   "meas_id": 31,
+   "rsrp": -99.0,
+   "rsrq": -3.5
+  }
+ },
+ {
+  "serialNo": 98389,
+  "messageBody": "02 08 2B 28 84 42 00 19 29 A0 7D 43 ED 80",
+  "time": "2026-08-11 13:31:04 (305)",
+  "expected": {
+   "meas_id": 23,
+   "rsrp": -100.0,
+   "rsrq": -3.0
+  }
+ },
+ {
+  "serialNo": 98392,
+  "messageBody": "02 08 3F A8 80 06 F5 A1 78 42 00 19 29 A0 7D 43 ED 80",
+  "time": "2026-08-11 13:31:04 (338)",
+  "expected": {
+   "meas_id": 32,
+   "rsrp": -100.0,
+   "rsrq": -3.5
+  }
+ },
+ {
+  "serialNo": 98401,
+  "messageBody": "02 08 3F 26 80 06 F5 21 10 80 06 4A 68 1F 50 FB 60",
+  "time": "2026-08-11 13:31:04 (505)",
+  "expected": {
+   "meas_id": 31,
+   "rsrp": -102.0,
+   "rsrq": -3.5
+  }
+ },
+ {
+  "serialNo": 98402,
+  "messageBody": "02 08 2B 26 80 42 00 19 29 A0 7D 43 ED 80",
+  "time": "2026-08-11 13:31:04 (985)",
+  "expected": {
+   "meas_id": 23,
+   "rsrp": -102.0,
+   "rsrq": -3.5
+  }
+ },
+ {
+  "serialNo": 98403,
+  "messageBody": "02 08 3A A6 80 06 F5 9F 74 42 00 19 29 A0 7D 43 ED 80",
+  "time": "2026-08-11 13:31:04 (985)",
+  "expected": {
+   "meas_id": 22,
+   "rsrp": -102.0,
+   "rsrq": -3.5
+  }
+ },
+ {
+  "serialNo": 98416,
+  "messageBody": "02 08 30 2B 80 02 E1 A1 80 42 00 19 29 A4 7D 44 70 00",
+  "time": "2026-08-11 13:31:05 (865)",
+  "expected": {
+   "meas_id": 1,
+   "rsrp": -97.0,
+   "rsrq": -3.5
+  }
+ },
+ {
+  "serialNo": 98431,
+  "messageBody": "02 08 3E 2B 84 02 E1 25 10 80 06 4A 68 9F 51 0C 00",
+  "time": "2026-08-11 13:31:06 (510)",
+  "expected": {
+   "meas_id": 29,
+   "rsrp": -97.0,
+   "rsrq": -3.0
+  }
+ },
+ {
+  "serialNo": 98457,
+  "messageBody": "02 08 3E A9 80 02 E1 21 10 80 06 4A 67 9F 50 EB 60",
+  "time": "2026-08-11 13:31:08 (380)",
+  "expected": {
+   "meas_id": 30,
+   "rsrp": -99.0,
+   "rsrq": -3.5
+  }
+ },
+ {
+  "serialNo": 98490,
+  "messageBody": "02 08 04 29 7C",
+  "time": "2026-08-11 13:31:14 (158)",
+  "expected": {
+   "meas_id": 9,
+   "rsrp": -99.0,
+   "rsrq": -4.0
+  }
+ },
+ {
+  "serialNo": 98495,
+  "messageBody": "02 08 21 AA 80 42 00 19 28 A5 6D 23 ED 80",
+  "time": "2026-08-11 13:31:14 (794)",
+  "expected": {
+   "meas_id": 4,
+   "rsrp": -98.0,
+   "rsrq": -3.5
+  }
+ },
+ {
+  "serialNo": 98498,
+  "messageBody": "02 08 34 2B 80 16 F5 9C 65 C5 66 D5 10 80 06 4A 29 5B 48 FB 60",
+  "time": "2026-08-11 13:31:14 (829)",
+  "expected": {
+   "meas_id": 9,
+   "rsrp": -97.0,
+   "rsrq": -3.5
+  }
+ },
+ {
+  "serialNo": 98503,
+  "messageBody": "02 08 34 2A 84 16 F5 9C 61 C5 66 95 10 80 06 4A 29 9E 48 FB C0",
+  "time": "2026-08-11 13:31:15 (270)",
+  "expected": {
+   "meas_id": 9,
+   "rsrp": -98.0,
+   "rsrq": -3.0
+  }
+ },
+ {
+  "serialNo": 98506,
+  "messageBody": "02 08 34 29 80 16 F5 9C 61 C5 66 95 10 80 06 4A 29 9E 48 FB C0",
+  "time": "2026-08-11 13:31:15 (329)",
+  "expected": {
+   "meas_id": 9,
+   "rsrp": -99.0,
+   "rsrq": -3.5
+  }
+ },
+ {
+  "serialNo": 98507,
+  "messageBody": "02 08 33 A8 84 06 F5 1D 10 80 06 4A 29 9E 48 FB C0",
+  "time": "2026-08-11 13:31:15 (454)",
+  "expected": {
+   "meas_id": 8,
+   "rsrp": -100.0,
+   "rsrq": -3.0
+  }
+ },
+ {
+  "serialNo": 98508,
+  "messageBody": "02 08 37 A8 84 06 F5 9D 68 42 00 19 28 A6 79 23 EF 00",
+  "time": "2026-08-11 13:31:15 (454)",
+  "expected": {
+   "meas_id": 16,
+   "rsrp": -100.0,
+   "rsrq": -3.0
+  }
+ },
+ {
+  "serialNo": 98509,
+  "messageBody": "02 08 33 A8 84 16 F5 1D 71 51 B1 08 00 64 A2 99 E4 8F BC 00",
+  "time": "2026-08-11 13:31:15 (534)",
+  "expected": {
+   "meas_id": 8,
+   "rsrp": -100.0,
+   "rsrq": -3.0
+  }
+ },
+ {
+  "serialNo": 98510,
+  "messageBody": "02 08 37 A8 84 16 F5 9D 69 C5 66 D6 10 80 06 4A 29 9E 48 FB C0",
+  "time": "2026-08-11 13:31:15 (534)",
+  "expected": {
+   "meas_id": 16,
+   "rsrp": -100.0,
+   "rsrq": -3.0
+  }
+ },
+ {
+  "serialNo": 98515,
+  "messageBody": "02 08 21 A6 80 42 00 19 28 A6 79 23 EF 00",
+  "time": "2026-08-11 13:31:15 (934)",
+  "expected": {
+   "meas_id": 4,
+   "rsrp": -102.0,
+   "rsrq": -3.5
+  }
+ },
+ {
+  "serialNo": 98524,
+  "messageBody": "02 08 28 27 80 42 00 19 28 A6 79 23 EF 00",
+  "time": "2026-08-11 13:31:16 (329)",
+  "expected": {
+   "meas_id": 17,
+   "rsrp": -101.0,
+   "rsrq": -3.5
+  }
+ },
+ {
+  "serialNo": 98529,
+  "messageBody": "02 08 38 A9 84 02 E1 A7 80 42 00 19 28 A6 81 24 D0 80",
+  "time": "2026-08-11 13:31:16 (984)",
+  "expected": {
+   "meas_id": 18,
+   "rsrp": -99.0,
+   "rsrq": -3.0
+  }
+ },
+ {
+  "serialNo": 98530,
+  "messageBody": "02 08 39 29 84 02 E1 A3 80 42 00 19 28 A6 81 24 D0 80",
+  "time": "2026-08-11 13:31:16 (984)",
+  "expected": {
+   "meas_id": 19,
+   "rsrp": -99.0,
+   "rsrq": -3.0
+  }
+ },
+ {
+  "serialNo": 98543,
+  "messageBody": "02 08 38 A9 88 12 E1 A6 75 C5 67 4C 10 80 06 4A 29 5F 49 33 E0",
+  "time": "2026-08-11 13:31:17 (699)",
+  "expected": {
+   "meas_id": 18,
+   "rsrp": -99.0,
+   "rsrq": -2.5
+  }
+ },
+ {
+  "serialNo": 98573,
+  "messageBody": "02 08 31 29 84 06 F5 A2 7C 42 00 19 0D 26 65 70 8D 90",
+  "time": "2026-08-11 13:31:19 (374)",
+  "expected": {
+   "meas_id": 3,
+   "rsrp": -99.0,
+   "rsrq": -3.0
+  }
+ },
+ {
+  "serialNo": 98582,
+  "messageBody": "02 08 21 29 80 42 00 19 0D 26 81 70 71 A0",
+  "time": "2026-08-11 13:31:20 (294)",
+  "expected": {
+   "meas_id": 3,
+   "rsrp": -99.0,
+   "rsrq": -3.5
+  }
+ },
+ {
+  "serialNo": 98583,
+  "messageBody": "02 08 24 2A 80 42 00 0D 09 26 80",
+  "time": "2026-08-11 13:31:20 (450)",
+  "expected": {
+   "meas_id": 9,
+   "rsrp": -98.0,
+   "rsrq": -3.5
+  }
+ },
+ {
+  "serialNo": 98594,
+  "messageBody": "02 08 31 24 7C 06 F5 A2 70 42 00 19 0D 26 81 70 71 A0",
+  "time": "2026-08-11 13:31:21 (374)",
+  "expected": {
+   "meas_id": 3,
+   "rsrp": -104.0,
+   "rsrq": -4.0
+  }
+ },
+ {
+  "serialNo": 98633,
+  "messageBody": "02 08 34 27 84 06 F5 A6 7C 42 00 0D 09 25 7C",
+  "time": "2026-08-11 13:31:25 (574)",
+  "expected": {
+   "meas_id": 9,
+   "rsrp": -101.0,
+   "rsrq": -3.0
+  }
+ },
+ {
+  "serialNo": 98638,
+  "messageBody": "02 08 36 2B 88 02 E1 23 10 80 03 42 48 60",
+  "time": "2026-08-11 13:31:26 (59)",
+  "expected": {
+   "meas_id": 13,
+   "rsrp": -97.0,
+   "rsrq": -2.5
+  }
+ },
+ {
+  "serialNo": 98667,
+  "messageBody": "02 08 21 2E 7C 42 00 19 0D 26 81 70 79 D0",
+  "time": "2026-08-11 13:31:28 (517)",
+  "expected": {
+   "meas_id": 3,
+   "rsrp": -94.0,
+   "rsrq": -4.0
+  }
+ },
+ {
+  "serialNo": 98674,
+  "messageBody": "02 08 2C AF 80 42 00 0D 09 26 80",
+  "time": "2026-08-11 13:31:29 (314)",
+  "expected": {
+   "meas_id": 26,
+   "rsrp": -93.0,
+   "rsrq": -3.5
+  }
+ },
+ {
+  "serialNo": 98677,
+  "messageBody": "02 08 34 2E 80 06 F5 9E 78 42 00 0D 09 2B 60",
+  "time": "2026-08-11 13:31:29 (374)",
+  "expected": {
+   "meas_id": 9,
+   "rsrp": -94.0,
+   "rsrq": -3.5
+  }
+ },
+ {
+  "serialNo": 148055,
+  "messageBody": "02 08 28 21 68 42 00 19 28 BE 59 27 4D 80",
+  "time": "2026-08-11 15:20:03 (748)",
+  "expected": {
+   "meas_id": 17,
+   "rsrp": -107.0,
+   "rsrq": -6.5
+  }
+ },
+ {
+  "serialNo": 148060,
+  "messageBody": "02 08 21 A0 68 42 00 19 28 BE 59 27 4D 80",
+  "time": "2026-08-11 15:20:04 (411)",
+  "expected": {
+   "meas_id": 4,
+   "rsrp": -108.0,
+   "rsrq": -6.5
+  }
+ },
+ {
+  "serialNo": 148063,
+  "messageBody": "02 08 28 20 6C 42 00 19 28 BE 59 27 4D 80",
+  "time": "2026-08-11 15:20:04 (436)",
+  "expected": {
+   "meas_id": 17,
+   "rsrp": -108.0,
+   "rsrq": -6.0
+  }
+ },
+ {
+  "serialNo": 148066,
+  "messageBody": "02 08 33 20 6A 00 14 20 02 48 00 00 42 00 19 28 BE 59 27 4D 80",
+  "time": "2026-08-11 15:20:04 (963)",
+  "expected": {
+   "meas_id": 7,
+   "rsrp": -108.0,
+   "rsrq": -6.5
+  }
+ },
+ {
+  "serialNo": 148082,
+  "messageBody": "02 08 01 A1 68",
+  "time": "2026-08-11 15:20:05 (111)",
+  "expected": {
+   "meas_id": 4,
+   "rsrp": -107.0,
+   "rsrq": -6.5
+  }
+ },
+ {
+  "serialNo": 148088,
+  "messageBody": "02 08 08 21 68",
+  "time": "2026-08-11 15:20:05 (151)",
+  "expected": {
+   "meas_id": 17,
+   "rsrp": -107.0,
+   "rsrq": -6.5
+  }
+ },
+ {
+  "serialNo": 148089,
+  "messageBody": "02 08 32 A3 6A 00 14 20 02 4D 00 20 40 10 5A 02 26 B3 81 00 1E 6C 1D 62 44 79 D0 74 A0 3C B8 3A 50 DE 44 1C E0",
+  "time": "2026-08-11 15:20:05 (363)",
+  "expected": {
+   "meas_id": 6,
+   "rsrp": -105.0,
+   "rsrq": -6.5
+  }
+ },
+ {
+  "serialNo": 219075,
+  "messageBody": "02 08 00 B9 88",
+  "time": "2026-08-11 17:18:43 (117)",
+  "expected": {
+   "meas_id": 2,
+   "rsrp": -83.0,
+   "rsrq": -2.5
+  }
+ },
+ {
+  "serialNo": 219088,
+  "messageBody": "02 08 20 B8 88 42 00 19 28 B0 85 26 8F 00",
+  "time": "2026-08-11 17:18:43 (234)",
+  "expected": {
+   "meas_id": 2,
+   "rsrp": -84.0,
+   "rsrq": -2.5
+  }
+ },
+ {
+  "serialNo": 219094,
+  "messageBody": "02 08 33 B8 88 06 F5 2C 10 80 06 4A 2C 21 49 A3 C0",
+  "time": "2026-08-11 17:18:43 (603)",
+  "expected": {
+   "meas_id": 8,
+   "rsrp": -84.0,
+   "rsrq": -2.5
+  }
+ },
+ {
+  "serialNo": 219134,
+  "messageBody": "02 08 33 B7 80 06 F5 2C 10 80 06 4A 2C A1 49 9B E0",
+  "time": "2026-08-11 17:18:44 (833)",
+  "expected": {
+   "meas_id": 8,
+   "rsrp": -85.0,
+   "rsrq": -3.5
+  }
+ },
+ {
+  "serialNo": 219141,
+  "messageBody": "02 08 36 34 80 02 E1 AA 80 42 00 19 28 B1 85 26 10 80",
+  "time": "2026-08-11 17:18:45 (434)",
+  "expected": {
+   "meas_id": 13,
+   "rsrp": -88.0,
+   "rsrq": -3.5
+  }
+ },
+ {
+  "serialNo": 219158,
+  "messageBody": "02 08 35 30 84 02 E1 30 10 80 06 4A 2B 60 49 6B 20",
+  "time": "2026-08-11 17:18:46 (388)",
+  "expected": {
+   "meas_id": 11,
+   "rsrp": -92.0,
+   "rsrq": -3.0
+  }
+ },
+ {
+  "serialNo": 219159,
+  "messageBody": "02 08 30 31 84 06 F5 AB 80 42 00 2D 2C AD 7D 70 C2 06 96 B2 B8 61 00",
+  "time": "2026-08-11 17:18:46 (467)",
+  "expected": {
+   "meas_id": 1,
+   "rsrp": -91.0,
+   "rsrq": -3.0
+  }
+ },
+ {
+  "serialNo": 219174,
+  "messageBody": "02 08 35 B1 88 02 E1 31 10 80 06 4A 2B 21 49 73 20",
+  "time": "2026-08-11 17:18:47 (414)",
+  "expected": {
+   "meas_id": 12,
+   "rsrp": -91.0,
+   "rsrq": -2.5
+  }
+ },
+ {
+  "serialNo": 219193,
+  "messageBody": "02 08 30 AF 88 16 F5 AF 70 B9 69 CD 10 80 06 4A 2B 1C 49 63 80",
+  "time": "2026-08-11 17:18:48 (350)",
+  "expected": {
+   "meas_id": 2,
+   "rsrp": -93.0,
+   "rsrq": -2.5
+  }
+ },
+ {
+  "serialNo": 219200,
+  "messageBody": "02 08 31 2C 78 06 F5 32 10 80 0B 4B 2A 9B 5C 34 7D A5 CF 2E 1A 3E",
+  "time": "2026-08-11 17:18:49 (94)",
+  "expected": {
+   "meas_id": 3,
+   "rsrp": -96.0,
+   "rsrq": -4.5
+  }
+ },
+ {
+  "serialNo": 219228,
+  "messageBody": "02 08 2B 33 7C 42 00 19 29 B5 81 46 8E 80",
+  "time": "2026-08-11 17:18:49 (426)",
+  "expected": {
+   "meas_id": 23,
+   "rsrp": -89.0,
+   "rsrq": -4.0
+  }
+ },
+ {
+  "serialNo": 219229,
+  "messageBody": "02 08 3A B4 80 05 7D 29 10 80 06 4A 6D 60 51 A3 A0",
+  "time": "2026-08-11 17:18:49 (791)",
+  "expected": {
+   "meas_id": 22,
+   "rsrp": -88.0,
+   "rsrq": -3.5
+  }
+ },
+ {
+  "serialNo": 219256,
+  "messageBody": "02 08 30 38 84 05 7D A6 80 42 00 19 29 BE 85 46 70 00",
+  "time": "2026-08-11 17:18:51 (598)",
+  "expected": {
+   "meas_id": 1,
+   "rsrp": -84.0,
+   "rsrq": -3.0
+  }
+ },
+ {
+  "serialNo": 219305,
+  "messageBody": "02 08 3B 3B 84 05 7D AC 78 42 00 19 29 BC 85 47 4E 00",
+  "time": "2026-08-11 17:18:54 (553)",
+  "expected": {
+   "meas_id": 23,
+   "rsrp": -81.0,
+   "rsrq": -3.0
+  }
+ },
+ {
+  "serialNo": 219356,
+  "messageBody": "02 08 04 40 84",
+  "time": "2026-08-11 17:18:55 (975)",
+  "expected": {
+   "meas_id": 9,
+   "rsrp": -76.0,
+   "rsrq": -3.0
+  }
+ },
+ {
+  "serialNo": 219365,
+  "messageBody": "02 08 14 41 84 05 7D AB 7C",
+  "time": "2026-08-11 17:18:56 (949)",
+  "expected": {
+   "meas_id": 9,
+   "rsrp": -75.0,
+   "rsrq": -3.0
+  }
+ },
+ {
+  "serialNo": 219366,
+  "messageBody": "02 08 19 42 84 00 D1 93 14",
+  "time": "2026-08-11 17:18:57 (204)",
+  "expected": {
+   "meas_id": 19,
+   "rsrp": -74.0,
+   "rsrq": -3.0
+  }
+ },
+ {
+  "serialNo": 219379,
+  "messageBody": "02 08 07 41 84",
+  "time": "2026-08-11 17:18:57 (970)",
+  "expected": {
+   "meas_id": 15,
+   "rsrp": -75.0,
+   "rsrq": -3.0
+  }
+ },
+ {
+  "serialNo": 219380,
+  "messageBody": "02 08 19 3F 84 13 15 94 14 34 64 C3",
+  "time": "2026-08-11 17:18:58 (164)",
+  "expected": {
+   "meas_id": 19,
+   "rsrp": -77.0,
+   "rsrq": -3.0
+  }
+ },
+ {
+  "serialNo": 219435,
+  "messageBody": "02 08 14 42 78 07 15 B1 14",
+  "time": "2026-08-11 17:19:02 (36)",
+  "expected": {
+   "meas_id": 9,
+   "rsrp": -74.0,
+   "rsrq": -4.5
+  }
+ },
+ {
+  "serialNo": 219450,
+  "messageBody": "02 08 11 40 64 07 15 BE 60",
+  "time": "2026-08-11 17:19:03 (224)",
+  "expected": {
+   "meas_id": 3,
+   "rsrp": -76.0,
+   "rsrq": -7.0
+  }
+ },
+ {
+  "serialNo": 219463,
+  "messageBody": "02 08 35 BF 58 17 15 43 2E 14 31 08 00 34 22 CC 40",
+  "time": "2026-08-11 17:19:04 (29)",
+  "expected": {
+   "meas_id": 12,
+   "rsrp": -77.0,
+   "rsrq": -8.5
+  }
+ },
+ {
+  "serialNo": 219485,
+  "messageBody": "02 08 33 BD 4A 00 4D AB 62 40 00 33 77 23 F0 02 26 2A 3E 00 02 E3 A3 70 02 80 42 00 0D 09 C3 64",
+  "time": "2026-08-11 17:19:05 (559)",
+  "expected": {
+   "meas_id": 8,
+   "rsrp": -79.0,
+   "rsrq": -10.5
+  }
+ },
+ {
+  "serialNo": 219511,
+  "messageBody": "02 08 14 3E 54 07 15 C2 74",
+  "time": "2026-08-11 17:19:05 (755)",
+  "expected": {
+   "meas_id": 9,
+   "rsrp": -78.0,
+   "rsrq": -9.0
+  }
+ },
+ {
+  "serialNo": 219516,
+  "messageBody": "02 08 33 BE 4C 14 01 A3 54 34 66 C5 10 04 0E 80 89 AC E0 56 C7 7F 02 00 10 1D FB F7 60",
+  "time": "2026-08-11 17:19:05 (899)",
+  "expected": {
+   "meas_id": 8,
+   "rsrp": -78.0,
+   "rsrq": -10.0
+  }
+ },
+ {
+  "serialNo": 219517,
+  "messageBody": "02 08 32 BE 4C 07 15 C2 6C 40 10 3A 02 26 B3 81 5B 1D FC 08 00 40 77 EF DD 80",
+  "time": "2026-08-11 17:19:05 (908)",
+  "expected": {
+   "meas_id": 6,
+   "rsrp": -78.0,
+   "rsrq": -10.0
+  }
+ },
+ {
+  "serialNo": 219530,
+  "messageBody": "02 08 30 3F 54 07 15 44 10 04 17 80 C9 AC E0 56 C7 83 02 00 10 1E 0B E6 CD DC EF 9F BB 02 23 BF 7E EC",
+  "time": "2026-08-11 17:19:06 (263)",
+  "expected": {
+   "meas_id": 1,
+   "rsrp": -77.0,
+   "rsrq": -9.0
+  }
+ },
+ {
+  "serialNo": 219545,
+  "messageBody": "02 08 16 44 7C 06 F5 BC 38",
+  "time": "2026-08-11 17:19:06 (461)",
+  "expected": {
+   "meas_id": 13,
+   "rsrp": -72.0,
+   "rsrq": -4.0
+  }
+ },
+ {
+  "serialNo": 219547,
+  "messageBody": "02 08 35 C4 7C 14 01 A1 41 C7 68 0C 10 04 0E 80 89 AC E0 56 C7 7E F9 B8 10 1D E3 F6 E0",
+  "time": "2026-08-11 17:19:06 (558)",
+  "expected": {
+   "meas_id": 12,
+   "rsrp": -72.0,
+   "rsrq": -4.0
+  }
+ },
+ {
+  "serialNo": 219552,
+  "messageBody": "02 08 34 C4 80 06 F5 BC 38 40 10 3A 02 26 B3 81 5B 1D DB E6 C0 40 77 8F 9B 00",
+  "time": "2026-08-11 17:19:06 (628)",
+  "expected": {
+   "meas_id": 10,
+   "rsrp": -72.0,
+   "rsrq": -3.5
+  }
+ },
+ {
+  "serialNo": 219573,
+  "messageBody": "02 08 33 C2 7A 00 4D AB 62 40 00 33 77 23 E0 02 26 2A 3E 00 02 E3 A3 A0 02 80 40 10 3A 02 26 B3 81 5B 1E 03 F7 80 46 78 0F DD 80",
+  "time": "2026-08-11 17:19:07 (151)",
+  "expected": {
+   "meas_id": 8,
+   "rsrp": -74.0,
+   "rsrq": -4.5
+  }
+ },
+ {
+  "serialNo": 278811,
+  "messageBody": "02 08 00 A5 78",
+  "time": "2026-08-11 18:27:01 (518)",
+  "expected": {
+   "meas_id": 2,
+   "rsrp": -103.0,
+   "rsrq": -4.5
+  }
+ },
+ {
+  "serialNo": 278820,
+  "messageBody": "02 08 20 A3 78 42 00 0D 08 A1 68",
+  "time": "2026-08-11 18:27:01 (659)",
+  "expected": {
+   "meas_id": 2,
+   "rsrp": -105.0,
+   "rsrq": -4.5
+  }
+ },
+ {
+  "serialNo": 278830,
+  "messageBody": "02 08 33 24 7A 00 28 A3 EA 27 00 1A 15 A2 50 01 80 42 00 0D 08 A1 68",
+  "time": "2026-08-11 18:27:01 (744)",
+  "expected": {
+   "meas_id": 7,
+   "rsrp": -104.0,
+   "rsrq": -4.5
+  }
+ },
+ {
+  "serialNo": 278884,
+  "messageBody": "02 08 02 25 80",
+  "time": "2026-08-11 18:27:02 (306)",
+  "expected": {
+   "meas_id": 5,
+   "rsrp": -103.0,
+   "rsrq": -3.5
+  }
+ },
+ {
+  "serialNo": 278887,
+  "messageBody": "02 08 00 A5 7C",
+  "time": "2026-08-11 18:27:02 (341)",
+  "expected": {
+   "meas_id": 2,
+   "rsrp": -103.0,
+   "rsrq": -4.0
+  }
+ },
+ {
+  "serialNo": 278914,
+  "messageBody": "02 08 02 25 7C",
+  "time": "2026-08-11 18:27:03 (6)",
+  "expected": {
+   "meas_id": 5,
+   "rsrp": -103.0,
+   "rsrq": -4.0
+  }
+ },
+ {
+  "serialNo": 278941,
+  "messageBody": "02 08 10 A5 80 00 AD 92 10",
+  "time": "2026-08-11 18:27:03 (451)",
+  "expected": {
+   "meas_id": 2,
+   "rsrp": -103.0,
+   "rsrq": -3.5
+  }
+ },
+ {
+  "serialNo": 278961,
+  "messageBody": "02 08 02 25 80",
+  "time": "2026-08-11 18:27:04 (96)",
+  "expected": {
+   "meas_id": 5,
+   "rsrp": -103.0,
+   "rsrq": -3.5
+  }
+ },
+ {
+  "serialNo": 279018,
+  "messageBody": "02 08 34 22 70 04 61 23 10 04 17 80 C9 AC E0 47 D7 5C F5 B0 10 DD 7B E6 C9 0A E9 59 21 02 0B A6 64 88",
+  "time": "2026-08-11 18:27:07 (382)",
+  "expected": {
+   "meas_id": 9,
+   "rsrp": -106.0,
+   "rsrq": -5.5
+  }
+ },
+ {
+  "serialNo": 279032,
+  "messageBody": "02 08 08 20 60",
+  "time": "2026-08-11 18:27:07 (584)",
+  "expected": {
+   "meas_id": 17,
+   "rsrp": -108.0,
+   "rsrq": -7.5
+  }
+ },
+ {
+  "serialNo": 279033,
+  "messageBody": "02 08 37 A0 60 00 AF 86 00 22 00 93 80 04 01 03 A0 22 6B 38 11 F5 D6 3C 68 04 37 58 F5 A0 00",
+  "time": "2026-08-11 18:27:07 (715)",
+  "expected": {
+   "meas_id": 16,
+   "rsrp": -108.0,
+   "rsrq": -7.5
+  }
+ },
+ {
+  "serialNo": 279036,
+  "messageBody": "02 08 36 A1 5C 02 15 9A 2C 40 10 3A 02 26 B3 81 1F 5D 53 B6 00 43 75 4F 18 00",
+  "time": "2026-08-11 18:27:07 (955)",
+  "expected": {
+   "meas_id": 14,
+   "rsrp": -107.0,
+   "rsrq": -8.0
+  }
+ },
+ {
+  "serialNo": 279037,
+  "messageBody": "02 08 37 A1 5C 27 6F 88 00 22 00 93 A0 02 B6 20 15 B3 87 00 22 00 93 A0 04 01 03 A0 22 6B 38 11 F5 D5 3B 60 04 37 54 F1 80 00",
+  "time": "2026-08-11 18:27:07 (955)",
+  "expected": {
+   "meas_id": 16,
+   "rsrp": -107.0,
+   "rsrq": -8.0
+  }
+ },
+ {
+  "serialNo": 279078,
+  "messageBody": "02 08 30 1E 4C 02 15 9A 24 40 10 5E 03 26 B3 81 1F 5D 4B C6 60 43 75 2F 59 AD 7B A4 68 90 08 2E 91 AA 40",
+  "time": "2026-08-11 18:27:08 (885)",
+  "expected": {
+   "meas_id": 1,
+   "rsrp": -110.0,
+   "rsrq": -10.0
+  }
+ },
+ {
+  "serialNo": 279087,
+  "messageBody": "02 08 02 1E 3C",
+  "time": "2026-08-11 18:27:09 (265)",
+  "expected": {
+   "meas_id": 5,
+   "rsrp": -110.0,
+   "rsrq": -12.0
+  }
+ },
+ {
+  "serialNo": 279090,
+  "messageBody": "02 08 18 1E 3C 02 15 9B 2C",
+  "time": "2026-08-11 18:27:09 (329)",
+  "expected": {
+   "meas_id": 17,
+   "rsrp": -110.0,
+   "rsrq": -12.0
+  }
+ },
+ {
+  "serialNo": 279105,
+  "messageBody": "02 08 30 20 48 02 15 9C 24 40 10 5E 03 26 B3 81 1F 5D 63 C6 40 43 75 8F 59 21 5B A5 66 8C 08 6E 95 81 F0",
+  "time": "2026-08-11 18:27:09 (935)",
+  "expected": {
+   "meas_id": 1,
+   "rsrp": -108.0,
+   "rsrq": -10.5
+  }
+ },
+ {
+  "serialNo": 279156,
+  "messageBody": "02 08 02 1E 58",
+  "time": "2026-08-11 18:27:13 (234)",
+  "expected": {
+   "meas_id": 5,
+   "rsrp": -110.0,
+   "rsrq": -8.5
+  }
+ },
+ {
+  "serialNo": 279181,
+  "messageBody": "02 08 18 21 44 02 15 9A 24",
+  "time": "2026-08-11 18:27:14 (450)",
+  "expected": {
+   "meas_id": 17,
+   "rsrp": -107.0,
+   "rsrq": -11.0
+  }
+ },
+ {
+  "serialNo": 279214,
+  "messageBody": "02 08 05 26 5C",
+  "time": "2026-08-11 18:27:16 (315)",
+  "expected": {
+   "meas_id": 11,
+   "rsrp": -102.0,
+   "rsrq": -8.0
+  }
+ },
+ {
+  "serialNo": 279260,
+  "messageBody": "02 08 20 29 6C 40 10 5E 03 26 B3 81 1F 5D 23 44 80 43 74 8D 12 AE DB A1 5E 7C 08 6E 89 81 F0",
+  "time": "2026-08-11 18:27:17 (568)",
+  "expected": {
+   "meas_id": 1,
+   "rsrp": -99.0,
+   "rsrq": -6.0
+  }
+ },
+ {
+  "serialNo": 279295,
+  "messageBody": "02 08 08 28 6C",
+  "time": "2026-08-11 18:27:19 (575)",
+  "expected": {
+   "meas_id": 17,
+   "rsrp": -100.0,
+   "rsrq": -6.0
+  }
+ },
+ {
+  "serialNo": 279437,
+  "messageBody": "02 08 18 29 64 02 15 9B 10",
+  "time": "2026-08-11 18:27:24 (685)",
+  "expected": {
+   "meas_id": 17,
+   "rsrp": -99.0,
+   "rsrq": -7.0
+  }
+ },
+ {
+  "serialNo": 279559,
+  "messageBody": "02 08 08 2A 68",
+  "time": "2026-08-11 18:27:29 (835)",
+  "expected": {
+   "meas_id": 17,
+   "rsrp": -98.0,
+   "rsrq": -6.5
+  }
+ },
+ {
+  "serialNo": 279636,
+  "messageBody": "02 08 18 29 78 17 6D 92 20 85 64 45",
+  "time": "2026-08-11 18:27:34 (945)",
+  "expected": {
+   "meas_id": 17,
+   "rsrp": -99.0,
+   "rsrq": -4.5
+  }
+ },
+ {
+  "serialNo": 279773,
+  "messageBody": "02 08 00 B4 7C",
+  "time": "2026-08-11 18:27:49 (276)",
+  "expected": {
+   "meas_id": 2,
+   "rsrp": -88.0,
+   "rsrq": -4.0
+  }
+ },
+ {
+  "serialNo": 279777,
+  "messageBody": "02 08 20 B3 80 42 00 0D 08 AF 68",
+  "time": "2026-08-11 18:27:49 (363)",
+  "expected": {
+   "meas_id": 2,
+   "rsrp": -89.0,
+   "rsrq": -3.5
+  }
+ },
+ {
+  "serialNo": 279778,
+  "messageBody": "02 08 33 33 82 00 14 2E DA 25 00 18 42 00 0D 08 AF 68",
+  "time": "2026-08-11 18:27:49 (437)",
+  "expected": {
+   "meas_id": 7,
+   "rsrp": -89.0,
+   "rsrq": -3.5
+  }
+ },
+ {
+  "serialNo": 279846,
+  "messageBody": "02 08 00 B1 7C",
+  "time": "2026-08-11 18:27:50 (393)",
+  "expected": {
+   "meas_id": 2,
+   "rsrp": -91.0,
+   "rsrq": -4.0
+  }
+ },
+ {
+  "serialNo": 279847,
+  "messageBody": "02 08 34 B0 7C 07 6D 92 3C 40 10 3A 02 26 B3 81 76 DD 5B E6 A0 43 74 EF 9A 80",
+  "time": "2026-08-11 18:27:50 (544)",
+  "expected": {
+   "meas_id": 10,
+   "rsrp": -92.0,
+   "rsrq": -4.0
+  }
+ },
+ {
+  "serialNo": 279871,
+  "messageBody": "02 08 04 33 80",
+  "time": "2026-08-11 18:27:51 (423)",
+  "expected": {
+   "meas_id": 9,
+   "rsrp": -89.0,
+   "rsrq": -3.5
+  }
+ },
+ {
+  "serialNo": 279937,
+  "messageBody": "02 08 00 B1 84",
+  "time": "2026-08-11 18:27:55 (535)",
+  "expected": {
+   "meas_id": 2,
+   "rsrp": -91.0,
+   "rsrq": -3.0
+  }
+ },
+ {
+  "serialNo": 279982,
+  "messageBody": "02 08 10 AF 80 07 6D 90 14",
+  "time": "2026-08-11 18:28:00 (657)",
+  "expected": {
+   "meas_id": 2,
+   "rsrp": -93.0,
+   "rsrq": -3.5
+  }
+ },
+ {
+  "serialNo": 280034,
+  "messageBody": "02 08 00 B1 7C",
+  "time": "2026-08-11 18:28:05 (752)",
+  "expected": {
+   "meas_id": 2,
+   "rsrp": -91.0,
+   "rsrq": -4.0
+  }
+ },
+ {
+  "serialNo": 280083,
+  "messageBody": "02 08 10 B2 80 07 6D 93 30",
+  "time": "2026-08-11 18:28:10 (897)",
+  "expected": {
+   "meas_id": 2,
+   "rsrp": -90.0,
+   "rsrq": -3.5
+  }
+ },
+ {
+  "serialNo": 280133,
+  "messageBody": "02 08 00 B3 7C",
+  "time": "2026-08-11 18:28:15 (992)",
+  "expected": {
+   "meas_id": 2,
+   "rsrp": -89.0,
+   "rsrq": -4.0
+  }
+ },
+ {
+  "serialNo": 280194,
+  "messageBody": "02 08 00 BA 84",
+  "time": "2026-08-11 18:28:21 (116)",
+  "expected": {
+   "meas_id": 2,
+   "rsrp": -82.0,
+   "rsrq": -3.0
+  }
+ },
+ {
+  "serialNo": 280219,
+  "messageBody": "02 08 00 BB 80",
+  "time": "2026-08-11 18:28:22 (501)",
+  "expected": {
+   "meas_id": 2,
+   "rsrp": -81.0,
+   "rsrq": -3.5
+  }
+ },
+ {
+  "serialNo": 280226,
+  "messageBody": "02 08 03 BB 74",
+  "time": "2026-08-11 18:28:23 (537)",
+  "expected": {
+   "meas_id": 8,
+   "rsrp": -81.0,
+   "rsrq": -5.0
+  }
+ },
+ {
+  "serialNo": 280259,
+  "messageBody": "02 08 00 B1 74",
+  "time": "2026-08-11 18:28:27 (624)",
+  "expected": {
+   "meas_id": 2,
+   "rsrp": -91.0,
+   "rsrq": -5.0
+  }
+ },
+ {
+  "serialNo": 280280,
+  "messageBody": "02 08 33 3B 82 00 14 2E DA 2F 00 18 40 10 3A 02 26 B3 81 76 DD 84 08 40 43 75 F0 21 00",
+  "time": "2026-08-11 18:28:30 (5)",
+  "expected": {
+   "meas_id": 7,
+   "rsrp": -81.0,
+   "rsrq": -3.5
+  }
+ },
+ {
+  "serialNo": 335010,
+  "messageBody": "02 08 00 A5 48",
+  "time": "2026-08-11 19:41:12 (847)",
+  "expected": {
+   "meas_id": 2,
+   "rsrp": -103.0,
+   "rsrq": -10.5
+  }
+ },
+ {
+  "serialNo": 335025,
+  "messageBody": "02 08 20 A5 4C 42 00 19 28 8C 29 21 E5 00",
+  "time": "2026-08-11 19:41:13 (10)",
+  "expected": {
+   "meas_id": 2,
+   "rsrp": -103.0,
+   "rsrq": -10.0
+  }
+ },
+ {
+  "serialNo": 335031,
+  "messageBody": "02 08 33 A5 54 05 15 1D 10 80 06 4A 23 0A 48 79 40",
+  "time": "2026-08-11 19:41:13 (266)",
+  "expected": {
+   "meas_id": 8,
+   "rsrp": -103.0,
+   "rsrq": -9.0
+  }
+ },
+ {
+  "serialNo": 335034,
+  "messageBody": "02 08 36 A7 5C 13 49 13 25 91 11 08 00 64 A2 30 A4 87 92 00",
+  "time": "2026-08-11 19:41:13 (506)",
+  "expected": {
+   "meas_id": 14,
+   "rsrp": -101.0,
+   "rsrq": -8.0
+  }
+ },
+ {
+  "serialNo": 335046,
+  "messageBody": "02 08 22 27 60 42 00 19 28 8C 29 32 88 00",
+  "time": "2026-08-11 19:41:13 (654)",
+  "expected": {
+   "meas_id": 5,
+   "rsrp": -101.0,
+   "rsrq": -7.5
+  }
+ },
+ {
+  "serialNo": 335049,
+  "messageBody": "02 08 20 A7 60 42 00 19 28 8C 29 32 88 00",
+  "time": "2026-08-11 19:41:13 (694)",
+  "expected": {
+   "meas_id": 2,
+   "rsrp": -101.0,
+   "rsrq": -7.5
+  }
+ },
+ {
+  "serialNo": 335068,
+  "messageBody": "02 08 23 A8 64 42 00 19 28 8B 25 32 87 80",
+  "time": "2026-08-11 19:41:14 (306)",
+  "expected": {
+   "meas_id": 8,
+   "rsrp": -100.0,
+   "rsrq": -7.0
+  }
+ },
+ {
+  "serialNo": 335069,
+  "messageBody": "02 08 24 28 64 42 00 19 28 8B 25 32 87 80",
+  "time": "2026-08-11 19:41:14 (306)",
+  "expected": {
+   "meas_id": 9,
+   "rsrp": -100.0,
+   "rsrq": -7.0
+  }
+ },
+ {
+  "serialNo": 335071,
+  "messageBody": "02 08 22 28 64 42 00 19 28 8B 25 32 87 80",
+  "time": "2026-08-11 19:41:14 (334)",
+  "expected": {
+   "meas_id": 5,
+   "rsrp": -100.0,
+   "rsrq": -7.0
+  }
+ },
+ {
+  "serialNo": 335098,
+  "messageBody": "02 08 34 A7 60 12 59 93 30 E2 64 07 10 80 03 42 65 51",
+  "time": "2026-08-11 19:41:15 (86)",
+  "expected": {
+   "meas_id": 10,
+   "rsrp": -101.0,
+   "rsrq": -7.5
+  }
+ },
+ {
+  "serialNo": 335101,
+  "messageBody": "02 08 34 A7 60 32 59 94 34 E2 64 07 36 98 F1 1B 26 3C 31 08 00 34 26 59 20",
+  "time": "2026-08-11 19:41:15 (406)",
+  "expected": {
+   "meas_id": 10,
+   "rsrp": -101.0,
+   "rsrq": -7.5
+  }
+ },
+ {
+  "serialNo": 335116,
+  "messageBody": "02 08 34 A7 64 22 59 94 38 E2 64 07 36 98 F1 04 20 00 D0 99 54 80",
+  "time": "2026-08-11 19:41:15 (726)",
+  "expected": {
+   "meas_id": 10,
+   "rsrp": -101.0,
+   "rsrq": -7.0
+  }
+ },
+ {
+  "serialNo": 335117,
+  "messageBody": "02 08 33 27 56 00 14 2B 52 25 00 00 42 00 0D 09 95 48",
+  "time": "2026-08-11 19:41:15 (886)",
+  "expected": {
+   "meas_id": 7,
+   "rsrp": -101.0,
+   "rsrq": -9.0
+  }
+ },
+ {
+  "serialNo": 335133,
+  "messageBody": "02 08 00 A7 54",
+  "time": "2026-08-11 19:41:16 (29)",
+  "expected": {
+   "meas_id": 2,
+   "rsrp": -101.0,
+   "rsrq": -9.0
+  }
+ },
+ {
+  "serialNo": 335148,
+  "messageBody": "02 08 35 A8 54 03 49 18 10 80 06 4A 24 C8 48 80 60",
+  "time": "2026-08-11 19:41:16 (634)",
+  "expected": {
+   "meas_id": 12,
+   "rsrp": -100.0,
+   "rsrq": -9.0
+  }
+ },
+ {
+  "serialNo": 335149,
+  "messageBody": "02 08 36 28 54 03 49 17 10 80 06 4A 24 C8 48 80 60",
+  "time": "2026-08-11 19:41:16 (634)",
+  "expected": {
+   "meas_id": 13,
+   "rsrp": -100.0,
+   "rsrq": -9.0
+  }
+ },
+ {
+  "serialNo": 335151,
+  "messageBody": "02 08 22 28 50 42 00 19 28 93 21 22 01 80",
+  "time": "2026-08-11 19:41:16 (686)",
+  "expected": {
+   "meas_id": 5,
+   "rsrp": -100.0,
+   "rsrq": -9.5
+  }
+ },
+ {
+  "serialNo": 335157,
+  "messageBody": "02 08 20 A8 50 42 00 0D 09 10 0C",
+  "time": "2026-08-11 19:41:16 (781)",
+  "expected": {
+   "meas_id": 2,
+   "rsrp": -100.0,
+   "rsrq": -9.5
+  }
+ },
+ {
+  "serialNo": 335158,
+  "messageBody": "02 08 36 28 50 03 49 17 10 80 06 4A 44 03 4C C1 E0",
+  "time": "2026-08-11 19:41:16 (867)",
+  "expected": {
+   "meas_id": 13,
+   "rsrp": -100.0,
+   "rsrq": -9.5
+  }
+ },
+ {
+  "serialNo": 335165,
+  "messageBody": "02 08 22 28 4C 42 00 19 28 98 51 33 07 80",
+  "time": "2026-08-11 19:41:17 (354)",
+  "expected": {
+   "meas_id": 5,
+   "rsrp": -100.0,
+   "rsrq": -10.0
+  }
+ },
+ {
+  "serialNo": 335174,
+  "messageBody": "02 08 23 28 4C 42 00 19 28 98 51 33 07 80",
+  "time": "2026-08-11 19:41:17 (666)",
+  "expected": {
+   "meas_id": 7,
+   "rsrp": -100.0,
+   "rsrq": -10.0
+  }
+ },
+ {
+  "serialNo": 335175,
+  "messageBody": "02 08 24 28 4C 42 00 19 28 98 51 33 07 80",
+  "time": "2026-08-11 19:41:17 (666)",
+  "expected": {
+   "meas_id": 9,
+   "rsrp": -100.0,
+   "rsrq": -10.0
+  }
+ },
+ {
+  "serialNo": 335182,
+  "messageBody": "02 08 20 A8 54 42 00 19 28 98 41 33 08 00",
+  "time": "2026-08-11 19:41:17 (857)",
+  "expected": {
+   "meas_id": 2,
+   "rsrp": -100.0,
+   "rsrq": -9.0
+  }
+ },
+ {
+  "serialNo": 335183,
+  "messageBody": "02 08 22 28 54 42 00 19 28 98 41 33 08 00",
+  "time": "2026-08-11 19:41:18 (506)",
+  "expected": {
+   "meas_id": 5,
+   "rsrp": -100.0,
+   "rsrq": -9.0
+  }
+ },
+ {
+  "serialNo": 335196,
+  "messageBody": "02 08 30 27 60 05 15 9D 10 42 10 2D 2C 95 3D DA 3C 46 CB 9C DA 28 40 5E 03 26 B3 81 5A 9D 74 08 80 40 75 B0 22 2D 93 9D 4C 50 08 0E 75 31 30",
+  "time": "2026-08-11 19:41:19 (185)",
+  "expected": {
+   "meas_id": 1,
+   "rsrp": -101.0,
+   "rsrq": -7.5
+  }
+ },
+ {
+  "serialNo": 335197,
+  "messageBody": "02 08 35 26 54 15 15 8F 14 ED 63 83 10 80 06 4A 25 50 4C C1 E0",
+  "time": "2026-08-11 19:41:19 (466)",
+  "expected": {
+   "meas_id": 11,
+   "rsrp": -102.0,
+   "rsrq": -9.0
+  }
+ },
+ {
+  "serialNo": 335204,
+  "messageBody": "02 08 20 26 58 42 10 2D 2C 96 42 8A 3C 46 CC 22 DA 24 28 5E 03 26 B3 81 5A 9D 63 F7 C0 40 75 70 1F 2D 93 A0 5A 70 08 0E 81 71 C0",
+  "time": "2026-08-11 19:41:19 (770)",
+  "expected": {
+   "meas_id": 1,
+   "rsrp": -102.0,
+   "rsrq": -8.5
+  }
+ },
+ {
+  "serialNo": 335205,
+  "messageBody": "02 08 33 A6 58 03 89 91 10 42 00 19 28 96 41 33 08 80",
+  "time": "2026-08-11 19:41:19 (770)",
+  "expected": {
+   "meas_id": 8,
+   "rsrp": -102.0,
+   "rsrq": -8.5
+  }
+ },
+ {
+  "serialNo": 335206,
+  "messageBody": "02 08 35 26 58 03 B5 8F 08 42 00 19 28 96 41 33 08 80",
+  "time": "2026-08-11 19:41:19 (770)",
+  "expected": {
+   "meas_id": 11,
+   "rsrp": -102.0,
+   "rsrq": -8.5
+  }
+ },
+ {
+  "serialNo": 335217,
+  "messageBody": "02 08 33 A5 58 13 89 91 10 DA 64 02 10 80 06 4A 25 91 4C BA 20",
+  "time": "2026-08-11 19:41:20 (427)",
+  "expected": {
+   "meas_id": 8,
+   "rsrp": -103.0,
+   "rsrq": -8.5
+  }
+ },
+ {
+  "serialNo": 335230,
+  "messageBody": "02 08 33 A4 58 03 89 91 10 42 00 19 28 98 45 32 E8 00",
+  "time": "2026-08-11 19:41:21 (66)",
+  "expected": {
+   "meas_id": 8,
+   "rsrp": -104.0,
+   "rsrq": -8.5
+  }
+ },
+ {
+  "serialNo": 335231,
+  "messageBody": "02 08 25 24 58 42 00 19 28 98 45 32 E8 00",
+  "time": "2026-08-11 19:41:21 (66)",
+  "expected": {
+   "meas_id": 11,
+   "rsrp": -104.0,
+   "rsrq": -8.5
+  }
+ },
+ {
+  "serialNo": 335262,
+  "messageBody": "02 08 20 A5 5C 42 00 19 28 97 49 32 C7 80",
+  "time": "2026-08-11 19:41:23 (6)",
+  "expected": {
+   "meas_id": 2,
+   "rsrp": -103.0,
+   "rsrq": -8.0
+  }
+ },
+ {
+  "serialNo": 335263,
+  "messageBody": "02 08 33 A5 58 13 89 90 0D B2 63 C2 10 80 06 4A 25 D2 4C B2 00",
+  "time": "2026-08-11 19:41:23 (315)",
+  "expected": {
+   "meas_id": 8,
+   "rsrp": -103.0,
+   "rsrq": -8.5
+  }
+ },
+ {
+  "serialNo": 335274,
+  "messageBody": "02 08 33 A5 5C 03 89 91 0C 42 00 19 28 97 49 32 E8 80",
+  "time": "2026-08-11 19:41:23 (914)",
+  "expected": {
+   "meas_id": 8,
+   "rsrp": -103.0,
+   "rsrq": -8.0
+  }
+ },
+ {
+  "serialNo": 335310,
+  "messageBody": "02 08 23 A5 48 42 00 19 28 98 55 32 C6 80",
+  "time": "2026-08-11 19:41:26 (341)",
+  "expected": {
+   "meas_id": 8,
+   "rsrp": -103.0,
+   "rsrq": -10.5
+  }
+ },
+ {
+  "serialNo": 335315,
+  "messageBody": "02 08 35 25 44 03 B5 91 14 42 00 19 28 98 55 32 C6 80",
+  "time": "2026-08-11 19:41:26 (505)",
+  "expected": {
+   "meas_id": 11,
+   "rsrp": -103.0,
+   "rsrq": -11.0
+  }
+ },
+ {
+  "serialNo": 335332,
+  "messageBody": "02 08 33 A5 44 03 8B 90 00 22 00 93 A0 04 20 01 92 89 95 93 2E 88 00",
+  "time": "2026-08-11 19:41:27 (605)",
+  "expected": {
+   "meas_id": 8,
+   "rsrp": -103.0,
+   "rsrq": -11.0
+  }
+ },
+ {
+  "serialNo": 335340,
+  "messageBody": "02 08 30 A5 44 05 17 9B 00 22 00 93 A0 04 20 01 92 89 95 93 2E 88 00",
+  "time": "2026-08-11 19:41:28 (126)",
+  "expected": {
+   "meas_id": 2,
+   "rsrp": -103.0,
+   "rsrq": -11.0
+  }
+ },
+ {
+  "serialNo": 335353,
+  "messageBody": "02 08 33 A5 48 23 89 90 0C DA 64 03 51 58 F1 44 20 01 92 89 94 D3 2E 98 00",
+  "time": "2026-08-11 19:41:28 (886)",
+  "expected": {
+   "meas_id": 8,
+   "rsrp": -103.0,
+   "rsrq": -10.5
+  }
+ },
+ {
+  "serialNo": 335356,
+  "messageBody": "02 08 23 A5 44 42 00 19 28 99 4D 32 E7 80",
+  "time": "2026-08-11 19:41:29 (206)",
+  "expected": {
+   "meas_id": 8,
+   "rsrp": -103.0,
+   "rsrq": -11.0
+  }
+ },
+ {
+  "serialNo": 335357,
+  "messageBody": "02 08 25 25 44 42 00 19 28 99 59 32 E8 00",
+  "time": "2026-08-11 19:41:29 (534)",
+  "expected": {
+   "meas_id": 11,
+   "rsrp": -103.0,
+   "rsrq": -11.0
+  }
+ },
+ {
+  "serialNo": 335372,
+  "messageBody": "02 08 33 A5 44 03 8B 90 00 22 00 93 A0 04 20 01 92 89 95 93 2E 88 00",
+  "time": "2026-08-11 19:41:30 (486)",
+  "expected": {
+   "meas_id": 8,
+   "rsrp": -103.0,
+   "rsrq": -11.0
+  }
+ },
+ {
+  "serialNo": 335415,
+  "messageBody": "02 08 20 A9 54 42 00 19 28 98 55 32 E9 80",
+  "time": "2026-08-11 19:41:33 (246)",
+  "expected": {
+   "meas_id": 2,
+   "rsrp": -99.0,
+   "rsrq": -9.0
+  }
+ },
+ {
+  "serialNo": 335436,
+  "messageBody": "02 08 33 A8 60 13 89 92 10 DA 64 01 10 80 06 4A 26 15 4C C2 60",
+  "time": "2026-08-11 19:41:34 (546)",
+  "expected": {
+   "meas_id": 8,
+   "rsrp": -100.0,
+   "rsrq": -7.5
+  }
+ },
+ {
+  "serialNo": 335439,
+  "messageBody": "02 08 33 A8 5C 03 69 92 04 42 00 19 28 98 55 33 09 80",
+  "time": "2026-08-11 19:41:34 (866)",
+  "expected": {
+   "meas_id": 8,
+   "rsrp": -100.0,
+   "rsrq": -8.0
+  }
+ },
+ {
+  "serialNo": 335442,
+  "messageBody": "02 08 35 28 58 03 89 91 0C 42 00 19 28 98 55 33 09 80",
+  "time": "2026-08-11 19:41:35 (186)",
+  "expected": {
+   "meas_id": 11,
+   "rsrp": -100.0,
+   "rsrq": -8.5
+  }
+ },
+ {
+  "serialNo": 335502,
+  "messageBody": "02 08 24 25 38 42 00 19 28 8B 25 22 83 00",
+  "time": "2026-08-11 19:41:37 (724)",
+  "expected": {
+   "meas_id": 9,
+   "rsrp": -103.0,
+   "rsrq": -12.5
+  }
+ },
+ {
+  "serialNo": 335503,
+  "messageBody": "02 08 33 25 3A 00 14 2B 52 2A 00 00 42 00 19 28 8B 25 22 83 00",
+  "time": "2026-08-11 19:41:37 (774)",
+  "expected": {
+   "meas_id": 7,
+   "rsrp": -103.0,
+   "rsrq": -12.5
+  }
+ },
+ {
+  "serialNo": 335529,
+  "messageBody": "02 08 21 A5 44 42 00 19 28 91 19 22 62 80",
+  "time": "2026-08-11 19:41:38 (366)",
+  "expected": {
+   "meas_id": 4,
+   "rsrp": -103.0,
+   "rsrq": -11.0
+  }
+ },
+ {
+  "serialNo": 335532,
+  "messageBody": "02 08 24 25 44 42 00 19 28 91 19 22 62 80",
+  "time": "2026-08-11 19:41:38 (413)",
+  "expected": {
+   "meas_id": 9,
+   "rsrp": -103.0,
+   "rsrq": -11.0
+  }
+ },
+ {
+  "serialNo": 335533,
+  "messageBody": "02 08 36 25 44 03 49 19 10 80 06 4A 24 46 48 98 A0",
+  "time": "2026-08-11 19:41:38 (452)",
+  "expected": {
+   "meas_id": 13,
+   "rsrp": -103.0,
+   "rsrq": -11.0
+  }
+ },
+ {
+  "serialNo": 335534,
+  "messageBody": "02 08 37 A5 44 03 49 17 10 80 06 4A 24 46 48 98 A0",
+  "time": "2026-08-11 19:41:38 (494)",
+  "expected": {
+   "meas_id": 16,
+   "rsrp": -103.0,
+   "rsrq": -11.0
+  }
+ },
+ {
+  "serialNo": 335535,
+  "messageBody": "02 08 25 A5 44 42 00 19 28 91 19 22 62 80",
+  "time": "2026-08-11 19:41:38 (538)",
+  "expected": {
+   "meas_id": 12,
+   "rsrp": -103.0,
+   "rsrq": -11.0
+  }
+ },
+ {
+  "serialNo": 335542,
+  "messageBody": "02 08 23 25 48 42 00 19 28 90 15 22 62 80",
+  "time": "2026-08-11 19:41:38 (655)",
+  "expected": {
+   "meas_id": 7,
+   "rsrp": -103.0,
+   "rsrq": -10.5
+  }
+ },
+ {
+  "serialNo": 335545,
+  "messageBody": "02 08 37 A5 44 03 49 17 10 80 06 4A 24 05 48 90 A0",
+  "time": "2026-08-11 19:41:38 (693)",
+  "expected": {
+   "meas_id": 16,
+   "rsrp": -103.0,
+   "rsrq": -11.0
+  }
+ },
+ {
+  "serialNo": 335546,
+  "messageBody": "02 08 36 25 44 03 49 18 10 80 06 4A 24 05 48 90 A0",
+  "time": "2026-08-11 19:41:38 (813)",
+  "expected": {
+   "meas_id": 13,
+   "rsrp": -103.0,
+   "rsrq": -11.0
+  }
+ },
+ {
+  "serialNo": 335549,
+  "messageBody": "02 08 21 A5 44 42 00 19 28 8E 09 22 02 00",
+  "time": "2026-08-11 19:41:39 (16)",
+  "expected": {
+   "meas_id": 4,
+   "rsrp": -103.0,
+   "rsrq": -11.0
+  }
+ },
+ {
+  "serialNo": 335553,
+  "messageBody": "02 08 36 A5 48 23 49 96 40 ED 64 05 6C 99 01 04 20 01 92 88 E0 92 20 20 00",
+  "time": "2026-08-11 19:41:39 (174)",
+  "expected": {
+   "meas_id": 14,
+   "rsrp": -103.0,
+   "rsrq": -10.5
+  }
+ },
+ {
+  "serialNo": 335558,
+  "messageBody": "02 08 35 25 3C 03 49 98 54 42 00 19 28 8D 09 22 02 00",
+  "time": "2026-08-11 19:41:39 (305)",
+  "expected": {
+   "meas_id": 11,
+   "rsrp": -103.0,
+   "rsrq": -12.0
+  }
+ },
+ {
+  "serialNo": 335569,
+  "messageBody": "02 08 24 25 3C 42 00 19 28 8D 0D 22 02 00",
+  "time": "2026-08-11 19:41:39 (412)",
+  "expected": {
+   "meas_id": 9,
+   "rsrp": -103.0,
+   "rsrq": -12.0
+  }
+ },
+ {
+  "serialNo": 335578,
+  "messageBody": "02 08 37 A5 50 03 49 18 10 80 06 4A 23 04 48 88 C0",
+  "time": "2026-08-11 19:41:39 (945)",
+  "expected": {
+   "meas_id": 16,
+   "rsrp": -103.0,
+   "rsrq": -9.5
+  }
+ },
+ {
+  "serialNo": 335579,
+  "messageBody": "02 08 36 25 50 03 49 15 10 80 06 4A 23 04 48 88 C0",
+  "time": "2026-08-11 19:41:39 (945)",
+  "expected": {
+   "meas_id": 13,
+   "rsrp": -103.0,
+   "rsrq": -9.5
+  }
+ },
+ {
+  "serialNo": 335580,
+  "messageBody": "02 08 21 A5 48 42 00 19 28 8C 11 22 23 00",
+  "time": "2026-08-11 19:41:40 (45)",
+  "expected": {
+   "meas_id": 4,
+   "rsrp": -103.0,
+   "rsrq": -10.5
+  }
+ },
+ {
+  "serialNo": 335588,
+  "messageBody": "02 08 36 A4 40 13 49 98 38 ED 63 C1 10 80 06 4A 23 01 48 90 C0",
+  "time": "2026-08-11 19:41:40 (420)",
+  "expected": {
+   "meas_id": 14,
+   "rsrp": -104.0,
+   "rsrq": -11.5
+  }
+ },
+ {
+  "serialNo": 335589,
+  "messageBody": "02 08 35 24 40 03 49 95 40 42 00 19 28 8C 05 22 43 00",
+  "time": "2026-08-11 19:41:40 (421)",
+  "expected": {
+   "meas_id": 11,
+   "rsrp": -104.0,
+   "rsrq": -11.5
+  }
+ },
+ {
+  "serialNo": 335615,
+  "messageBody": "02 08 35 26 48 13 49 95 41 45 E3 40 08 80 24 E8 01 08 00 A4 E2 30 00 30 14 74 02 44 84 00",
+  "time": "2026-08-11 19:41:41 (85)",
+  "expected": {
+   "meas_id": 11,
+   "rsrp": -102.0,
+   "rsrq": -10.5
+  }
+ },
+ {
+  "serialNo": 335618,
+  "messageBody": "02 08 36 A7 44 03 49 97 38 42 00 19 28 8C 09 22 21 00",
+  "time": "2026-08-11 19:41:41 (116)",
+  "expected": {
+   "meas_id": 14,
+   "rsrp": -101.0,
+   "rsrq": -11.0
+  }
+ },
+ {
+  "serialNo": 335623,
+  "messageBody": "02 08 35 28 3C 03 49 94 3C 42 00 19 28 8C 11 22 21 00",
+  "time": "2026-08-11 19:41:41 (405)",
+  "expected": {
+   "meas_id": 11,
+   "rsrp": -100.0,
+   "rsrq": -12.0
+  }
+ },
+ {
+  "serialNo": 335628,
+  "messageBody": "02 08 35 29 3C 13 49 95 3C ED E3 40 08 80 24 E8 01 08 00 64 A2 2C 44 88 82 00",
+  "time": "2026-08-11 19:41:41 (725)",
+  "expected": {
+   "meas_id": 11,
+   "rsrp": -99.0,
+   "rsrq": -12.0
+  }
+ },
+ {
+  "serialNo": 335631,
+  "messageBody": "02 08 35 29 44 03 49 95 3C 42 00 19 28 8B 05 22 21 00",
+  "time": "2026-08-11 19:41:42 (45)",
+  "expected": {
+   "meas_id": 11,
+   "rsrp": -99.0,
+   "rsrq": -11.0
+  }
+ },
+ {
+  "serialNo": 335636,
+  "messageBody": "02 08 28 A8 44 42 00 29 38 8B 00 0C 05 1D 00 91 10 80",
+  "time": "2026-08-11 19:41:42 (365)",
+  "expected": {
+   "meas_id": 18,
+   "rsrp": -100.0,
+   "rsrq": -11.0
+  }
+ },
+ {
+  "serialNo": 335643,
+  "messageBody": "02 08 36 A8 44 13 49 96 34 ED 64 43 10 80 0A 4E 22 C0 03 01 47 40 24 40 20",
+  "time": "2026-08-11 19:41:42 (402)",
+  "expected": {
+   "meas_id": 14,
+   "rsrp": -100.0,
+   "rsrq": -11.0
+  }
+ },
+ {
+  "serialNo": 335659,
+  "messageBody": "02 08 36 A8 44 23 49 96 30 DA 64 43 3B 59 11 04 20 00 D0 91 11 40",
+  "time": "2026-08-11 19:41:43 (465)",
+  "expected": {
+   "meas_id": 14,
+   "rsrp": -100.0,
+   "rsrq": -11.0
+  }
+ },
+ {
+  "serialNo": 335664,
+  "messageBody": "02 08 31 28 40 05 15 9E 04 42 10 19 0D 11 11 A4 58 B0 5E 03 26 B3 81 5A 9D 63 F7 A0 40 75 70 1E AD 93 A0 56 68 08 0E 81 51 80",
+  "time": "2026-08-11 19:41:44 (285)",
+  "expected": {
+   "meas_id": 3,
+   "rsrp": -100.0,
+   "rsrq": -11.5
+  }
+ },
+ {
+  "serialNo": 335671,
+  "messageBody": "02 08 34 28 3C 05 15 9E 04 42 00 0D 09 10 10",
+  "time": "2026-08-11 19:41:44 (556)",
+  "expected": {
+   "meas_id": 9,
+   "rsrp": -100.0,
+   "rsrq": -12.0
+  }
+ },
+ {
+  "serialNo": 335676,
+  "messageBody": "02 08 21 29 3C 42 10 19 0D 11 11 A4 58 B0 5E 03 26 B3 81 5A 9D 6B F8 00 40 75 90 20 2D 93 A1 56 68 08 0E 85 61 A0",
+  "time": "2026-08-11 19:41:44 (862)",
+  "expected": {
+   "meas_id": 3,
+   "rsrp": -99.0,
+   "rsrq": -12.0
+  }
+ },
+ {
+  "serialNo": 335687,
+  "messageBody": "02 08 36 A9 38 03 49 96 2C 42 00 0D 09 11 0C",
+  "time": "2026-08-11 19:41:45 (676)",
+  "expected": {
+   "meas_id": 14,
+   "rsrp": -99.0,
+   "rsrq": -12.5
+  }
+ },
+ {
+  "serialNo": 335714,
+  "messageBody": "02 08 36 A4 34 13 49 98 2C ED 65 02 10 80 03 42 45 01",
+  "time": "2026-08-11 19:41:48 (588)",
+  "expected": {
+   "meas_id": 14,
+   "rsrp": -104.0,
+   "rsrq": -13.0
+  }
+ },
+ {
+  "serialNo": 335725,
+  "messageBody": "02 08 31 24 40 05 15 9D 0C 42 10 19 0D 14 15 A4 64 D0 5E 03 26 B3 81 5A 9D 5B F7 80 40 75 4F DE 2D 93 A0 5A 6C 08 0E 85 69 C0",
+  "time": "2026-08-11 19:41:49 (549)",
+  "expected": {
+   "meas_id": 3,
+   "rsrp": -104.0,
+   "rsrq": -11.5
+  }
+ },
+ {
+  "serialNo": 335728,
+  "messageBody": "02 08 34 24 44 05 15 9D 0C 42 00 0D 09 14 14",
+  "time": "2026-08-11 19:41:49 (684)",
+  "expected": {
+   "meas_id": 9,
+   "rsrp": -104.0,
+   "rsrq": -11.0
+  }
+ },
+ {
+  "serialNo": 335729,
+  "messageBody": "02 08 21 24 40 42 10 19 0D 14 15 A4 64 D0 5E 03 26 B3 81 5A 9D 5B F7 80 40 75 4F DE 2D 93 A0 5A 6C 08 0E 85 69 C0",
+  "time": "2026-08-11 19:41:49 (684)",
+  "expected": {
+   "meas_id": 3,
+   "rsrp": -104.0,
+   "rsrq": -11.5
+  }
+ },
+ {
+  "serialNo": 335736,
+  "messageBody": "02 08 36 A4 3C 03 49 99 34 42 00 0D 09 14 1C",
+  "time": "2026-08-11 19:41:49 (869)",
+  "expected": {
+   "meas_id": 14,
+   "rsrp": -104.0,
+   "rsrq": -12.0
+  }
+ },
+ {
+  "serialNo": 335810,
+  "messageBody": "02 08 00 A5 44",
+  "time": "2026-08-11 19:42:00 (182)",
+  "expected": {
+   "meas_id": 2,
+   "rsrp": -103.0,
+   "rsrq": -11.0
+  }
+ },
+ {
+  "serialNo": 335821,
+  "messageBody": "02 08 20 A5 48 42 00 0D 08 8C 24",
+  "time": "2026-08-11 19:42:00 (337)",
+  "expected": {
+   "meas_id": 2,
+   "rsrp": -103.0,
+   "rsrq": -10.5
+  }
+ },
+ {
+  "serialNo": 335828,
+  "messageBody": "02 08 33 25 4A 00 14 2B 52 2A 00 00 42 00 0D 08 8C 24",
+  "time": "2026-08-11 19:42:00 (397)",
+  "expected": {
+   "meas_id": 7,
+   "rsrp": -103.0,
+   "rsrq": -10.5
+  }
+ },
+ {
+  "serialNo": 335875,
+  "messageBody": "02 08 33 A4 44 05 15 1E 10 04 0E 80 89 AC E0 56 A7 54 FD E8 10 1D 54 07 A0",
+  "time": "2026-08-11 19:42:00 (902)",
+  "expected": {
+   "meas_id": 8,
+   "rsrp": -104.0,
+   "rsrq": -11.0
+  }
+ },
+ {
+  "serialNo": 335887,
+  "messageBody": "02 08 02 24 44",
+  "time": "2026-08-11 19:42:00 (981)",
+  "expected": {
+   "meas_id": 5,
+   "rsrp": -104.0,
+   "rsrq": -11.0
+  }
+ },
+ {
+  "serialNo": 335890,
+  "messageBody": "02 08 30 A4 48 05 15 9E 24 42 00 0D 08 8F 10",
+  "time": "2026-08-11 19:42:01 (1)",
+  "expected": {
+   "meas_id": 2,
+   "rsrp": -104.0,
+   "rsrq": -10.5
+  }
+ },
+ {
+  "serialNo": 335891,
+  "messageBody": "02 08 33 A4 50 05 15 1E 10 84 03 42 23 C4 17 80 C9 AC E0 56 A7 54 FD E0 10 1D 4C 07 8B 64 E7 D6 1A 02 03 9F 58 68",
+  "time": "2026-08-11 19:42:01 (163)",
+  "expected": {
+   "meas_id": 8,
+   "rsrp": -104.0,
+   "rsrq": -9.5
+  }
+ },
+ {
+  "serialNo": 335900,
+  "messageBody": "02 08 30 A4 50 05 15 9E 24 42 00 0D 08 8F 14",
+  "time": "2026-08-11 19:42:01 (249)",
+  "expected": {
+   "meas_id": 2,
+   "rsrp": -104.0,
+   "rsrq": -9.5
+  }
+ },
+ {
+  "serialNo": 335920,
+  "messageBody": "02 08 34 A4 58 03 49 16 10 80 03 42 23 C5",
+  "time": "2026-08-11 19:42:01 (757)",
+  "expected": {
+   "meas_id": 10,
+   "rsrp": -104.0,
+   "rsrq": -8.5
+  }
+ },
+ {
+  "serialNo": 335927,
+  "messageBody": "02 08 22 24 54 42 00 0D 08 90 14",
+  "time": "2026-08-11 19:42:01 (925)",
+  "expected": {
+   "meas_id": 5,
+   "rsrp": -104.0,
+   "rsrq": -9.0
+  }
+ },
+ {
+  "serialNo": 335928,
+  "messageBody": "02 08 23 24 54 42 00 0D 08 90 14",
+  "time": "2026-08-11 19:42:01 (925)",
+  "expected": {
+   "meas_id": 7,
+   "rsrp": -104.0,
+   "rsrq": -9.0
+  }
+ },
+ {
+  "serialNo": 335931,
+  "messageBody": "02 08 34 A4 54 03 49 15 10 80 03 42 23 C3",
+  "time": "2026-08-11 19:42:02 (220)",
+  "expected": {
+   "meas_id": 10,
+   "rsrp": -104.0,
+   "rsrq": -9.0
+  }
+ },
+ {
+  "serialNo": 335937,
+  "messageBody": "02 08 34 25 58 13 49 94 3C 96 63 C5 10 80 03 42 23 C4",
+  "time": "2026-08-11 19:42:02 (691)",
+  "expected": {
+   "meas_id": 9,
+   "rsrp": -103.0,
+   "rsrq": -8.5
+  }
+ },
+ {
+  "serialNo": 335944,
+  "messageBody": "02 08 30 25 54 05 15 9D 18 42 10 19 0C 8F 11 A4 50 F0 5E 03 26 B3 81 5A 9D 53 F7 A0 40 75 30 1E AD 93 9D 50 58 08 0E 75 49 70",
+  "time": "2026-08-11 19:42:02 (891)",
+  "expected": {
+   "meas_id": 1,
+   "rsrp": -103.0,
+   "rsrq": -9.0
+  }
+ },
+ {
+  "serialNo": 335954,
+  "messageBody": "02 08 20 25 4C 42 10 19 0C 8F 11 A4 50 F0 5E 03 26 B3 81 5A 9D 53 F7 A0 40 75 50 1E AD 93 9E 52 5C 08 0E 79 49 70",
+  "time": "2026-08-11 19:42:03 (59)",
+  "expected": {
+   "meas_id": 1,
+   "rsrp": -103.0,
+   "rsrq": -10.0
+  }
+ },
+ {
+  "serialNo": 335963,
+  "messageBody": "02 08 30 25 58 05 15 9C 18 42 10 19 0C 8F 11 A4 51 00 5E 03 26 B3 81 5A 9D 4B F7 60 40 75 0F DD AD 93 9F 58 6C 08 0E 7D 61 A0",
+  "time": "2026-08-11 19:42:03 (891)",
+  "expected": {
+   "meas_id": 1,
+   "rsrp": -103.0,
+   "rsrq": -8.5
+  }
+ },
+ {
+  "serialNo": 335974,
+  "messageBody": "02 08 20 25 54 42 10 19 0C 8F 11 A4 51 00 5E 03 26 B3 81 5A 9D 53 F7 80 40 75 2F DE 2D 93 9E 54 60 08 0E 79 51 80",
+  "time": "2026-08-11 19:42:04 (291)",
+  "expected": {
+   "meas_id": 1,
+   "rsrp": -103.0,
+   "rsrq": -9.0
+  }
+ },
+ {
+  "serialNo": 335990,
+  "messageBody": "02 08 34 23 54 23 49 95 3C 96 64 06 36 99 01 44 20 00 D0 88 F0 C0",
+  "time": "2026-08-11 19:42:05 (796)",
+  "expected": {
+   "meas_id": 9,
+   "rsrp": -105.0,
+   "rsrq": -9.0
+  }
+ },
+ {
+  "serialNo": 336006,
+  "messageBody": "02 08 30 A3 58 05 15 9B 14 42 00 0D 08 8F 0C",
+  "time": "2026-08-11 19:42:06 (405)",
+  "expected": {
+   "meas_id": 2,
+   "rsrp": -105.0,
+   "rsrq": -8.5
+  }
+ },
+ {
+  "serialNo": 336009,
+  "messageBody": "02 08 34 23 58 13 49 95 38 DA 63 C3 10 80 03 42 23 C3",
+  "time": "2026-08-11 19:42:06 (485)",
+  "expected": {
+   "meas_id": 9,
+   "rsrp": -105.0,
+   "rsrq": -8.5
+  }
+ },
+ {
+  "serialNo": 336020,
+  "messageBody": "02 08 34 24 5C 23 49 95 41 B2 63 C5 36 98 D0 84 20 00 D0 88 F1 80",
+  "time": "2026-08-11 19:42:07 (449)",
+  "expected": {
+   "meas_id": 9,
+   "rsrp": -104.0,
+   "rsrq": -8.0
+  }
+ },
+ {
+  "serialNo": 336026,
+  "messageBody": "02 08 30 24 5C 05 15 9A 0C 42 10 19 0C 8F 19 A4 55 00 5E 03 26 B3 81 5A 9D 4B E7 20 40 75 0F DC AD 93 A0 5E 78 08 0E 81 79 E0",
+  "time": "2026-08-11 19:42:07 (689)",
+  "expected": {
+   "meas_id": 1,
+   "rsrp": -104.0,
+   "rsrq": -8.0
+  }
+ },
+ {
+  "serialNo": 336027,
+  "messageBody": "02 08 20 24 58 42 10 19 0C 8F 19 A4 55 00 5E 03 26 B3 81 5A 9D 4B E7 20 40 75 0F DC AD 93 A0 5E 74 08 0E 81 79 E0",
+  "time": "2026-08-11 19:42:07 (841)",
+  "expected": {
+   "meas_id": 1,
+   "rsrp": -104.0,
+   "rsrq": -8.5
+  }
+ },
+ {
+  "serialNo": 336038,
+  "messageBody": "02 08 34 24 58 23 49 94 40 96 63 43 36 98 D0 84 20 00 D0 88 F1 40",
+  "time": "2026-08-11 19:42:08 (81)",
+  "expected": {
+   "meas_id": 9,
+   "rsrp": -104.0,
+   "rsrq": -8.5
+  }
+ },
+ {
+  "serialNo": 336057,
+  "messageBody": "02 08 34 23 3C 13 49 94 3C 96 63 83 10 80 03 42 23 85",
+  "time": "2026-08-11 19:42:09 (492)",
+  "expected": {
+   "meas_id": 9,
+   "rsrp": -105.0,
+   "rsrq": -12.0
+  }
+ },
+ {
+  "serialNo": 336058,
+  "messageBody": "02 08 34 23 3C 03 49 95 44 42 00 0D 08 8F 18",
+  "time": "2026-08-11 19:42:09 (819)",
+  "expected": {
+   "meas_id": 9,
+   "rsrp": -105.0,
+   "rsrq": -12.0
+  }
+ },
+ {
+  "serialNo": 336087,
+  "messageBody": "02 08 20 A6 58 42 00 0D 08 90 1C",
+  "time": "2026-08-11 19:42:11 (531)",
+  "expected": {
+   "meas_id": 2,
+   "rsrp": -102.0,
+   "rsrq": -8.5
+  }
+ },
+ {
+  "serialNo": 336098,
+  "messageBody": "02 08 34 A5 5C 03 49 16 10 80 03 42 24 09",
+  "time": "2026-08-11 19:42:12 (491)",
+  "expected": {
+   "meas_id": 10,
+   "rsrp": -103.0,
+   "rsrq": -8.0
+  }
+ },
+ {
+  "serialNo": 336111,
+  "messageBody": "02 08 34 25 40 13 49 97 50 DA 63 C4 10 80 03 42 24 47",
+  "time": "2026-08-11 19:42:13 (811)",
+  "expected": {
+   "meas_id": 9,
+   "rsrp": -103.0,
+   "rsrq": -11.5
+  }
+ },
+ {
+  "serialNo": 336122,
+  "messageBody": "02 08 34 25 4C 03 49 96 4C 42 00 0D 08 90 1C",
+  "time": "2026-08-11 19:42:14 (251)",
+  "expected": {
+   "meas_id": 9,
+   "rsrp": -103.0,
+   "rsrq": -10.0
+  }
+ },
+ {
+  "serialNo": 336123,
+  "messageBody": "02 08 34 24 58 13 49 96 4C 96 63 85 10 80 03 42 23 C7",
+  "time": "2026-08-11 19:42:14 (571)",
+  "expected": {
+   "meas_id": 9,
+   "rsrp": -104.0,
+   "rsrq": -8.5
+  }
+ },
+ {
+  "serialNo": 336132,
+  "messageBody": "02 08 30 25 5C 05 15 9A 10 42 10 19 0C 8E 15 A4 55 30 5E 03 26 B3 81 5A 9D 43 E7 20 40 75 0F DC AD 93 9F 5E 74 08 0E 81 79 D0",
+  "time": "2026-08-11 19:42:15 (321)",
+  "expected": {
+   "meas_id": 1,
+   "rsrp": -103.0,
+   "rsrq": -8.0
+  }
+ },
+ {
+  "serialNo": 336133,
+  "messageBody": "02 08 34 A5 5C 13 49 15 25 91 01 08 00 34 22 38 50",
+  "time": "2026-08-11 19:42:15 (349)",
+  "expected": {
+   "meas_id": 10,
+   "rsrp": -103.0,
+   "rsrq": -8.0
+  }
+ },
+ {
+  "serialNo": 336150,
+  "messageBody": "02 08 30 A7 4C 05 17 9B 00 22 00 93 A0 04 20 00 D0 89 01 80",
+  "time": "2026-08-11 19:42:16 (651)",
+  "expected": {
+   "meas_id": 2,
+   "rsrp": -101.0,
+   "rsrq": -10.0
+  }
+ },
+ {
+  "serialNo": 336151,
+  "messageBody": "02 08 34 27 50 23 49 95 40 96 64 06 36 98 F1 04 20 00 D0 89 01 80",
+  "time": "2026-08-11 19:42:16 (811)",
+  "expected": {
+   "meas_id": 9,
+   "rsrp": -101.0,
+   "rsrq": -9.5
+  }
+ },
+ {
+  "serialNo": 336152,
+  "messageBody": "02 08 20 27 50 42 10 19 0C 90 19 A4 55 00 5E 03 26 B3 81 5A 9D 5B F7 80 40 75 50 1E 2D 93 A0 58 68 08 0E 81 61 A0",
+  "time": "2026-08-11 19:42:16 (891)",
+  "expected": {
+   "meas_id": 1,
+   "rsrp": -101.0,
+   "rsrq": -9.5
+  }
+ },
+ {
+  "serialNo": 336161,
+  "messageBody": "02 08 34 27 58 13 49 95 40 96 64 05 10 80 03 42 24 47",
+  "time": "2026-08-11 19:42:17 (131)",
+  "expected": {
+   "meas_id": 9,
+   "rsrp": -101.0,
+   "rsrq": -8.5
+  }
+ },
+ {
+  "serialNo": 336163,
+  "messageBody": "02 08 34 26 4C 03 49 95 40 42 00 0D 08 91 1C",
+  "time": "2026-08-11 19:42:17 (772)",
+  "expected": {
+   "meas_id": 9,
+   "rsrp": -102.0,
+   "rsrq": -10.0
+  }
+ },
+ {
+  "serialNo": 336181,
+  "messageBody": "02 08 34 26 54 13 49 95 3D B2 64 05 10 80 03 42 24 48",
+  "time": "2026-08-11 19:42:18 (805)",
+  "expected": {
+   "meas_id": 9,
+   "rsrp": -102.0,
+   "rsrq": -9.0
+  }
+ },
+ {
+  "serialNo": 336182,
+  "messageBody": "02 08 30 26 54 05 17 9A 00 22 00 93 A0 04 21 01 90 C9 12 1A 45 4F 05 E0 32 6B 38 15 A9 D5 BF 7A 04 07 55 01 EA D9 3A 05 86 80 80 E8 16 1A 00",
+  "time": "2026-08-11 19:42:18 (901)",
+  "expected": {
+   "meas_id": 1,
+   "rsrp": -102.0,
+   "rsrq": -9.0
+  }
+ },
+ {
+  "serialNo": 336193,
+  "messageBody": "02 08 20 25 54 42 10 19 0C 91 21 A4 54 F0 5E 03 26 B3 81 5A 9D 4B F7 60 40 75 2F DD AD 93 A0 5A 70 08 0E 81 71 C0",
+  "time": "2026-08-11 19:42:19 (251)",
+  "expected": {
+   "meas_id": 1,
+   "rsrp": -103.0,
+   "rsrq": -9.0
+  }
+ },
+ {
+  "serialNo": 336265,
+  "messageBody": "02 08 04 27 48",
+  "time": "2026-08-11 19:42:22 (6)",
+  "expected": {
+   "meas_id": 9,
+   "rsrp": -101.0,
+   "rsrq": -10.5
+  }
+ },
+ {
+  "serialNo": 336270,
+  "messageBody": "02 08 33 27 4A 00 14 2B 52 2B 00 00 42 00 19 28 88 09 22 A4 00",
+  "time": "2026-08-11 19:42:22 (152)",
+  "expected": {
+   "meas_id": 7,
+   "rsrp": -101.0,
+   "rsrq": -10.5
+  }
+ },
+ {
+  "serialNo": 336298,
+  "messageBody": "02 08 21 A6 48 42 00 19 28 91 0D 22 A3 00",
+  "time": "2026-08-11 19:42:22 (645)",
+  "expected": {
+   "meas_id": 4,
+   "rsrp": -102.0,
+   "rsrq": -10.5
+  }
+ },
+ {
+  "serialNo": 336301,
+  "messageBody": "02 08 24 26 44 42 00 19 28 91 0D 22 A3 00",
+  "time": "2026-08-11 19:42:22 (669)",
+  "expected": {
+   "meas_id": 9,
+   "rsrp": -102.0,
+   "rsrq": -11.0
+  }
+ },
+ {
+  "serialNo": 336302,
+  "messageBody": "02 08 37 A7 48 03 49 19 10 80 0A 4E 24 00 03 01 47 40 24 4C 50",
+  "time": "2026-08-11 19:42:22 (890)",
+  "expected": {
+   "meas_id": 16,
+   "rsrp": -101.0,
+   "rsrq": -10.5
+  }
+ },
+ {
+  "serialNo": 336303,
+  "messageBody": "02 08 36 27 48 03 49 16 10 80 0A 4E 24 00 03 01 47 40 24 4C 50",
+  "time": "2026-08-11 19:42:22 (891)",
+  "expected": {
+   "meas_id": 13,
+   "rsrp": -101.0,
+   "rsrq": -10.5
+  }
+ },
+ {
+  "serialNo": 336304,
+  "messageBody": "02 08 25 A7 48 42 00 29 38 90 00 0C 05 1D 00 91 31 40",
+  "time": "2026-08-11 19:42:22 (918)",
+  "expected": {
+   "meas_id": 12,
+   "rsrp": -101.0,
+   "rsrq": -10.5
+  }
+ },
+ {
+  "serialNo": 336311,
+  "messageBody": "02 08 23 28 48 42 00 29 38 8F 00 0C 05 1C 00 91 31 40",
+  "time": "2026-08-11 19:42:23 (50)",
+  "expected": {
+   "meas_id": 7,
+   "rsrp": -100.0,
+   "rsrq": -10.5
+  }
+ },
+ {
+  "serialNo": 336314,
+  "messageBody": "02 08 37 A9 40 03 49 18 10 80 0A 4E 23 C0 03 01 47 00 24 48 40",
+  "time": "2026-08-11 19:42:23 (120)",
+  "expected": {
+   "meas_id": 16,
+   "rsrp": -99.0,
+   "rsrq": -11.5
+  }
+ },
+ {
+  "serialNo": 336315,
+  "messageBody": "02 08 36 29 40 03 49 16 10 80 0A 4E 23 C0 03 01 47 00 24 48 40",
+  "time": "2026-08-11 19:42:23 (210)",
+  "expected": {
+   "meas_id": 13,
+   "rsrp": -99.0,
+   "rsrq": -11.5
+  }
+ },
+ {
+  "serialNo": 336316,
+  "messageBody": "02 08 21 A9 40 42 00 29 38 8F 00 0C 05 1C 00 91 21 00",
+  "time": "2026-08-11 19:42:23 (310)",
+  "expected": {
+   "meas_id": 4,
+   "rsrp": -99.0,
+   "rsrq": -11.5
+  }
+ },
+ {
+  "serialNo": 336317,
+  "messageBody": "02 08 36 A9 48 03 49 97 3C 42 00 29 38 8E 00 0C 05 1D 00 91 21 00",
+  "time": "2026-08-11 19:42:23 (610)",
+  "expected": {
+   "meas_id": 14,
+   "rsrp": -99.0,
+   "rsrq": -10.5
+  }
+ },
+ {
+  "serialNo": 336321,
+  "messageBody": "02 08 35 29 48 03 49 97 34 42 00 29 38 8E 00 0C 05 1A 00 91 21 00",
+  "time": "2026-08-11 19:42:23 (676)",
+  "expected": {
+   "meas_id": 11,
+   "rsrp": -99.0,
+   "rsrq": -10.5
+  }
+ },
+ {
+  "serialNo": 336325,
+  "messageBody": "02 08 24 29 48 42 00 29 38 8E 00 0C 05 1A 00 91 21 00",
+  "time": "2026-08-11 19:42:23 (718)",
+  "expected": {
+   "meas_id": 9,
+   "rsrp": -99.0,
+   "rsrq": -10.5
+  }
+ },
+ {
+  "serialNo": 336335,
+  "messageBody": "02 08 37 A9 4C 03 49 18 10 80 0A 4E 23 80 03 01 46 80 24 48 50",
+  "time": "2026-08-11 19:42:24 (210)",
+  "expected": {
+   "meas_id": 16,
+   "rsrp": -99.0,
+   "rsrq": -10.0
+  }
+ },
+ {
+  "serialNo": 336336,
+  "messageBody": "02 08 36 29 4C 03 49 17 10 80 0A 4E 23 80 03 01 46 80 24 48 50",
+  "time": "2026-08-11 19:42:24 (210)",
+  "expected": {
+   "meas_id": 13,
+   "rsrp": -99.0,
+   "rsrq": -10.0
+  }
+ },
+ {
+  "serialNo": 336344,
+  "messageBody": "02 08 21 A9 48 42 00 29 38 8E 00 0C 05 1A 00 91 21 40",
+  "time": "2026-08-11 19:42:24 (320)",
+  "expected": {
+   "meas_id": 4,
+   "rsrp": -99.0,
+   "rsrq": -10.5
+  }
+ },
+ {
+  "serialNo": 336345,
+  "messageBody": "02 08 36 A9 44 03 49 98 40 42 00 29 38 8E 00 0C 05 1D 00 91 21 80",
+  "time": "2026-08-11 19:42:24 (698)",
+  "expected": {
+   "meas_id": 14,
+   "rsrp": -99.0,
+   "rsrq": -11.0
+  }
+ },
+ {
+  "serialNo": 336346,
+  "messageBody": "02 08 35 29 44 03 49 95 38 42 00 29 38 8E 00 0C 05 1D 00 91 21 80",
+  "time": "2026-08-11 19:42:24 (698)",
+  "expected": {
+   "meas_id": 11,
+   "rsrp": -99.0,
+   "rsrq": -11.0
+  }
+ },
+ {
+  "serialNo": 336354,
+  "messageBody": "02 08 36 A8 40 13 49 98 45 B2 E3 C0 08 80 24 E0 01 08 00 A4 E2 30 00 30 14 74 02 44 85 00",
+  "time": "2026-08-11 19:42:25 (8)",
+  "expected": {
+   "meas_id": 14,
+   "rsrp": -100.0,
+   "rsrq": -11.5
+  }
+ },
+ {
+  "serialNo": 336370,
+  "messageBody": "02 08 36 A7 3C 03 49 98 40 42 00 19 28 8C 0D 22 42 80",
+  "time": "2026-08-11 19:42:25 (410)",
+  "expected": {
+   "meas_id": 14,
+   "rsrp": -101.0,
+   "rsrq": -12.0
+  }
+ },
+ {
+  "serialNo": 336395,
+  "messageBody": "02 08 31 27 4C 05 15 9F 04 42 10 2D 2C 8C 15 A4 50 F6 88 88 D2 30 78 5E 03 26 B3 81 5A 9D 54 08 00 40 75 50 20 2D 93 9C 4C 50 08 0E 71 21 20",
+  "time": "2026-08-11 19:42:27 (282)",
+  "expected": {
+   "meas_id": 3,
+   "rsrp": -101.0,
+   "rsrq": -10.0
+  }
+ },
+ {
+  "serialNo": 336400,
+  "messageBody": "02 08 21 27 4C 42 10 2D 2C 8C 15 A4 50 F6 88 88 D2 30 78 5E 03 26 B3 81 5A 9D 5C 07 C0 40 75 50 1F 2D 93 9E 50 58 08 0E 79 41 60",
+  "time": "2026-08-11 19:42:27 (410)",
+  "expected": {
+   "meas_id": 3,
+   "rsrp": -101.0,
+   "rsrq": -10.0
+  }
+ },
+ {
+  "serialNo": 336409,
+  "messageBody": "02 08 36 28 50 13 49 15 3B 50 F1 08 00 64 A2 30 64 89 0C 00",
+  "time": "2026-08-11 19:42:27 (930)",
+  "expected": {
+   "meas_id": 13,
+   "rsrp": -100.0,
+   "rsrq": -9.5
+  }
+ },
+ {
+  "serialNo": 336414,
+  "messageBody": "02 08 36 A8 50 13 49 98 3D 45 E3 C0 08 80 24 E8 01 08 00 64 A2 30 54 89 0C 00",
+  "time": "2026-08-11 19:42:28 (90)",
+  "expected": {
+   "meas_id": 14,
+   "rsrp": -100.0,
+   "rsrq": -9.5
+  }
+ },
+ {
+  "serialNo": 336417,
+  "messageBody": "02 08 35 28 4C 13 49 95 40 ED 63 C3 10 80 06 4A 22 C4 48 90 C0",
+  "time": "2026-08-11 19:42:28 (410)",
+  "expected": {
+   "meas_id": 11,
+   "rsrp": -100.0,
+   "rsrq": -10.0
+  }
+ },
+ {
+  "serialNo": 336418,
+  "messageBody": "02 08 31 28 48 05 17 9E 00 22 00 93 A0 04 21 02 D2 C8 B1 1A 45 50 68 90 CD 22 E7 05 E0 32 6B 38 15 A9 D6 C0 82 04 07 59 02 0A D9 39 F5 46 00 80 E7 D5 18 00",
+  "time": "2026-08-11 19:42:28 (438)",
+  "expected": {
+   "meas_id": 3,
+   "rsrp": -100.0,
+   "rsrq": -10.5
+  }
+ },
+ {
+  "serialNo": 336419,
+  "messageBody": "02 08 36 A8 48 03 49 97 38 42 00 19 28 8B 11 22 43 00",
+  "time": "2026-08-11 19:42:28 (438)",
+  "expected": {
+   "meas_id": 14,
+   "rsrp": -100.0,
+   "rsrq": -10.5
+  }
+ },
+ {
+  "serialNo": 336428,
+  "messageBody": "02 08 34 28 44 05 15 A0 08 42 00 19 28 8B 15 22 43 00",
+  "time": "2026-08-11 19:42:28 (852)",
+  "expected": {
+   "meas_id": 9,
+   "rsrp": -100.0,
+   "rsrq": -11.0
+  }
+ },
+ {
+  "serialNo": 336431,
+  "messageBody": "02 08 28 A8 40 42 00 19 28 8B 15 22 23 00",
+  "time": "2026-08-11 19:42:29 (51)",
+  "expected": {
+   "meas_id": 18,
+   "rsrp": -100.0,
+   "rsrq": -11.5
+  }
+ },
+ {
+  "serialNo": 336443,
+  "messageBody": "02 08 21 26 3C 42 10 19 0D 11 19 A4 58 F0 5E 03 26 B3 81 5A 9D 6C 08 20 40 75 90 20 AD 93 9F 4E 54 08 0E 7D 39 50",
+  "time": "2026-08-11 19:42:29 (371)",
+  "expected": {
+   "meas_id": 3,
+   "rsrp": -102.0,
+   "rsrq": -12.0
+  }
+ },
+ {
+  "serialNo": 336452,
+  "messageBody": "02 08 36 A8 3C 13 49 98 41 45 E4 40 08 80 24 E8 01 08 00 34 24 50 80",
+  "time": "2026-08-11 19:42:30 (450)",
+  "expected": {
+   "meas_id": 14,
+   "rsrp": -100.0,
+   "rsrq": -12.0
+  }
+ },
+ {
+  "serialNo": 336457,
+  "messageBody": "02 08 36 A9 40 03 49 98 3C 42 00 0D 09 13 1C",
+  "time": "2026-08-11 19:42:30 (771)",
+  "expected": {
+   "meas_id": 14,
+   "rsrp": -99.0,
+   "rsrq": -11.5
+  }
+ },
+ {
+  "serialNo": 336464,
+  "messageBody": "02 08 36 A9 40 13 49 98 38 ED E4 00 08 80 24 D8 01 08 00 34 24 48 40",
+  "time": "2026-08-11 19:42:31 (411)",
+  "expected": {
+   "meas_id": 14,
+   "rsrp": -99.0,
+   "rsrq": -11.5
+  }
+ },
+ {
+  "serialNo": 336465,
+  "messageBody": "02 08 36 A8 3C 03 49 98 38 42 00 0D 09 12 10",
+  "time": "2026-08-11 19:42:31 (738)",
+  "expected": {
+   "meas_id": 14,
+   "rsrp": -100.0,
+   "rsrq": -12.0
+  }
+ },
+ {
+  "serialNo": 337087,
+  "messageBody": "02 08 00 A5 44",
+  "time": "2026-08-11 19:44:31 (753)",
+  "expected": {
+   "meas_id": 2,
+   "rsrp": -103.0,
+   "rsrq": -11.0
+  }
+ },
+ {
+  "serialNo": 337095,
+  "messageBody": "02 08 20 A5 48 42 00 0D 08 8C 2C",
+  "time": "2026-08-11 19:44:31 (895)",
+  "expected": {
+   "meas_id": 2,
+   "rsrp": -103.0,
+   "rsrq": -10.5
+  }
+ },
+ {
+  "serialNo": 337102,
+  "messageBody": "02 08 33 25 4A 00 14 2B 52 25 00 00 42 00 0D 08 8C 2C",
+  "time": "2026-08-11 19:44:31 (935)",
+  "expected": {
+   "meas_id": 7,
+   "rsrp": -103.0,
+   "rsrq": -10.5
+  }
+ },
+ {
+  "serialNo": 337145,
+  "messageBody": "02 08 22 24 44 42 00 0D 08 96 0C",
+  "time": "2026-08-11 19:44:32 (539)",
+  "expected": {
+   "meas_id": 5,
+   "rsrp": -104.0,
+   "rsrq": -11.0
+  }
+ },
+ {
+  "serialNo": 337150,
+  "messageBody": "02 08 30 A4 44 05 15 9C 14 42 00 0D 08 96 0C",
+  "time": "2026-08-11 19:44:32 (581)",
+  "expected": {
+   "meas_id": 2,
+   "rsrp": -104.0,
+   "rsrq": -11.0
+  }
+ },
+ {
+  "serialNo": 337169,
+  "messageBody": "02 08 33 A4 48 05 15 1B 10 84 03 42 25 83 17 80 C9 AC E0 56 A7 4A F1 90 10 1D 2B D6 4B 64 E8 59 A2 02 03 A1 66 8C",
+  "time": "2026-08-11 19:44:32 (755)",
+  "expected": {
+   "meas_id": 8,
+   "rsrp": -104.0,
+   "rsrq": -10.5
+  }
+ },
+ {
+  "serialNo": 337176,
+  "messageBody": "02 08 30 A4 48 05 15 9B 20 42 00 0D 08 95 0C",
+  "time": "2026-08-11 19:44:32 (869)",
+  "expected": {
+   "meas_id": 2,
+   "rsrp": -104.0,
+   "rsrq": -10.5
+  }
+ },
+ {
+  "serialNo": 337177,
+  "messageBody": "02 08 34 A5 4C 03 49 17 10 80 03 42 24 C1",
+  "time": "2026-08-11 19:44:33 (375)",
+  "expected": {
+   "meas_id": 10,
+   "rsrp": -103.0,
+   "rsrq": -10.0
+  }
+ },
+ {
+  "serialNo": 337184,
+  "messageBody": "02 08 22 25 4C 42 00 21 18 93 00 0C 05 1D 00 00",
+  "time": "2026-08-11 19:44:33 (529)",
+  "expected": {
+   "meas_id": 5,
+   "rsrp": -103.0,
+   "rsrq": -10.0
+  }
+ },
+ {
+  "serialNo": 337185,
+  "messageBody": "02 08 23 25 4C 42 00 21 18 93 00 0C 05 1D 00 00",
+  "time": "2026-08-11 19:44:33 (529)",
+  "expected": {
+   "meas_id": 7,
+   "rsrp": -103.0,
+   "rsrq": -10.0
+  }
+ },
+ {
+  "serialNo": 337221,
+  "messageBody": "02 08 34 A6 54 03 49 15 10 80 03 42 24 84",
+  "time": "2026-08-11 19:44:34 (635)",
+  "expected": {
+   "meas_id": 10,
+   "rsrp": -102.0,
+   "rsrq": -9.0
+  }
+ },
+ {
+  "serialNo": 337225,
+  "messageBody": "02 08 34 26 50 13 49 95 40 96 64 89 10 80 03 42 24 84",
+  "time": "2026-08-11 19:44:34 (798)",
+  "expected": {
+   "meas_id": 9,
+   "rsrp": -102.0,
+   "rsrq": -9.5
+  }
+ },
+ {
+  "serialNo": 337255,
+  "messageBody": "02 08 34 25 44 03 49 95 2C 42 00 0D 08 93 18",
+  "time": "2026-08-11 19:44:36 (755)",
+  "expected": {
+   "meas_id": 9,
+   "rsrp": -103.0,
+   "rsrq": -11.0
+  }
+ },
+ {
+  "serialNo": 337277,
+  "messageBody": "02 08 20 A5 40 42 00 0D 08 91 18",
+  "time": "2026-08-11 19:44:37 (995)",
+  "expected": {
+   "meas_id": 2,
+   "rsrp": -103.0,
+   "rsrq": -11.5
+  }
+ },
+ {
+  "serialNo": 337280,
+  "messageBody": "02 08 34 A4 48 13 49 15 25 91 31 08 00 34 22 40 60",
+  "time": "2026-08-11 19:44:38 (310)",
+  "expected": {
+   "meas_id": 10,
+   "rsrp": -104.0,
+   "rsrq": -10.5
+  }
+ },
+ {
+  "serialNo": 337289,
+  "messageBody": "02 08 34 25 44 13 49 95 3C 96 64 C9 10 80 03 42 24 07",
+  "time": "2026-08-11 19:44:38 (795)",
+  "expected": {
+   "meas_id": 9,
+   "rsrp": -103.0,
+   "rsrq": -11.0
+  }
+ },
+ {
+  "serialNo": 337351,
+  "messageBody": "02 08 34 26 34 23 49 95 40 96 64 CB 36 98 E0 84 20 00 D0 89 12 40",
+  "time": "2026-08-11 19:44:43 (71)",
+  "expected": {
+   "meas_id": 9,
+   "rsrp": -102.0,
+   "rsrq": -13.0
+  }
+ },
+ {
+  "serialNo": 337352,
+  "messageBody": "02 08 20 A6 38 42 00 0D 08 91 24",
+  "time": "2026-08-11 19:44:43 (151)",
+  "expected": {
+   "meas_id": 2,
+   "rsrp": -102.0,
+   "rsrq": -12.5
+  }
+ },
+ {
+  "serialNo": 337353,
+  "messageBody": "02 08 34 26 38 13 49 95 48 96 64 CC 10 80 03 42 24 49",
+  "time": "2026-08-11 19:44:43 (163)",
+  "expected": {
+   "meas_id": 9,
+   "rsrp": -102.0,
+   "rsrq": -12.5
+  }
+ },
+ {
+  "serialNo": 337406,
+  "messageBody": "02 08 34 24 48 23 49 95 3C 96 65 0B 6C 98 F1 04 20 00 D0 88 F1 40",
+  "time": "2026-08-11 19:44:45 (802)",
+  "expected": {
+   "meas_id": 9,
+   "rsrp": -104.0,
+   "rsrq": -10.5
+  }
+ },
+ {
+  "serialNo": 337420,
+  "messageBody": "02 08 34 23 48 13 49 95 38 96 64 89 10 80 03 42 23 81",
+  "time": "2026-08-11 19:44:46 (803)",
+  "expected": {
+   "meas_id": 9,
+   "rsrp": -105.0,
+   "rsrq": -10.5
+  }
+ },
+ {
+  "serialNo": 337433,
+  "messageBody": "02 08 20 A5 48 42 00 0D 08 8E 04",
+  "time": "2026-08-11 19:44:48 (275)",
+  "expected": {
+   "meas_id": 2,
+   "rsrp": -103.0,
+   "rsrq": -10.5
+  }
+ },
+ {
+  "serialNo": 337442,
+  "messageBody": "02 08 34 A5 48 13 49 13 25 91 21 08 00 84 62 34 00 30 14 74 00 00",
+  "time": "2026-08-11 19:44:48 (575)",
+  "expected": {
+   "meas_id": 10,
+   "rsrp": -103.0,
+   "rsrq": -10.5
+  }
+ },
+ {
+  "serialNo": 337443,
+  "messageBody": "02 08 34 25 48 23 49 94 30 96 64 8A 6C 98 F0 C4 20 02 11 88 D0 00 C0 51 C0 00 00",
+  "time": "2026-08-11 19:44:48 (735)",
+  "expected": {
+   "meas_id": 9,
+   "rsrp": -103.0,
+   "rsrq": -10.5
+  }
+ },
+ {
+  "serialNo": 337444,
+  "messageBody": "02 08 34 A5 44 23 49 14 25 91 16 C9 0F 10 80 08 46 23 40 03 01 47 00 00",
+  "time": "2026-08-11 19:44:49 (215)",
+  "expected": {
+   "meas_id": 10,
+   "rsrp": -103.0,
+   "rsrq": -11.0
+  }
+ },
+ {
+  "serialNo": 337455,
+  "messageBody": "02 08 34 24 4C 13 49 95 3C 96 64 49 10 80 03 42 23 81",
+  "time": "2026-08-11 19:44:50 (5)",
+  "expected": {
+   "meas_id": 9,
+   "rsrp": -104.0,
+   "rsrq": -10.0
+  }
+ },
+ {
+  "serialNo": 337502,
+  "messageBody": "02 08 20 A2 50 42 00 21 18 8C 00 0C 05 1C 00 00",
+  "time": "2026-08-11 19:44:53 (393)",
+  "expected": {
+   "meas_id": 2,
+   "rsrp": -106.0,
+   "rsrq": -9.5
+  }
+ },
+ {
+  "serialNo": 337521,
+  "messageBody": "02 08 30 22 48 05 15 9B 08 42 10 29 1C 8D 01 A4 50 C0 30 14 68 00 5E 03 26 B3 81 5A 9D 4B E7 00 40 75 2F DC 2D 93 9F 64 84 08 0E 7D 92 10",
+  "time": "2026-08-11 19:44:54 (605)",
+  "expected": {
+   "meas_id": 1,
+   "rsrp": -106.0,
+   "rsrq": -10.5
+  }
+ },
+ {
+  "serialNo": 337525,
+  "messageBody": "02 08 20 22 3C 42 10 29 1C 8D 01 A4 54 D0 30 14 68 00 5E 03 26 B3 81 5A 9D 4B E6 E0 40 75 2F DB AD 93 9F 64 84 08 0E 7D 92 10",
+  "time": "2026-08-11 19:44:54 (797)",
+  "expected": {
+   "meas_id": 1,
+   "rsrp": -106.0,
+   "rsrq": -12.0
+  }
+ },
+ {
+  "serialNo": 337547,
+  "messageBody": "02 08 34 A4 54 23 49 13 25 91 23 69 11 10 80 08 46 23 40 03 01 46 00 00",
+  "time": "2026-08-11 19:44:56 (645)",
+  "expected": {
+   "meas_id": 10,
+   "rsrp": -104.0,
+   "rsrq": -9.0
+  }
+ },
+ {
+  "serialNo": 337552,
+  "messageBody": "02 08 34 24 48 23 49 93 30 96 64 47 36 98 E0 44 20 02 11 88 D0 00 C0 51 B0 00 00",
+  "time": "2026-08-11 19:44:57 (117)",
+  "expected": {
+   "meas_id": 9,
+   "rsrp": -104.0,
+   "rsrq": -10.5
+  }
+ },
+ {
+  "serialNo": 337565,
+  "messageBody": "02 08 34 23 4C 13 49 93 28 96 64 44 10 80 08 46 23 80 03 01 46 C0 00",
+  "time": "2026-08-11 19:44:58 (94)",
+  "expected": {
+   "meas_id": 9,
+   "rsrp": -105.0,
+   "rsrq": -10.0
+  }
+ },
+ {
+  "serialNo": 337570,
+  "messageBody": "02 08 30 23 48 05 15 9B 0C 42 10 29 1C 8E 01 A4 50 A0 30 14 70 00 5E 03 26 B3 81 5A 9D 3B E6 E0 40 74 EF DB AD 93 9F 60 7C 08 0E 7D 8A 00",
+  "time": "2026-08-11 19:44:58 (485)",
+  "expected": {
+   "meas_id": 1,
+   "rsrp": -105.0,
+   "rsrq": -10.5
+  }
+ },
+ {
+  "serialNo": 337571,
+  "messageBody": "02 08 30 A3 48 05 15 9B 0C 42 00 21 18 8E 00 0C 05 1C 00 00",
+  "time": "2026-08-11 19:44:58 (485)",
+  "expected": {
+   "meas_id": 2,
+   "rsrp": -105.0,
+   "rsrq": -10.5
+  }
+ },
+ {
+  "serialNo": 337578,
+  "messageBody": "02 08 20 23 4C 42 10 29 1C 8E 01 A4 50 A0 30 14 70 00 5E 03 26 B3 81 5A 9D 3B E6 E0 40 74 CF DB AD 93 9F 60 7C 08 0E 7D 8A 00",
+  "time": "2026-08-11 19:44:58 (645)",
+  "expected": {
+   "meas_id": 1,
+   "rsrp": -105.0,
+   "rsrq": -10.0
+  }
+ }
+]

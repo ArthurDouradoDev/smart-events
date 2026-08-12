@@ -241,6 +241,8 @@ def init_db():
             id           INTEGER PRIMARY KEY AUTOINCREMENT,
             vip_name     TEXT NOT NULL,
             event_id     TEXT NOT NULL,
+            task_id      INTEGER,
+            serial_no    INTEGER,
             timestamp    TEXT NOT NULL,
             serving_cell TEXT,
             rsrp         REAL,
@@ -314,22 +316,21 @@ def init_db():
     except sqlite3.OperationalError:
         pass
 
-    # Garante UNIQUE index em vip_measurements global para deduplicação entre migrações.
-    # Se já houver duplicatas (ciclos anteriores sem o índice), remove-as primeiro
-    # mantendo o registro de maior id para cada (vip_name, timestamp).
     try:
-        conn.execute("""
-            DELETE FROM vip_measurements
-            WHERE id NOT IN (
-                SELECT MAX(id)
-                FROM vip_measurements
-                GROUP BY vip_name, timestamp
-            )
-        """)
-        conn.commit()
+        columns = {row["name"] for row in conn.execute("PRAGMA table_info(vip_measurements)")}
+        if "task_id" not in columns:
+            conn.execute("ALTER TABLE vip_measurements ADD COLUMN task_id INTEGER")
+        if "serial_no" not in columns:
+            conn.execute("ALTER TABLE vip_measurements ADD COLUMN serial_no INTEGER")
+        conn.execute("DROP INDEX IF EXISTS idx_vip_dedup")
         conn.execute(
-            "CREATE UNIQUE INDEX IF NOT EXISTS idx_vip_dedup "
-            "ON vip_measurements(vip_name, timestamp)"
+            "CREATE UNIQUE INDEX IF NOT EXISTS idx_vip_task_serial "
+            "ON vip_measurements(task_id, serial_no) "
+            "WHERE task_id IS NOT NULL AND serial_no IS NOT NULL"
+        )
+        conn.execute(
+            "CREATE UNIQUE INDEX IF NOT EXISTS idx_vip_legacy_dedup "
+            "ON vip_measurements(vip_name, timestamp) WHERE serial_no IS NULL"
         )
         conn.commit()
     except Exception:
@@ -737,16 +738,21 @@ def get_latest_kpi(event_id: str, max_timestamp: Optional[str] = None) -> List[d
 # ── VIP Measurements ────────────────────────────────────────────────
 
 def insert_vip_batch(measurements: List[dict]):
-    """Insere medições de VIP no banco global (deduplicação por vip_name + timestamp)."""
+    """Insere medições de VIP por task/serial e devolve inseridos/duplicados."""
     if not measurements:
-        return
+        return {"inserted": 0, "duplicate": 0}
     conn = get_conn()  # banco global — VIP measurements são independentes de evento
+    rows = [{**item, "task_id": item.get("task_id"), "serial_no": item.get("serial_no")}
+            for item in measurements]
+    before = conn.total_changes
     conn.executemany("""
         INSERT OR IGNORE INTO vip_measurements
-            (vip_name, event_id, timestamp, serving_cell, rsrp, rsrq, in_event)
-        VALUES (:vip_name, :event_id, :timestamp, :serving_cell, :rsrp, :rsrq, :in_event)
-    """, measurements)
+            (vip_name, event_id, task_id, serial_no, timestamp, serving_cell, rsrp, rsrq, in_event)
+        VALUES (:vip_name, :event_id, :task_id, :serial_no, :timestamp, :serving_cell, :rsrp, :rsrq, :in_event)
+    """, rows)
     conn.commit()
+    inserted = conn.total_changes - before
+    return {"inserted": inserted, "duplicate": len(rows) - inserted}
 
 
 def get_vip_latest(max_timestamp: Optional[str] = None) -> List[dict]:

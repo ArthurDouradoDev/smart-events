@@ -976,9 +976,13 @@ function _syncSection(title, s, isVip) {
   let rows = _syncRow("Status",
     `<span class="sync-dot ${info.cls}"></span>${info.label}${last ? " · " + _agoLabel(last) : ""}`);
   if (isVip) {
-    const modeLabel = s.mode === "full" ? "completo" : (s.mode === "express" ? "expresso" : "—");
+    const modeLabel = s.mode === "incremental" ? "incremental" : "—";
     rows += _syncRow("Modo", modeLabel);
     rows += _syncRow("VIPs com dados", `${s.vips_with_data}/${s.vips_total}`);
+    if (s.coverage?.backlog_tasks) {
+      rows += _syncRow("Backlog", `${s.coverage.backlog_messages || 0} mensagens em ${s.coverage.backlog_tasks} task(s)`);
+    }
+    if (s.coverage?.latest_serial != null) rows += _syncRow("Último serial", _esc(s.coverage.latest_serial));
   }
   const meas = `${s.inserted ?? s.last_count ?? 0} inseridas · ${s.invalid ?? 0} inválidas`;
   rows += _syncRow("Medições", meas + (s.duration_s != null ? " · " + s.duration_s + "s" : ""));

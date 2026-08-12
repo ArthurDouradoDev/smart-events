@@ -46,6 +46,7 @@ from core import database as db
 from core import credentials
 from core.collection_result import CollectionResult
 from core.kpi_formulas import InvalidKpi, calculate as calculate_kpi, definitions_for
+from core.rrc_decode import decode_meas_report
 from core.session_renew import (
     EXIT_SUCCESS,
     EXIT_GENERIC_FAIL,
@@ -606,9 +607,6 @@ class HttpCollector(BaseCollector):
     _interactive_lock = threading.Lock()
     _interactive_cooldown_until = None  # datetime | None
 
-    # Limites de decodificação de mensagens (RRC_MEAS_RPRT) de VIPs
-    _VIP_DECODES_EXPRESS = 3
-    _VIP_DECODES_FULL = 20
     _VIP_MAX_WORKERS = 3
 
     # Diagnóstico HTTP opt-in: quando ligado (HttpCollector.http_debug=True ou env
@@ -1556,265 +1554,307 @@ class HttpCollector(BaseCollector):
         val, _ = self._find_metric_value_and_candidate(d, candidates)
         return val
 
-    # Limite de mensagens RRC_MEAS_RPRT que tentamos decodificar por ciclo
-    # (cada uma exige uma chamada extra ao msg-explain-info).
-    _MAX_MEAS_DECODES_PER_CYCLE = 50
-    _TRACE_PAGE_SIZE = 500
+    # O filtro por Message Type é aplicado no servidor e o RSRP/RSRQ sai do
+    # messageBody por decodificação local, então um ciclo custa uma requisição
+    # por página — não uma por mensagem.  O teto de páginas só impede que um
+    # bootstrap muito longo bloqueie o worker; o restante vira backlog.
+    _VIP_PAGE_SIZE = 1000
+    _VIP_MAX_PAGES_PER_CYCLE = 5
+    # A alocação do msgId espelha a página que o navegador pede no mesmo passo.
+    _VIP_BOOTSTRAP_PAGE_SIZE = 100
 
-    def _collect_one_vip(self, task_id: int, vip_name: str, mode: str) -> List[dict]:
-        """
-        Executa o fluxo de coleta completo de 4 etapas para um único VIP.
-        Roda em uma thread do ThreadPoolExecutor e usa uma requests.Session exclusiva.
-        """
-        s = self._build_session("trace")
-        try:
-            # 1) pre-check: inicializa a sessão de query server-side
-            pre_url = f"{self.base_url}/rest/oss/access/fars/v1/traceresult/pre-check"
-            pre_resp = s.get(pre_url, params={
-                "taskId": task_id,
-                "queryType": 0,
-                "nocache": int(time.time() * 1000),
-            }, timeout=30)
-            if not self._check_session_valid(pre_resp, "trace"):
-                raise SessionExpiredError("Sessão trace expirada no worker (pre-check)")
-            if pre_resp.status_code >= 400:
-                self._handle_trace_error(task_id, "pre-check", pre_resp)
-                raise requests.exceptions.HTTPError(f"pre-check HTTP {pre_resp.status_code}")
-            pre_data = pre_resp.json() if pre_resp.content else {}
-            if not pre_data.get("checkState", False):
-                logger.warning(f"pre-check falhou para task {task_id}: {pre_data}")
-                raise ValueError(f"pre-check recusou a task {task_id}")
+    def _trace_oss(self) -> str:
+        return (self._region or self.base_url).upper()
 
-            # 2) query/result para obter sess_msg_id
-            result_url = f"{self.base_url}/rest/oss/access/fars/v1/traceresult/query/result"
-            result_resp = s.get(result_url, params={
-                "nocache": int(time.time() * 1000),
-                "startRow": 0,
-                "pageSize": 10,
-                "taskId": task_id,
-                "msgId": 1,
-                "isSetBenchMarkTime": "false",
+    def _open_trace_query(self, session, task_id: int) -> tuple[int, str, str]:
+        """Abre a consulta FARS e devolve ``msgId`` e a janela da task do ciclo.
+
+        O ``msgId`` é um handle descartável: cada chamada de ``query/result`` com
+        ``msgId=1`` aloca um novo no servidor. Por isso ele precisa ser criado e
+        consumido dentro do mesmo ciclo — reaproveitar um handle de outro ciclo
+        faz o FARS responder sem linhas.
+
+        ``fetch-field-values`` devolve o intervalo coberto pela task. Ele não é
+        opcional: ``filter-by-cols`` responde HTTP 500 quando recebe
+        ``startTime``/``endTime`` vazios.
+        """
+        pre = session.get(
+            f"{self.base_url}/rest/oss/access/fars/v1/traceresult/pre-check",
+            params={"taskId": task_id, "queryType": 0, "nocache": int(time.time() * 1000)},
+            timeout=30, allow_redirects=False,
+        )
+        if not self._check_session_valid(pre, "trace"):
+            raise SessionExpiredError("Sessão Trace expirada no pre-check")
+        pre.raise_for_status()
+        pre_data = pre.json() if pre.content else {}
+        if not isinstance(pre_data, dict) or not pre_data.get("checkState", False):
+            raise ValueError(f"Task {task_id} ausente, parada ou recusada pelo pre-check")
+
+        initial = session.get(
+            f"{self.base_url}/rest/oss/access/fars/v1/traceresult/query/result",
+            params={
+                "nocache": int(time.time() * 1000), "startRow": 0,
+                "pageSize": self._VIP_BOOTSTRAP_PAGE_SIZE,
+                "taskId": task_id, "msgId": 1, "isSetBenchMarkTime": "false",
                 "benchMarkTimeRowNo": -1,
-            }, timeout=30)
-            if not self._check_session_valid(result_resp, "trace"):
-                raise SessionExpiredError("Sessão trace expirada no worker (query/result)")
-            if result_resp.status_code >= 400:
-                self._handle_trace_error(task_id, "query/result", result_resp)
-                raise requests.exceptions.HTTPError(f"query/result HTTP {result_resp.status_code}")
+            }, timeout=60, allow_redirects=False,
+        )
+        if not self._check_session_valid(initial, "trace"):
+            raise SessionExpiredError("Sessão Trace expirada ao abrir a consulta")
+        initial.raise_for_status()
+        data = initial.json().get("data") or {}
+        if not isinstance(data, dict) or data.get("msgId") is None:
+            raise ValueError("A abertura da consulta de Trace não retornou msgId")
+        msg_id = int(data["msgId"])
 
-            result_data = result_resp.json() if result_resp.content else {}
-            data_block = result_data.get("data") or {}
-            if isinstance(data_block, list):
-                logger.warning(f"query/result retornou lista para task {task_id} — sem sess_msg_id")
-                raise ValueError("query/result retornou contrato sem msgId")
-            sess_msg_id = data_block.get("msgId")
-            if not sess_msg_id:
-                logger.warning(f"Sem sess_msg_id para task {task_id}: {data_block}")
-                raise ValueError("query/result não retornou msgId")
+        fields = session.get(
+            f"{self.base_url}/rest/oss/access/fars/v1/traceresult/query/fetch-field-values",
+            params={"nocache": int(time.time() * 1000), "taskId": task_id, "msgId": msg_id},
+            timeout=60, allow_redirects=False,
+        )
+        if not self._check_session_valid(fields, "trace"):
+            raise SessionExpiredError("Sessão Trace expirada ao ler a janela da task")
+        fields.raise_for_status()
+        window = fields.json() if fields.content else {}
+        start_time, end_time = window.get("startTime"), window.get("endTime")
+        if not start_time or not end_time:
+            raise ValueError(f"Task {task_id} não informou a janela de tempo (startTime/endTime)")
+        return msg_id, start_time, end_time
 
-            # 3) filter-by-cols — RRC_MEAS_RPRT, mais recente primeiro
-            filter_url = f"{self.base_url}/rest/oss/access/fars/v1/traceresult/query/filter-by-cols"
-            _now_local = datetime.utcnow()
-            _filter_end   = _now_local.strftime('%Y-%m-%d %H:%M:%S')
-            _filter_start = "2000-01-01 00:00:00"
-            filter_payload = {
-                "colFilterDto": {
-                    "colFltExpSeq": [{
-                        "fieldId": "Message Type",
-                        "value": "RRC_MEAS_RPRT",
-                        "operator": {"op": 0}
-                    }],
-                    "signalList": [],
-                    "hasStartTime": False,
-                    "startTime": _filter_start,
-                    "hasEndTime": False,
-                    "endTime": _filter_end,
-                    "isReverse": False
-                },
-                "pageDto": {
-                    "sqlColumnName": "Time",
-                    "isAscend": False,  # mais recente primeiro
-                    "taskId": task_id,
-                    "msgId": sess_msg_id,
-                    "comparisonMsgId": -1,
-                    "startRow": 0,
-                    "pageSize": 1000,
-                    "templateName": [],
-                    "isSetBenchMarkTime": False,
-                    "benchMarkTimeRowNo": -1
-                }
-            }
-            # POST sem ?nocache= (limpeza; ver collect_kpis). allow_redirects=False para
-            # detectar 302→SSO como sessão inválida em vez de seguir o redirect → 404 enganoso.
-            filter_resp = s.post(
-                filter_url,
-                json=filter_payload,
-                timeout=60,
-                allow_redirects=False,
-            )
-            if not self._check_session_valid(filter_resp, "trace"):
-                raise SessionExpiredError("Sessão trace expirada no worker (filter-by-cols)")
-            if filter_resp.status_code >= 400:
-                self._handle_trace_error(task_id, "filter-by-cols", filter_resp)
-                raise requests.exceptions.HTTPError(f"filter-by-cols HTTP {filter_resp.status_code}")
+    def _fetch_meas_report_page(self, session, task_id: int, msg_id: int, start_row: int,
+                                start_time: str, end_time: str) -> tuple[list, int]:
+        """Pede ao FARS uma página contendo apenas ``RRC_MEAS_RPRT``.
 
-            # 4) parsing + msg-explain-info para RSRP/RSRQ
-            max_decodes = self._VIP_DECODES_EXPRESS if mode == "express" else self._VIP_DECODES_FULL
-            return self._parse_filtered_trace_response(
-                filter_resp.json(), task_id, s, vip_name, sess_msg_id, max_decodes
-            )
+        O filtro por tipo é resolvido no servidor, o que reduz o resultado da
+        task (centenas de milhares de linhas) ao conjunto de relatórios de
+        medição. Devolve as linhas da página e o total filtrado.
+        """
+        body = {
+            "colFilterDto": {
+                "colFltExpSeq": [
+                    {"fieldId": "Message Type", "value": "RRC_MEAS_RPRT", "operator": {"op": 0}}
+                ],
+                # ``hasStartTime``/``hasEndTime`` falsos usam a janela inteira,
+                # mas as datas precisam vir preenchidas — o servidor as desserializa
+                # de qualquer forma e devolve 500 se vierem vazias.
+                "signalList": [], "hasStartTime": False, "startTime": start_time,
+                "hasEndTime": False, "endTime": end_time, "isReverse": False,
+            },
+            "pageDto": {
+                "sqlColumnName": "", "isAscend": "", "taskId": task_id, "msgId": msg_id,
+                "comparisonMsgId": -1, "startRow": start_row, "pageSize": self._VIP_PAGE_SIZE,
+                "templateName": [], "isSetBenchMarkTime": False, "benchMarkTimeRowNo": -1,
+            },
+        }
+        response = session.post(
+            f"{self.base_url}/rest/oss/access/fars/v1/traceresult/query/filter-by-cols",
+            params={"nocache": int(time.time() * 1000)}, json=body,
+            timeout=120, allow_redirects=False,
+        )
+        if not self._check_session_valid(response, "trace"):
+            raise SessionExpiredError("Sessão Trace expirada no filtro de mensagens")
+        response.raise_for_status()
+        payload = response.json()
+        data = payload.get("data") if isinstance(payload, dict) else None
+        if not isinstance(data, dict) or not isinstance(data.get("tableData"), list):
+            raise ValueError("filter-by-cols retornou contrato inválido")
+        try:
+            total = int(payload.get("recordCount") or 0)
+        except (TypeError, ValueError):
+            total = 0
+        return data["tableData"], total
 
-        except (requests.exceptions.ConnectTimeout, requests.exceptions.ConnectionError, requests.exceptions.Timeout) as e:
-            logger.error(f"Erro de conexão ao consultar VIP {vip_name} (taskId={task_id}): {e}")
+    @staticmethod
+    def _trace_fields(message: dict) -> dict:
+        return {field.get("name", ""): field.get("value", "")
+                for field in (message.get("payload") or []) if isinstance(field, dict)}
+
+    def _build_vip_measurements(self, task_id: int, vip_name: str, messages: list,
+                                last_serial: int) -> tuple[list, int, int]:
+        """Decodifica as linhas do filtro e devolve medições, cursor e não decodificadas.
+
+        A resposta do FARS não vem ordenada por ``serialNo``, então a ordenação
+        é feita aqui antes de avançar o cursor.
+
+        Diferente de um decode remoto, ``decode_meas_report`` é função pura dos
+        bytes: uma mensagem que falha hoje falha em todo ciclo futuro. Por isso o
+        cursor avança sobre ela — parar ali travaria a coleta para sempre — mas a
+        ocorrência é contada e volta como diagnóstico, nunca como zero.
+        """
+        rows, undecoded = [], 0
+        safe_serial = last_serial
+        ordered = sorted(messages, key=lambda item: int(item.get("serialNo") or -1))
+        for message in ordered:
             try:
-                active_alerts = db.get_active_alerts(self.event_id)
-                conn_msg = f"Falha de conexão com o iManager (Trace VIP {vip_name}). Verifique a VPN."
-                if not any(a.get("message") == conn_msg for a in active_alerts):
-                    db.insert_alert({
-                        "event_id":  self.event_id,
-                        "level":     "GLOBAL",
-                        "severity":  "CRITICAL",
-                        "site_id":   "GLOBAL",
-                        "cell_id":   "",
-                        "message":   conn_msg,
-                        "timestamp": datetime.utcnow().strftime('%Y-%m-%dT%H:%M:%SZ'),
-                    })
-            except Exception as alert_ex:
-                logger.warning(f"Não foi possível inserir alerta de conexão VIP: {alert_ex}")
-            raise requests.exceptions.ConnectionError(
-                f"Falha de conexão ao consultar VIP {vip_name}: {e}") from e
-        except Exception as e:
-            if not isinstance(e, SessionExpiredError):
-                logger.error(f"Erro ao consultar VIP {vip_name} (taskId={task_id}): {e}")
-            raise
+                serial = int(message["serialNo"])
+            except (KeyError, TypeError, ValueError):
+                undecoded += 1
+                continue
+            if serial <= last_serial:
+                continue
+            fields = self._trace_fields(message)
+            if (fields.get("GULTrcMsgType") or message.get("msgType") or "") != "RRC_MEAS_RPRT":
+                safe_serial = max(safe_serial, serial)
+                continue
+            decoded = decode_meas_report(message.get("messageBody"))
+            if decoded is None:
+                undecoded += 1
+                safe_serial = max(safe_serial, serial)
+                continue
+            cell = str(fields.get("GLCellId") or "")
+            source = message.get("source") or ""
+            serving_cell = f"{source}_{cell}" if source and cell else (source or cell)
+            rows.append({
+                "vip_name": vip_name, "event_id": self.event_id, "task_id": task_id,
+                "serial_no": serial, "timestamp": self._parse_trace_timestamp(fields.get("Time")),
+                "serving_cell": serving_cell, "rsrp": decoded["rsrp"], "rsrq": decoded["rsrq"],
+                "in_event": 1 if self._cell_in_event(serving_cell) else 0,
+            })
+            safe_serial = max(safe_serial, serial)
+        return rows, safe_serial, undecoded
 
-    def collect_vips(self, mode: str = "express") -> CollectionResult:
-        """
-        Coleta resultados de trace via fluxo paralelo com ThreadPoolExecutor.
-        Antes da execução paralela, faz um preflight sequencial para garantir e/ou renovar a sessão.
-        """
-        import time
-        start_time = time.time()
+    def collect_vips(self, mode: str = "incremental") -> CollectionResult:
+        """Consome o Trace por ``filter-by-cols``, decodificando RSRP/RSRQ localmente."""
+        from core.collection_result import CollectionDiagnostic
 
         self.vips_by_task = self._load_vips_by_task()
         if not self.vips_by_task:
-            logger.warning(
-                "Nenhum VIP com task_id configurado — sem coleta de trace. "
-                "Defina 'task_id' em cada VIP do evento."
-            )
             return CollectionResult.empty(
-                "Nenhum VIP com task configurada para coleta de trace.",
-                coverage={"vips_configured": 0, "vips_with_data": 0},
+                "Nenhum VIP com task configurada para coleta de Trace.",
+                coverage={"vips_configured": 0, "vips_with_data": 0, "tasks_configured": 0},
             )
 
-        # 1) Preflight sequencial: garante que a sessão 'trace' está ativa.
-        # Tenta fazer pre-check com o primeiro task_id do pool.
-        first_task_id = list(self.vips_by_task.keys())[0]
-        preflight_ok = False
-        retries = 2
-        renewed_this_call = False
-        
-        for attempt in range(retries):
-            s = self._get_session("trace")
+        all_rows, cursors, diagnostics = [], {}, []
+        task_details, failures = [], []
+        renewed = False
+        for attempt in range(2):
+            all_rows, cursors, diagnostics, task_details, failures = [], {}, [], [], []
             try:
-                pre_url = f"{self.base_url}/rest/oss/access/fars/v1/traceresult/pre-check"
-                pre_resp = s.get(pre_url, params={
-                    "taskId": first_task_id,
-                    "queryType": 0,
-                    "nocache": int(time.time() * 1000),
-                }, timeout=30)
-                if not self._check_session_valid(pre_resp, "trace"):
-                    raise SessionExpiredError("Sessão trace expirada no preflight")
-                pre_resp.raise_for_status()
-                preflight_ok = True
-                break
-            except SessionExpiredError as e:
-                logger.warning(f"Sessão expirada no preflight de trace: {e}")
-                if renewed_this_call:
-                    self._engage_backoff("trace")
-                    logger.error("Sessão trace renovada no preflight mas continua inválida (backoff).")
-                    break
-                if attempt < retries - 1:
-                    logger.warning("Iniciando renovação automática da sessão de trace no preflight...")
-                    if self._renew_session("trace"):
-                        renewed_this_call = True
+                session = self._get_session("trace")
+                for raw_task_id, vip_name in self.vips_by_task.items():
+                    try:
+                        task_id = int(raw_task_id)
+                    except (TypeError, ValueError):
+                        failures.append(("configuration", f"Task inválida para VIP {vip_name}: {raw_task_id}"))
                         continue
-                    break
+                    checkpoints = db.get_collection_checkpoints(
+                        self.event_id, "vip", task_id, self._trace_oss())
+                    try:
+                        # ``""`` é o object_key legado da assinatura por serial.
+                        last_serial = int(checkpoints.get("serial") or checkpoints.get("") or 0)
+                        start_row = int(checkpoints.get("row") or 0)
+                    except (TypeError, ValueError):
+                        failures.append(("contract", f"Checkpoint inválido da task {task_id}"))
+                        continue
+                    try:
+                        msg_id, win_start, win_end = self._open_trace_query(session, task_id)
+                        page, total = self._fetch_meas_report_page(
+                            session, task_id, msg_id, start_row, win_start, win_end)
+                        # Uma task reiniciada recria o conjunto filtrado: índices e
+                        # seriais voltam a zero e o cursor antigo passaria do fim,
+                        # travando a coleta. Reler do início é seguro porque a chave
+                        # única (task_id, serial_no) descarta o replay.
+                        if start_row > total:
+                            logger.warning(
+                                f"[vip/{vip_name}] task {task_id}: conjunto filtrado encolheu "
+                                f"({total} < offset {start_row}); relendo do início.")
+                            last_serial, start_row = 0, 0
+                            page, total = self._fetch_meas_report_page(
+                                session, task_id, msg_id, 0, win_start, win_end)
+                        messages, row, pages = list(page), start_row + len(page), 1
+                        while (len(page) == self._VIP_PAGE_SIZE
+                               and pages < self._VIP_MAX_PAGES_PER_CYCLE):
+                            page, total = self._fetch_meas_report_page(
+                                session, task_id, msg_id, row, win_start, win_end)
+                            messages.extend(page)
+                            row += len(page)
+                            pages += 1
+                        rows, safe_serial, undecoded = self._build_vip_measurements(
+                            task_id, vip_name, messages, last_serial)
+                        backlog = row < total
+                    except SessionExpiredError:
+                        raise
+                    except (requests.exceptions.ConnectTimeout, requests.exceptions.ConnectionError,
+                            requests.exceptions.Timeout) as error:
+                        failures.append(("network", f"Task {task_id} sem conexão: {error}"))
+                        continue
+                    except requests.exceptions.HTTPError as error:
+                        failures.append(("http", f"Task {task_id} retornou erro HTTP: {error}"))
+                        continue
+                    except (ValueError, TypeError, KeyError, json.JSONDecodeError) as error:
+                        failures.append(("contract", f"Task {task_id} inválida ou indisponível: {error}"))
+                        continue
+                    all_rows.extend(rows)
+                    if safe_serial > last_serial or row > start_row:
+                        cursors[f"{task_id}:serial"] = {
+                            "task_id": task_id, "object_key": "serial", "cursor": safe_serial}
+                        cursors[f"{task_id}:row"] = {
+                            "task_id": task_id, "object_key": "row", "cursor": row}
+                    if undecoded:
+                        logger.warning(
+                            f"[vip/{vip_name}] task {task_id}: {undecoded} de {len(messages)} "
+                            f"mensagens não decodificadas (formato não reconhecido).")
+                        diagnostics.append(CollectionDiagnostic(
+                            "decode", f"{undecoded} mensagens de {vip_name} não decodificadas",
+                            "decode", {"task_id": task_id, "serial": safe_serial}))
+                    if backlog:
+                        diagnostics.append(CollectionDiagnostic(
+                            "decode", f"Processando backlog de {vip_name}: {total - row} mensagens restantes",
+                            "backlog", {"task_id": task_id, "serial": safe_serial}))
+                    task_details.append({
+                        "task_id": task_id, "vip": vip_name, "msg_id": msg_id,
+                        "serial_initial": last_serial, "serial_final": safe_serial,
+                        "messages": len(messages), "rrc_measurements": len(messages),
+                        "decoded": len(rows), "undecoded": undecoded,
+                        "row_initial": start_row, "row_final": row, "record_count": total,
+                        "backlog": backlog,
+                    })
                 break
-            except Exception as e:
-                logger.warning(f"Erro no preflight de trace: {e}")
-                return CollectionResult.error(f"Preflight do Trace falhou: {e}", code="http")
-                
-        if not preflight_ok:
-            logger.error("Preflight de trace falhou. Abortando ciclo de VIPs.")
-            return CollectionResult.auth_required("A sessão de Trace não pôde ser validada.")
+            except SessionExpiredError:
+                if renewed or attempt:
+                    return CollectionResult.auth_required("A sessão de Trace continuou inválida após a renovação.")
+                if not self._renew_session("trace"):
+                    return CollectionResult.auth_required("Não foi possível renovar a sessão de Trace.")
+                renewed = True
+            except (requests.exceptions.ConnectTimeout, requests.exceptions.ConnectionError, requests.exceptions.Timeout) as error:
+                return CollectionResult.error(f"Falha de conexão no Trace: {error}", code="network")
+            except requests.exceptions.HTTPError as error:
+                return CollectionResult.error(f"Falha HTTP no Trace: {error}", code="http")
+            except (ValueError, TypeError, KeyError, json.JSONDecodeError) as error:
+                return CollectionResult.error(f"Contrato inválido do Trace: {error}", stage="parsing", code="contract")
 
-        # 2) Execução paralela com ThreadPoolExecutor
-        import concurrent.futures
-        measurements = []
-        worker_errors = []
-        workers = self._VIP_MAX_WORKERS
-        
-        with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as executor:
-            futures = {
-                executor.submit(self._collect_one_vip, task_id, vip_name, mode): (task_id, vip_name)
-                for task_id, vip_name in self.vips_by_task.items()
-            }
-            
-            for future in concurrent.futures.as_completed(futures):
-                task_id, vip_name = futures[future]
-                try:
-                    res = future.result()
-                    if res:
-                        measurements.extend(res)
-                except SessionExpiredError as e:
-                    logger.warning(f"Worker reportou expiração de sessão para VIP {vip_name}: {e}")
-                    worker_errors.append((vip_name, "auth_required", str(e)))
-                except Exception as e:
-                    logger.exception(f"Falha ao coletar VIP {vip_name}")
-                    worker_errors.append((vip_name, "error", str(e)))
-
-        # Calcular contadores de log-resumo
-        elapsed = time.time() - start_time
-        total_vips = len(self.vips_by_task)
-        
-        vips_with_data = set()
-        total_meas = len(measurements)
-        in_event_count = 0
-        for m in measurements:
-            vips_with_data.add(m["vip_name"])
-            if m.get("in_event"):
-                in_event_count += 1
-                
-        num_vips_with_data = len(vips_with_data)
-        
+        self._last_vip_subscription = task_details
+        total_tasks = len(self.vips_by_task)
+        vips_with_data = len({row["vip_name"] for row in all_rows})
+        coverage = {
+            "vips_configured": total_tasks, "vips_with_data": vips_with_data,
+            "tasks_configured": total_tasks, "tasks_valid": len(task_details),
+            "tasks_invalid": len(failures), "backlog_tasks": sum(1 for item in task_details if item["backlog"]),
+            "backlog_messages": sum(max(0, item["record_count"] - item["row_final"])
+                                    for item in task_details if item["backlog"]),
+            "undecoded_messages": sum(item["undecoded"] for item in task_details),
+            "latest_serial": max((item["serial_final"] for item in task_details), default=None),
+        }
+        for stage, message in failures:
+            diagnostics.append(CollectionDiagnostic(stage, message, "task_invalid"))
+        # Um ciclo sem log foi o que escondeu a falha anterior: registre sempre o
+        # resultado, inclusive quando ele é zero.
         logger.info(
-            f"Trace/VIP (modo={mode}): {num_vips_with_data}/{total_vips} VIPs com dados, "
-            f"{total_meas} medições, {in_event_count} no evento, em {elapsed:.2f}s."
-        )
-                    
-        coverage = {"vips_configured": total_vips, "vips_with_data": num_vips_with_data}
-        latest_data_at = max((m.get("timestamp") for m in measurements), default=None)
-        if worker_errors:
-            all_auth = all(kind == "auth_required" for _, kind, _ in worker_errors)
-            if not measurements and all_auth:
-                return CollectionResult.auth_required(
-                    "A sessão de Trace expirou durante a coleta de VIPs.", coverage=coverage)
-            if not measurements:
-                return CollectionResult.error(
-                    "Nenhum VIP pôde ser coletado; verifique o Trace/iManager.",
-                    stage="trace", code="request",
-                    coverage={**coverage, "vips_failed": len(worker_errors)},
-                )
-            return CollectionResult.partial(
-                measurements,
-                cause=f"{len(worker_errors)} VIP(s) não puderam ser processados.",
-                coverage={**coverage, "vips_failed": len(worker_errors)},
-                latest_data_at=latest_data_at,
-            )
-        if measurements:
-            return CollectionResult.data(measurements, coverage=coverage, latest_data_at=latest_data_at)
-        return CollectionResult.empty("Trace respondeu sem novas medições de VIP.", coverage=coverage)
+            f"VIPs: {len(all_rows)} medições de {vips_with_data}/{total_tasks} VIPs; "
+            f"tasks ok={len(task_details)} falhas={len(failures)} "
+            f"backlog={coverage['backlog_messages']} não decodificadas={coverage['undecoded_messages']} "
+            f"serial={coverage['latest_serial']}")
+        latest_data_at = max((row.get("timestamp") for row in all_rows), default=None)
+        partial = bool(failures or any(item["backlog"] for item in task_details))
+        if partial:
+            return CollectionResult.partial(all_rows, cause="Trace processado parcialmente; confira tarefas ou backlog.",
+                                            cursors=cursors, diagnostics=diagnostics, coverage=coverage,
+                                            latest_data_at=latest_data_at)
+        if all_rows:
+            return CollectionResult.data(all_rows, cursors=cursors, diagnostics=diagnostics,
+                                         coverage=coverage, latest_data_at=latest_data_at)
+        return CollectionResult.empty("Trace respondeu sem mensagens novas de VIP.", cursors=cursors,
+                                      diagnostics=diagnostics, coverage=coverage)
 
     def _handle_trace_error(self, task_id, step: str, resp: requests.Response):
         """Loga e alerta para erros HTTP do fluxo FARS."""
@@ -1837,156 +1877,6 @@ class HttpCollector(BaseCollector):
             except Exception:
                 pass
 
-    def _parse_trace_response(self, response_json: dict, task_id, session,
-                               vip_name: str) -> List[dict]:
-        """
-        Parse do schema retornado por /traceresult/query/result.
-
-        Como cada task é dedicada a um VIP, todas as mensagens RRC_MEAS_RPRT
-        encontradas pertencem ao vip_name informado.
-
-        Formato esperado da resposta:
-          {
-            "recordCount": int,
-            "data": {
-              "msgId": int,            # ID interno da sessão de query
-              "tableData": [
-                {
-                  "serialNo": int,
-                  "source":   "SR-...",
-                  "messageBody": "04 4B ...",
-                  "payload": [{"name": "...", "value": "...", "children": [...]}, ...]
-                },
-                ...
-              ]
-            }
-          }
-
-        Para RRC_MEAS_RPRT, RSRP/RSRQ NÃO ficam neste payload — é preciso
-        chamar /traceresult/query/msg-explain-info com (msgId da sessão, rowNo).
-        """
-        rows = []
-        data = response_json.get("data") or {}
-        if isinstance(data, list):
-            table = data
-            sess_msg_id = None
-        else:
-            table = data.get("tableData") or data.get("result") or []
-            sess_msg_id = data.get("msgId")
-
-        if not table:
-            return rows
-
-        decodes_used = 0
-        for idx, item in enumerate(table):
-            fields = {f.get("name", ""): f.get("value", "")
-                      for f in (item.get("payload") or [])}
-
-            msg_type = (
-                fields.get("GULTrcMsgType")
-                or item.get("msgType")
-                or ""
-            )
-            if msg_type != "RRC_MEAS_RPRT":
-                continue
-            if decodes_used >= self._MAX_MEAS_DECODES_PER_CYCLE:
-                break
-            if sess_msg_id is None:
-                continue
-
-            decodes_used += 1
-            content_json = self._fetch_msg_explain_info(
-                session, task_id, sess_msg_id, idx + 1  # FARS usa rowNo 1-indexado
-            )
-            if content_json is None:
-                continue
-
-            rsrp, rsrq = self._extract_rsrp_rsrq_from_json(content_json)
-            if rsrp is None:
-                continue
-
-            source = item.get("source") or ""
-            cell_id = str(fields.get("GLCellId") or "")
-            if source:
-                serving_cell_value = f"{source}_{cell_id}" if cell_id else source
-            else:
-                serving_cell_value = cell_id
-
-            rows.append({
-                "vip_name":    vip_name,
-                "event_id":    self.event_id,
-                "timestamp":   self._parse_trace_timestamp(fields.get("Time")),
-                "serving_cell": serving_cell_value,
-                "rsrp":        rsrp,
-                "rsrq":        rsrq,
-                "in_event":    1 if self._cell_in_event(serving_cell_value) else 0,
-            })
-
-        return rows
-
-    def _parse_filtered_trace_response(self, response_json: dict, task_id, session,
-                                       vip_name: str, sess_msg_id: int, max_decodes: int = None) -> List[dict]:
-        """
-        Parse do schema retornado por /traceresult/query/filter-by-cols.
-        Como o filter-by-cols já filtrou por Message Type = RRC_MEAS_RPRT,
-        não precisamos checar o tipo de mensagem no loop. A ordenação é decrescente
-        por Time (mais recente primeiro), logo os primeiros max_decodes
-        registros serão os mais recentes.
-        """
-        rows = []
-        data = response_json.get("data") or {}
-        if isinstance(data, list):
-            table = data
-        else:
-            table = data.get("tableData") or data.get("result") or []
-
-        if not table:
-            return rows
-
-        if max_decodes is None:
-            max_decodes = self._MAX_MEAS_DECODES_PER_CYCLE
-
-        decodes_used = 0
-        for idx, item in enumerate(table):
-            if decodes_used >= max_decodes:
-                break
-            if sess_msg_id is None:
-                continue
-
-            decodes_used += 1
-            row_no = idx + 1  # FARS usa rowNo 1-indexado da página atual
-            content_json = self._fetch_msg_explain_info(
-                session, task_id, sess_msg_id, row_no
-            )
-            if content_json is None:
-                continue
-
-            rsrp, rsrq = self._extract_rsrp_rsrq_from_json(content_json)
-            if rsrp is None:
-                continue
-
-            fields = {f.get("name", ""): f.get("value", "")
-                      for f in (item.get("payload") or [])}
-
-            source = item.get("source") or ""
-            cell_id = str(fields.get("GLCellId") or "")
-            if source:
-                serving_cell_value = f"{source}_{cell_id}" if cell_id else source
-            else:
-                serving_cell_value = cell_id
-
-            rows.append({
-                "vip_name":    vip_name,
-                "event_id":    self.event_id,
-                "timestamp":   self._parse_trace_timestamp(fields.get("Time")),
-                "serving_cell": serving_cell_value,
-                "rsrp":        rsrp,
-                "rsrq":        rsrq,
-                "in_event":    1 if self._cell_in_event(serving_cell_value) else 0,
-            })
-
-        return rows
-
     def _parse_trace_timestamp(self, raw) -> str:
         """
         Converte timestamp do FARS para UTC ISO com Z.
@@ -1995,12 +1885,16 @@ class HttpCollector(BaseCollector):
         if raw is None or raw == "":
             return datetime.utcnow().strftime('%Y-%m-%dT%H:%M:%SZ')
         s = str(raw)
-        if " (" in s:
-            s = s.split(" (")[0]
+        milliseconds = None
+        match = re.search(r"\((\d{1,3})\)\s*$", s)
+        if match:
+            # O FARS não zero-preenche o campo: "(98)" são 98 ms, não 980.
+            milliseconds = int(match.group(1).zfill(3))
+            s = s[:match.start()].strip()
         # Tenta tratar como epoch ms (já é UTC)
         try:
             ms = int(s)
-            return datetime.utcfromtimestamp(ms / 1000.0).strftime('%Y-%m-%dT%H:%M:%SZ')
+            return datetime.utcfromtimestamp(ms / 1000.0).strftime('%Y-%m-%dT%H:%M:%S.%f')[:-3] + 'Z'
         except (ValueError, TypeError):
             pass
         # Timestamp local — converter para UTC
@@ -2010,86 +1904,10 @@ class HttpCollector(BaseCollector):
             # Ex: UTC-3 (offset=-180) → UTC = local_time - (-180 min) = local + 180 min
             from datetime import timedelta
             dt_utc = dt_local - timedelta(minutes=self._oss_tz_offset_min)
-            return dt_utc.strftime('%Y-%m-%dT%H:%M:%SZ')
+            suffix = f".{milliseconds:03d}" if milliseconds is not None else ""
+            return dt_utc.strftime('%Y-%m-%dT%H:%M:%S') + suffix + 'Z'
         except Exception:
             return datetime.utcnow().strftime('%Y-%m-%dT%H:%M:%SZ')
-
-    def _fetch_msg_explain_info(self, session, task_id, sess_msg_id, row_no):
-        """
-        Chama /traceresult/query/msg-explain-info para decodificar uma mensagem.
-
-        Atenção: rowNo aqui é 1-indexado e refere-se à posição da linha na
-        página de query/result — NÃO é o serialNo da mensagem.
-        """
-        url = f"{self.base_url}/rest/oss/access/fars/v1/traceresult/query/msg-explain-info"
-        try:
-            resp = session.get(url, params={
-                "nocache": int(time.time() * 1000),
-                "taskId": task_id,
-                "msgId": sess_msg_id,
-                "rowNo": row_no,
-                "tabularFlag": "y",
-                "isSubscribe": "false",
-                "isSecondDecode": "false",
-                "isPlayback": "false",
-            }, timeout=30)
-            if resp.status_code == 200:
-                return resp.json()
-            logger.debug(
-                f"msg-explain-info HTTP {resp.status_code} (rowNo={row_no}): {resp.text[:200]}"
-            )
-        except Exception as e:
-            logger.debug(f"msg-explain-info exception (rowNo={row_no}): {e}")
-        return None
-
-    def _extract_rsrp_rsrq_from_json(self, content) -> tuple:
-        """
-        Procura recursivamente nós cujo `name` é rsrpResult/rsrqResult.
-
-        Formato esperado no node: `{"name": "rsrpResult", "val": ": ---- 0x35(53) ---- *0110101"}`
-        Mapeamento LTE: RSRP = index − 140 dBm,  RSRQ = index/2 − 19.5 dB.
-        """
-        rsrp = rsrq = None
-
-        def parse_index(val_str: str):
-            try:
-                return int(val_str.split("(")[1].split(")")[0])
-            except (ValueError, IndexError):
-                return None
-
-        def visit(node):
-            nonlocal rsrp, rsrq
-            if isinstance(node, dict):
-                name = node.get("name", "")
-                val = node.get("val") or node.get("value") or ""
-                if rsrp is None and "rsrpResult" in name and "0x" in str(val):
-                    idx = parse_index(str(val))
-                    if idx is not None:
-                        rsrp = idx - 140.0
-                if rsrq is None and "rsrqResult" in name and "0x" in str(val):
-                    idx = parse_index(str(val))
-                    if idx is not None:
-                        rsrq = (idx / 2.0) - 19.5
-                for child in node.get("children", []) or []:
-                    if rsrp is not None and rsrq is not None:
-                        return
-                    visit(child)
-                # outros valores compostos
-                for k, v in node.items():
-                    if rsrp is not None and rsrq is not None:
-                        return
-                    if k == "children":
-                        continue
-                    if isinstance(v, (dict, list)):
-                        visit(v)
-            elif isinstance(node, list):
-                for item in node:
-                    if rsrp is not None and rsrq is not None:
-                        return
-                    visit(item)
-
-        visit(content)
-        return rsrp, rsrq
 
     # ── Alarmes (iMaster FM website) ─────────────────────────────────
     def collect_alarms(self) -> CollectionResult:

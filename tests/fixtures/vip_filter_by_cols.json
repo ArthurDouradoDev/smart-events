@@ -1,0 +1,1070 @@
+{
+  "recordCount": 20,
+  "data": {
+    "lastSerialNo": null,
+    "msgId": 7711005,
+    "tableData": [
+      {
+        "serialNo": 64454,
+        "source": "SR-SPSMI4",
+        "messageBody": "02 08 26 37 7C 42 00 19 28 A9 7D 24 D0 00",
+        "isTextMsg": false,
+        "payload": [
+          {
+            "name": "Time",
+            "value": "2026-08-11 12:28:33 (849)",
+            "children": []
+          },
+          {
+            "name": "GULMoudle",
+            "value": "LTE",
+            "children": []
+          },
+          {
+            "name": "GULItfType",
+            "value": "UU Standard Interface Message",
+            "children": []
+          },
+          {
+            "name": "GULTrcMsgType",
+            "value": "RRC_MEAS_RPRT",
+            "children": []
+          },
+          {
+            "name": "GULMsgDirection",
+            "value": "From UE",
+            "children": []
+          },
+          {
+            "name": "GLCellId",
+            "value": "22",
+            "children": []
+          },
+          {
+            "name": "MSG_LEN",
+            "value": "14",
+            "children": []
+          },
+          {
+            "name": "eNodeBID",
+            "value": "725468",
+            "children": []
+          },
+          {
+            "name": "_MessageName",
+            "value": "RRC_MEAS_RPRT",
+            "children": []
+          }
+        ]
+      },
+      {
+        "serialNo": 64457,
+        "source": "SR-SPSMI4",
+        "messageBody": "02 08 33 B2 84 06 F5 26 10 80 06 4A 2A 5F 49 34 00",
+        "isTextMsg": false,
+        "payload": [
+          {
+            "name": "Time",
+            "value": "2026-08-11 12:28:34 (416)",
+            "children": []
+          },
+          {
+            "name": "GULMoudle",
+            "value": "LTE",
+            "children": []
+          },
+          {
+            "name": "GULItfType",
+            "value": "UU Standard Interface Message",
+            "children": []
+          },
+          {
+            "name": "GULTrcMsgType",
+            "value": "RRC_MEAS_RPRT",
+            "children": []
+          },
+          {
+            "name": "GULMsgDirection",
+            "value": "From UE",
+            "children": []
+          },
+          {
+            "name": "GLCellId",
+            "value": "22",
+            "children": []
+          },
+          {
+            "name": "MSG_LEN",
+            "value": "17",
+            "children": []
+          },
+          {
+            "name": "eNodeBID",
+            "value": "725468",
+            "children": []
+          },
+          {
+            "name": "_MessageName",
+            "value": "RRC_MEAS_RPRT",
+            "children": []
+          }
+        ]
+      },
+      {
+        "serialNo": 64476,
+        "source": "SR-SPSMI4",
+        "messageBody": "02 08 35 2F 88 02 E1 2B 10 80 06 4A 29 5B 49 23 A0",
+        "isTextMsg": false,
+        "payload": [
+          {
+            "name": "Time",
+            "value": "2026-08-11 12:28:36 (224)",
+            "children": []
+          },
+          {
+            "name": "GULMoudle",
+            "value": "LTE",
+            "children": []
+          },
+          {
+            "name": "GULItfType",
+            "value": "UU Standard Interface Message",
+            "children": []
+          },
+          {
+            "name": "GULTrcMsgType",
+            "value": "RRC_MEAS_RPRT",
+            "children": []
+          },
+          {
+            "name": "GULMsgDirection",
+            "value": "From UE",
+            "children": []
+          },
+          {
+            "name": "GLCellId",
+            "value": "22",
+            "children": []
+          },
+          {
+            "name": "MSG_LEN",
+            "value": "17",
+            "children": []
+          },
+          {
+            "name": "eNodeBID",
+            "value": "725468",
+            "children": []
+          },
+          {
+            "name": "_MessageName",
+            "value": "RRC_MEAS_RPRT",
+            "children": []
+          }
+        ]
+      },
+      {
+        "serialNo": 64477,
+        "source": "SR-SPSMI4",
+        "messageBody": "02 08 35 AF 88 02 E1 26 10 80 06 4A 29 5B 49 23 A0",
+        "isTextMsg": false,
+        "payload": [
+          {
+            "name": "Time",
+            "value": "2026-08-11 12:28:36 (224)",
+            "children": []
+          },
+          {
+            "name": "GULMoudle",
+            "value": "LTE",
+            "children": []
+          },
+          {
+            "name": "GULItfType",
+            "value": "UU Standard Interface Message",
+            "children": []
+          },
+          {
+            "name": "GULTrcMsgType",
+            "value": "RRC_MEAS_RPRT",
+            "children": []
+          },
+          {
+            "name": "GULMsgDirection",
+            "value": "From UE",
+            "children": []
+          },
+          {
+            "name": "GLCellId",
+            "value": "22",
+            "children": []
+          },
+          {
+            "name": "MSG_LEN",
+            "value": "17",
+            "children": []
+          },
+          {
+            "name": "eNodeBID",
+            "value": "725468",
+            "children": []
+          },
+          {
+            "name": "_MessageName",
+            "value": "RRC_MEAS_RPRT",
+            "children": []
+          }
+        ]
+      },
+      {
+        "serialNo": 64819,
+        "source": "SR-SPSMI3",
+        "messageBody": "02 08 2C AD 6C 42 00 19 29 B3 79 45 EF 00",
+        "isTextMsg": false,
+        "payload": [
+          {
+            "name": "Time",
+            "value": "2026-08-11 12:29:00 (600)",
+            "children": []
+          },
+          {
+            "name": "GULMoudle",
+            "value": "LTE",
+            "children": []
+          },
+          {
+            "name": "GULItfType",
+            "value": "UU Standard Interface Message",
+            "children": []
+          },
+          {
+            "name": "GULTrcMsgType",
+            "value": "RRC_MEAS_RPRT",
+            "children": []
+          },
+          {
+            "name": "GULMsgDirection",
+            "value": "From UE",
+            "children": []
+          },
+          {
+            "name": "GLCellId",
+            "value": "24",
+            "children": []
+          },
+          {
+            "name": "MSG_LEN",
+            "value": "14",
+            "children": []
+          },
+          {
+            "name": "eNodeBID",
+            "value": "725470",
+            "children": []
+          },
+          {
+            "name": "_MessageName",
+            "value": "RRC_MEAS_RPRT",
+            "children": []
+          }
+        ]
+      },
+      {
+        "serialNo": 64824,
+        "source": "SR-SPSMI3",
+        "messageBody": "02 08 3C 2F 74 05 7D 23 10 80 06 4A 6C E0 51 84 20",
+        "isTextMsg": false,
+        "payload": [
+          {
+            "name": "Time",
+            "value": "2026-08-11 12:29:01 (165)",
+            "children": []
+          },
+          {
+            "name": "GULMoudle",
+            "value": "LTE",
+            "children": []
+          },
+          {
+            "name": "GULItfType",
+            "value": "UU Standard Interface Message",
+            "children": []
+          },
+          {
+            "name": "GULTrcMsgType",
+            "value": "RRC_MEAS_RPRT",
+            "children": []
+          },
+          {
+            "name": "GULMsgDirection",
+            "value": "From UE",
+            "children": []
+          },
+          {
+            "name": "GLCellId",
+            "value": "24",
+            "children": []
+          },
+          {
+            "name": "MSG_LEN",
+            "value": "17",
+            "children": []
+          },
+          {
+            "name": "eNodeBID",
+            "value": "725470",
+            "children": []
+          },
+          {
+            "name": "_MessageName",
+            "value": "RRC_MEAS_RPRT",
+            "children": []
+          }
+        ]
+      },
+      {
+        "serialNo": 64838,
+        "source": "SR-SPSMI3",
+        "messageBody": "02 08 3C 31 84 05 7D 25 10 80 06 4A 6D 1F 51 94 00",
+        "isTextMsg": false,
+        "payload": [
+          {
+            "name": "Time",
+            "value": "2026-08-11 12:29:01 (995)",
+            "children": []
+          },
+          {
+            "name": "GULMoudle",
+            "value": "LTE",
+            "children": []
+          },
+          {
+            "name": "GULItfType",
+            "value": "UU Standard Interface Message",
+            "children": []
+          },
+          {
+            "name": "GULTrcMsgType",
+            "value": "RRC_MEAS_RPRT",
+            "children": []
+          },
+          {
+            "name": "GULMsgDirection",
+            "value": "From UE",
+            "children": []
+          },
+          {
+            "name": "GLCellId",
+            "value": "24",
+            "children": []
+          },
+          {
+            "name": "MSG_LEN",
+            "value": "17",
+            "children": []
+          },
+          {
+            "name": "eNodeBID",
+            "value": "725470",
+            "children": []
+          },
+          {
+            "name": "_MessageName",
+            "value": "RRC_MEAS_RPRT",
+            "children": []
+          }
+        ]
+      },
+      {
+        "serialNo": 64867,
+        "source": "SR-SPSMI3",
+        "messageBody": "02 08 3C 34 80 05 7D 27 10 80 06 4A 6E 21 51 BC 20",
+        "isTextMsg": false,
+        "payload": [
+          {
+            "name": "Time",
+            "value": "2026-08-11 12:29:03 (985)",
+            "children": []
+          },
+          {
+            "name": "GULMoudle",
+            "value": "LTE",
+            "children": []
+          },
+          {
+            "name": "GULItfType",
+            "value": "UU Standard Interface Message",
+            "children": []
+          },
+          {
+            "name": "GULTrcMsgType",
+            "value": "RRC_MEAS_RPRT",
+            "children": []
+          },
+          {
+            "name": "GULMsgDirection",
+            "value": "From UE",
+            "children": []
+          },
+          {
+            "name": "GLCellId",
+            "value": "24",
+            "children": []
+          },
+          {
+            "name": "MSG_LEN",
+            "value": "17",
+            "children": []
+          },
+          {
+            "name": "eNodeBID",
+            "value": "725470",
+            "children": []
+          },
+          {
+            "name": "_MessageName",
+            "value": "RRC_MEAS_RPRT",
+            "children": []
+          }
+        ]
+      },
+      {
+        "serialNo": 148055,
+        "source": "SR-SPSMH1",
+        "messageBody": "02 08 28 21 68 42 00 19 28 BE 59 27 4D 80",
+        "isTextMsg": false,
+        "payload": [
+          {
+            "name": "Time",
+            "value": "2026-08-11 15:20:03 (748)",
+            "children": []
+          },
+          {
+            "name": "GULMoudle",
+            "value": "LTE",
+            "children": []
+          },
+          {
+            "name": "GULItfType",
+            "value": "UU Standard Interface Message",
+            "children": []
+          },
+          {
+            "name": "GULTrcMsgType",
+            "value": "RRC_MEAS_RPRT",
+            "children": []
+          },
+          {
+            "name": "GULMsgDirection",
+            "value": "From UE",
+            "children": []
+          },
+          {
+            "name": "GLCellId",
+            "value": "21",
+            "children": []
+          },
+          {
+            "name": "MSG_LEN",
+            "value": "14",
+            "children": []
+          },
+          {
+            "name": "eNodeBID",
+            "value": "725471",
+            "children": []
+          },
+          {
+            "name": "_MessageName",
+            "value": "RRC_MEAS_RPRT",
+            "children": []
+          }
+        ]
+      },
+      {
+        "serialNo": 148060,
+        "source": "SR-SPSMH1",
+        "messageBody": "02 08 21 A0 68 42 00 19 28 BE 59 27 4D 80",
+        "isTextMsg": false,
+        "payload": [
+          {
+            "name": "Time",
+            "value": "2026-08-11 15:20:04 (411)",
+            "children": []
+          },
+          {
+            "name": "GULMoudle",
+            "value": "LTE",
+            "children": []
+          },
+          {
+            "name": "GULItfType",
+            "value": "UU Standard Interface Message",
+            "children": []
+          },
+          {
+            "name": "GULTrcMsgType",
+            "value": "RRC_MEAS_RPRT",
+            "children": []
+          },
+          {
+            "name": "GULMsgDirection",
+            "value": "From UE",
+            "children": []
+          },
+          {
+            "name": "GLCellId",
+            "value": "21",
+            "children": []
+          },
+          {
+            "name": "MSG_LEN",
+            "value": "14",
+            "children": []
+          },
+          {
+            "name": "eNodeBID",
+            "value": "725471",
+            "children": []
+          },
+          {
+            "name": "_MessageName",
+            "value": "RRC_MEAS_RPRT",
+            "children": []
+          }
+        ]
+      },
+      {
+        "serialNo": 148063,
+        "source": "SR-SPSMH1",
+        "messageBody": "02 08 28 20 6C 42 00 19 28 BE 59 27 4D 80",
+        "isTextMsg": false,
+        "payload": [
+          {
+            "name": "Time",
+            "value": "2026-08-11 15:20:04 (436)",
+            "children": []
+          },
+          {
+            "name": "GULMoudle",
+            "value": "LTE",
+            "children": []
+          },
+          {
+            "name": "GULItfType",
+            "value": "UU Standard Interface Message",
+            "children": []
+          },
+          {
+            "name": "GULTrcMsgType",
+            "value": "RRC_MEAS_RPRT",
+            "children": []
+          },
+          {
+            "name": "GULMsgDirection",
+            "value": "From UE",
+            "children": []
+          },
+          {
+            "name": "GLCellId",
+            "value": "21",
+            "children": []
+          },
+          {
+            "name": "MSG_LEN",
+            "value": "14",
+            "children": []
+          },
+          {
+            "name": "eNodeBID",
+            "value": "725471",
+            "children": []
+          },
+          {
+            "name": "_MessageName",
+            "value": "RRC_MEAS_RPRT",
+            "children": []
+          }
+        ]
+      },
+      {
+        "serialNo": 148066,
+        "source": "SR-SPSMH1",
+        "messageBody": "02 08 33 20 6A 00 14 20 02 48 00 00 42 00 19 28 BE 59 27 4D 80",
+        "isTextMsg": false,
+        "payload": [
+          {
+            "name": "Time",
+            "value": "2026-08-11 15:20:04 (963)",
+            "children": []
+          },
+          {
+            "name": "GULMoudle",
+            "value": "LTE",
+            "children": []
+          },
+          {
+            "name": "GULItfType",
+            "value": "UU Standard Interface Message",
+            "children": []
+          },
+          {
+            "name": "GULTrcMsgType",
+            "value": "RRC_MEAS_RPRT",
+            "children": []
+          },
+          {
+            "name": "GULMsgDirection",
+            "value": "From UE",
+            "children": []
+          },
+          {
+            "name": "GLCellId",
+            "value": "21",
+            "children": []
+          },
+          {
+            "name": "MSG_LEN",
+            "value": "21",
+            "children": []
+          },
+          {
+            "name": "eNodeBID",
+            "value": "725471",
+            "children": []
+          },
+          {
+            "name": "_MessageName",
+            "value": "RRC_MEAS_RPRT",
+            "children": []
+          }
+        ]
+      },
+      {
+        "serialNo": 278811,
+        "source": "SR-SPSCD4",
+        "messageBody": "02 08 00 A5 78",
+        "isTextMsg": false,
+        "payload": [
+          {
+            "name": "Time",
+            "value": "2026-08-11 18:27:01 (518)",
+            "children": []
+          },
+          {
+            "name": "GULMoudle",
+            "value": "LTE",
+            "children": []
+          },
+          {
+            "name": "GULItfType",
+            "value": "UU Standard Interface Message",
+            "children": []
+          },
+          {
+            "name": "GULTrcMsgType",
+            "value": "RRC_MEAS_RPRT",
+            "children": []
+          },
+          {
+            "name": "GULMsgDirection",
+            "value": "From UE",
+            "children": []
+          },
+          {
+            "name": "GLCellId",
+            "value": "22",
+            "children": []
+          },
+          {
+            "name": "MSG_LEN",
+            "value": "5",
+            "children": []
+          },
+          {
+            "name": "eNodeBID",
+            "value": "725215",
+            "children": []
+          },
+          {
+            "name": "_MessageName",
+            "value": "RRC_MEAS_RPRT",
+            "children": []
+          }
+        ]
+      },
+      {
+        "serialNo": 278820,
+        "source": "SR-SPSCD4",
+        "messageBody": "02 08 20 A3 78 42 00 0D 08 A1 68",
+        "isTextMsg": false,
+        "payload": [
+          {
+            "name": "Time",
+            "value": "2026-08-11 18:27:01 (659)",
+            "children": []
+          },
+          {
+            "name": "GULMoudle",
+            "value": "LTE",
+            "children": []
+          },
+          {
+            "name": "GULItfType",
+            "value": "UU Standard Interface Message",
+            "children": []
+          },
+          {
+            "name": "GULTrcMsgType",
+            "value": "RRC_MEAS_RPRT",
+            "children": []
+          },
+          {
+            "name": "GULMsgDirection",
+            "value": "From UE",
+            "children": []
+          },
+          {
+            "name": "GLCellId",
+            "value": "22",
+            "children": []
+          },
+          {
+            "name": "MSG_LEN",
+            "value": "11",
+            "children": []
+          },
+          {
+            "name": "eNodeBID",
+            "value": "725215",
+            "children": []
+          },
+          {
+            "name": "_MessageName",
+            "value": "RRC_MEAS_RPRT",
+            "children": []
+          }
+        ]
+      },
+      {
+        "serialNo": 278830,
+        "source": "SR-SPSCD4",
+        "messageBody": "02 08 33 24 7A 00 28 A3 EA 27 00 1A 15 A2 50 01 80 42 00 0D 08 A1 68",
+        "isTextMsg": false,
+        "payload": [
+          {
+            "name": "Time",
+            "value": "2026-08-11 18:27:01 (744)",
+            "children": []
+          },
+          {
+            "name": "GULMoudle",
+            "value": "LTE",
+            "children": []
+          },
+          {
+            "name": "GULItfType",
+            "value": "UU Standard Interface Message",
+            "children": []
+          },
+          {
+            "name": "GULTrcMsgType",
+            "value": "RRC_MEAS_RPRT",
+            "children": []
+          },
+          {
+            "name": "GULMsgDirection",
+            "value": "From UE",
+            "children": []
+          },
+          {
+            "name": "GLCellId",
+            "value": "22",
+            "children": []
+          },
+          {
+            "name": "MSG_LEN",
+            "value": "23",
+            "children": []
+          },
+          {
+            "name": "eNodeBID",
+            "value": "725215",
+            "children": []
+          },
+          {
+            "name": "_MessageName",
+            "value": "RRC_MEAS_RPRT",
+            "children": []
+          }
+        ]
+      },
+      {
+        "serialNo": 278884,
+        "source": "SR-SPSCD4",
+        "messageBody": "02 08 02 25 80",
+        "isTextMsg": false,
+        "payload": [
+          {
+            "name": "Time",
+            "value": "2026-08-11 18:27:02 (306)",
+            "children": []
+          },
+          {
+            "name": "GULMoudle",
+            "value": "LTE",
+            "children": []
+          },
+          {
+            "name": "GULItfType",
+            "value": "UU Standard Interface Message",
+            "children": []
+          },
+          {
+            "name": "GULTrcMsgType",
+            "value": "RRC_MEAS_RPRT",
+            "children": []
+          },
+          {
+            "name": "GULMsgDirection",
+            "value": "From UE",
+            "children": []
+          },
+          {
+            "name": "GLCellId",
+            "value": "22",
+            "children": []
+          },
+          {
+            "name": "MSG_LEN",
+            "value": "5",
+            "children": []
+          },
+          {
+            "name": "eNodeBID",
+            "value": "725215",
+            "children": []
+          },
+          {
+            "name": "_MessageName",
+            "value": "RRC_MEAS_RPRT",
+            "children": []
+          }
+        ]
+      },
+      {
+        "serialNo": 335010,
+        "source": "SR-SAVBJ1",
+        "messageBody": "02 08 00 A5 48",
+        "isTextMsg": false,
+        "payload": [
+          {
+            "name": "Time",
+            "value": "2026-08-11 19:41:12 (847)",
+            "children": []
+          },
+          {
+            "name": "GULMoudle",
+            "value": "LTE",
+            "children": []
+          },
+          {
+            "name": "GULItfType",
+            "value": "UU Standard Interface Message",
+            "children": []
+          },
+          {
+            "name": "GULTrcMsgType",
+            "value": "RRC_MEAS_RPRT",
+            "children": []
+          },
+          {
+            "name": "GULMsgDirection",
+            "value": "From UE",
+            "children": []
+          },
+          {
+            "name": "GLCellId",
+            "value": "14",
+            "children": []
+          },
+          {
+            "name": "MSG_LEN",
+            "value": "5",
+            "children": []
+          },
+          {
+            "name": "eNodeBID",
+            "value": "921963",
+            "children": []
+          },
+          {
+            "name": "_MessageName",
+            "value": "RRC_MEAS_RPRT",
+            "children": []
+          }
+        ]
+      },
+      {
+        "serialNo": 335025,
+        "source": "SR-SAVBJ1",
+        "messageBody": "02 08 20 A5 4C 42 00 19 28 8C 29 21 E5 00",
+        "isTextMsg": false,
+        "payload": [
+          {
+            "name": "Time",
+            "value": "2026-08-11 19:41:13 (10)",
+            "children": []
+          },
+          {
+            "name": "GULMoudle",
+            "value": "LTE",
+            "children": []
+          },
+          {
+            "name": "GULItfType",
+            "value": "UU Standard Interface Message",
+            "children": []
+          },
+          {
+            "name": "GULTrcMsgType",
+            "value": "RRC_MEAS_RPRT",
+            "children": []
+          },
+          {
+            "name": "GULMsgDirection",
+            "value": "From UE",
+            "children": []
+          },
+          {
+            "name": "GLCellId",
+            "value": "14",
+            "children": []
+          },
+          {
+            "name": "MSG_LEN",
+            "value": "14",
+            "children": []
+          },
+          {
+            "name": "eNodeBID",
+            "value": "921963",
+            "children": []
+          },
+          {
+            "name": "_MessageName",
+            "value": "RRC_MEAS_RPRT",
+            "children": []
+          }
+        ]
+      },
+      {
+        "serialNo": 335031,
+        "source": "SR-SAVBJ1",
+        "messageBody": "02 08 33 A5 54 05 15 1D 10 80 06 4A 23 0A 48 79 40",
+        "isTextMsg": false,
+        "payload": [
+          {
+            "name": "Time",
+            "value": "2026-08-11 19:41:13 (266)",
+            "children": []
+          },
+          {
+            "name": "GULMoudle",
+            "value": "LTE",
+            "children": []
+          },
+          {
+            "name": "GULItfType",
+            "value": "UU Standard Interface Message",
+            "children": []
+          },
+          {
+            "name": "GULTrcMsgType",
+            "value": "RRC_MEAS_RPRT",
+            "children": []
+          },
+          {
+            "name": "GULMsgDirection",
+            "value": "From UE",
+            "children": []
+          },
+          {
+            "name": "GLCellId",
+            "value": "14",
+            "children": []
+          },
+          {
+            "name": "MSG_LEN",
+            "value": "17",
+            "children": []
+          },
+          {
+            "name": "eNodeBID",
+            "value": "921963",
+            "children": []
+          },
+          {
+            "name": "_MessageName",
+            "value": "RRC_MEAS_RPRT",
+            "children": []
+          }
+        ]
+      },
+      {
+        "serialNo": 335034,
+        "source": "SR-SAVBJ1",
+        "messageBody": "02 08 36 A7 5C 13 49 13 25 91 11 08 00 64 A2 30 A4 87 92 00",
+        "isTextMsg": false,
+        "payload": [
+          {
+            "name": "Time",
+            "value": "2026-08-11 19:41:13 (506)",
+            "children": []
+          },
+          {
+            "name": "GULMoudle",
+            "value": "LTE",
+            "children": []
+          },
+          {
+            "name": "GULItfType",
+            "value": "UU Standard Interface Message",
+            "children": []
+          },
+          {
+            "name": "GULTrcMsgType",
+            "value": "RRC_MEAS_RPRT",
+            "children": []
+          },
+          {
+            "name": "GULMsgDirection",
+            "value": "From UE",
+            "children": []
+          },
+          {
+            "name": "GLCellId",
+            "value": "14",
+            "children": []
+          },
+          {
+            "name": "MSG_LEN",
+            "value": "20",
+            "children": []
+          },
+          {
+            "name": "eNodeBID",
+            "value": "921963",
+            "children": []
+          },
+          {
+            "name": "_MessageName",
+            "value": "RRC_MEAS_RPRT",
+            "children": []
+          }
+        ]
+      }
+    ],
+    "serialNo": null
+  }
+}

@@ -218,15 +218,24 @@ def _validate_vip(rep: Report, collector: HttpCollector):
     except Exception as e:
         rep.add(Report.FAIL, "Coleta VIP", f"exceção: {type(e).__name__}: {e}")
         return
-    if rows:
-        vips = len({r.get("vip_name") for r in rows})
-        in_event = sum(1 for r in rows if r.get("in_event"))
+    if rows.measurements:
+        vips = len({r.get("vip_name") for r in rows.measurements})
+        in_event = sum(1 for r in rows.measurements if r.get("in_event"))
+        details = getattr(collector, "_last_vip_subscription", [])
+        trace = "; ".join(
+            f"task {d['task_id']} ({d['vip']}) msgId={d['msg_id']} "
+            f"serial={d['serial_initial']}→{d['serial_final']} "
+            f"linhas={d['row_initial']}→{d['row_final']}/{d['record_count']} "
+            f"RRC={d['rrc_measurements']} decodificadas={d['decoded']} "
+            f"indecifráveis={d['undecoded']}{' BACKLOG' if d['backlog'] else ''}"
+            for d in details
+        )
         rep.add(Report.PASS, "Coleta VIP",
-                f"{len(rows)} medições de {vips}/{len(tasks)} VIP(s), {in_event} no evento.")
+                f"{len(rows.measurements)} medições de {vips}/{len(tasks)} VIP(s), {in_event} no evento. {trace}")
     else:
         rep.add(Report.FAIL, "Coleta VIP",
-                f"0 medições de {len(tasks)} task(s). Veja [http/trace] acima "
-                "(pre-check/query/filter-by-cols) — 404 expõe rota/CSRF/cookies.")
+                f"estado={rows.state}; 0 medições de {len(tasks)} task(s). "
+                f"{rows.cause or 'Veja o diagnóstico [http/trace] acima (pre-check/query/result/filter-by-cols).'}")
 
 
 # ── Main ─────────────────────────────────────────────────────────────

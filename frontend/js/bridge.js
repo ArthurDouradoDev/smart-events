@@ -82,7 +82,7 @@ function _mockCollectionStatus() {
     interval_s: interval,
   });
   const kpi = item(120, state === "data" ? 24 : 0);
-  const vip = { ...item(60, state === "data" ? 5 : 0), mode: "express", vips_total: 5, vips_with_data: state === "data" ? 5 : 0 };
+  const vip = { ...item(60, state === "data" ? 5 : 0), mode: "incremental", vips_total: 5, vips_with_data: state === "data" ? 5 : 0 };
   return {
     ok: true, recording: true, overall_state: state, kpi, vip, alarms: { ...item(180, 4), state: "data" },
     session: { needs_interactive: state === "auth_required", region: "SP",

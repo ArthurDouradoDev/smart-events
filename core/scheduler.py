@@ -178,11 +178,11 @@ class Scheduler:
                 evaluate(measurements)
         # Checkpoints pertencem ao lote: só avançam depois de a persistência
         # idempotente terminar, inclusive quando o lote é um replay completo.
-        if result.cursors and collector == "kpi":
+        if result.cursors and collector in {"kpi", "vip"}:
             oss = ((self._event_config or {}).get("oss", {}).get("region") or "").upper()
             db.save_collection_checkpoints(
                 (self._event_config or {}).get("id", ""), result.cursors,
-                collector="monitoring", oss=oss,
+                collector="monitoring" if collector == "kpi" else "vip", oss=oss,
             )
 
         now = datetime.utcnow().isoformat()
@@ -234,11 +234,7 @@ class Scheduler:
         # Serializa para evitar coleta concorrente (ciclo agendado vs. refresh manual).
         with self._vip_lock:
             if mode is None:
-                now = time.time()
-                if now - self._last_vip_full_time >= INTERVAL_VIP_FULL_SECONDS:
-                    mode = "full"
-                else:
-                    mode = "express"
+                mode = "incremental"
 
             self._mark_attempt("vip", mode=mode)
             t0 = time.time()
@@ -246,8 +242,6 @@ class Scheduler:
                 logger.info(f"Iniciando coleta de VIPs no modo: {mode}")
                 result = self._collector.collect_vips(mode=mode)
                 self._apply_result("vip", result, t0, db.insert_vip_batch, self._evaluate_vip_alerts)
-                if mode == "full" and result.state in {"data", "empty"}:
-                    self._last_vip_full_time = time.time()
                 coverage = result.coverage
                 self._status["vip"].update({
                     "vips_total": coverage.get("vips_configured", len(getattr(self._collector, "vips_by_task", {}) or {})),
@@ -260,7 +254,7 @@ class Scheduler:
 
     def collect_vips_now(self) -> int:
         """Coleta de VIPs sob demanda (botão de refresh do painel). Retorna nº de medições."""
-        count = self._collect_vips(mode="express")
+        count = self._collect_vips(mode="incremental")
         if self._on_update:
             try:
                 self._on_update()
