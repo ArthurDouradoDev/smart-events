@@ -4,6 +4,48 @@ Cada entrada: o que quebrou, causa raiz, correção e a regra que evita a repeti
 
 ---
 
+## 2026-08-12 — Marca d'água de serial apagava linhas em ciclo parcial (latente)
+
+**Como apareceu:** não apareceu em produção. Foi encontrado analisando
+`har-atualizado-filtrado-ordenado-completo.har`, ao medir a ordem real do conjunto que sai do
+`filter-by-cols`.
+
+**Sintoma que teria:** medições de VIP sumindo em silêncio, sem erro e sem log, só em tasks
+longas. A cobertura pareceria saudável.
+
+**Causa raiz:** `_build_vip_measurements` avança a marca d'água para `max(serialNo)` do lote e
+descarta `serial <= last_serial`. Isso só é correto se o lote for um **prefixo ordenado** do
+conjunto. Mas o `filter-by-cols` devolve o conjunto **fora de ordem** — 127 violações de ordem
+crescente em 619 linhas na captura, em 128 runs curtos (média 4,8 linhas) que não acompanham o
+NE. Um ciclo que parasse no meio gravava uma marca d'água alta e as linhas de serial menor
+ainda não lidas eram descartadas para sempre nos ciclos seguintes.
+
+**Por que não estava ativo:** `_VIP_PAGE_SIZE = 1000` e o conjunto filtrado da task 2072 tinha
+619 linhas — cabia numa requisição, o laço de paginação nunca rodava e `backlog` era sempre
+`False`. Simulando a parada em cada offset das 619 linhas reais, o pior caso perdia **50 de 85**
+linhas restantes (parada no offset 534).
+
+**Correção (duas camadas):**
+1. `POST query/sort` por `Time` **ascendente** no servidor, e paginação por `result-paging`
+   sobre o handle ordenado — o lote volta a ser um prefixo ordenado de verdade.
+2. Rede de segurança: com `backlog`, a marca d'água de `serial` **não avança**; só o cursor
+   `row`. A chave única `(task_id, serial_no)` absorve o replay.
+
+**Regras:**
+- **Marca d'água só é válida sobre conjunto ordenado.** Antes de usar `max(cursor)` de um lote,
+  provar que o lote é um prefixo ordenado — não presumir a partir do nome do campo.
+- **Ordem de resposta de API é contrato, e precisa ser medida, não presumida.** Aqui o conjunto
+  de origem era ordenado e estável (0 violações em 1000 linhas de `query/result`) e mesmo assim
+  o filtro devolveu desordem. Um filtro determinístico sobre conjunto ordenado *deveria* dar
+  subsequência ordenada; não deu.
+- **Um teste que passa com a correção revertida não testa a correção.** O teste
+  `test_ciclos_parciais_sucessivos_nao_perdem_nenhuma_linha` passava dos dois jeitos, porque a
+  fixture já vinha ordenada. Só `test_conjunto_fora_de_ordem_nao_perde_linhas_em_ciclo_parcial`
+  (sessão que devolve o conjunto embaralhado) reproduz a perda — 6 seriais somem sem ele.
+  Sempre reverter a correção e confirmar que o teste falha.
+
+---
+
 ## 2026-08-12 — Fase 3 entregou zero medições de VIP, em silêncio
 
 **Sintoma:** após a Fase 3, o log mostrava `Iniciando coleta de VIPs no modo: incremental`
@@ -54,7 +96,8 @@ corretos vêm de `GET /traceresult/query/fetch-field-values?taskId=&msgId=` — 
 no HAR e havia sido ignorado.
 
 **Correção:** `_open_trace_query` passou a ler a janela da task e devolvê-la junto do `msgId`;
-`_fetch_meas_report_page` envia as datas reais. Teste de regressão:
+`_fetch_meas_report_page` envia as datas reais (método hoje chamado
+`_filter_meas_reports`). Teste de regressão:
 `test_a_janela_da_task_e_lida_antes_de_filtrar`.
 
 **Regra:** ao reproduzir uma requisição capturada, replicar **todos** os passos que a

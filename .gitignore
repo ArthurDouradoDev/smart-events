@@ -45,6 +45,7 @@ build/
 *.log
 logs/
 err/
+*.har
 
 # --- OS / System Files ---
 .DS_Store

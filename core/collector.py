@@ -1621,13 +1621,35 @@ class HttpCollector(BaseCollector):
             raise ValueError(f"Task {task_id} não informou a janela de tempo (startTime/endTime)")
         return msg_id, start_time, end_time
 
-    def _fetch_meas_report_page(self, session, task_id: int, msg_id: int, start_row: int,
-                                start_time: str, end_time: str) -> tuple[list, int]:
-        """Pede ao FARS uma página contendo apenas ``RRC_MEAS_RPRT``.
+    @staticmethod
+    def _allocated_msg_id(payload, endpoint: str) -> tuple[int, int]:
+        """Extrai o ``msgId`` alocado e o ``recordCount`` de uma resposta do FARS.
 
-        O filtro por tipo é resolvido no servidor, o que reduz o resultado da
-        task (centenas de milhares de linhas) ao conjunto de relatórios de
-        medição. Devolve as linhas da página e o total filtrado.
+        Todo passo que muda o conjunto (``filter-by-cols``, ``sort``) materializa
+        um snapshot novo e devolve o handle dele em ``data.msgId`` — o handle de
+        entrada continua apontando para o conjunto anterior.
+        """
+        data = payload.get("data") if isinstance(payload, dict) else None
+        if not isinstance(data, dict):
+            raise ValueError(f"{endpoint} retornou contrato inválido")
+        try:
+            msg_id = int(data["msgId"])
+        except (KeyError, TypeError, ValueError):
+            raise ValueError(f"{endpoint} não devolveu msgId")
+        try:
+            total = int(payload.get("recordCount") or 0)
+        except (TypeError, ValueError):
+            total = 0
+        return msg_id, total
+
+    def _filter_meas_reports(self, session, task_id: int, msg_id: int,
+                             start_time: str, end_time: str) -> tuple[int, int]:
+        """Filtra ``RRC_MEAS_RPRT`` no servidor e devolve ``(msgId filtrado, total)``.
+
+        Chamado **uma vez por ciclo**. As linhas vêm depois pelo ``result-paging``
+        sobre o handle devolvido aqui: repetir este POST por página re-executaria
+        o filtro contra os dados vivos, e duas páginas do mesmo ciclo poderiam sair
+        de snapshots diferentes.
         """
         body = {
             "colFilterDto": {
@@ -1642,7 +1664,7 @@ class HttpCollector(BaseCollector):
             },
             "pageDto": {
                 "sqlColumnName": "", "isAscend": "", "taskId": task_id, "msgId": msg_id,
-                "comparisonMsgId": -1, "startRow": start_row, "pageSize": self._VIP_PAGE_SIZE,
+                "comparisonMsgId": -1, "startRow": 0, "pageSize": self._VIP_PAGE_SIZE,
                 "templateName": [], "isSetBenchMarkTime": False, "benchMarkTimeRowNo": -1,
             },
         }
@@ -1654,15 +1676,59 @@ class HttpCollector(BaseCollector):
         if not self._check_session_valid(response, "trace"):
             raise SessionExpiredError("Sessão Trace expirada no filtro de mensagens")
         response.raise_for_status()
+        return self._allocated_msg_id(response.json(), "filter-by-cols")
+
+    def _sort_trace_by_time(self, session, task_id: int, msg_id: int) -> tuple[int, int]:
+        """Ordena o conjunto filtrado por ``Time`` e devolve ``(msgId ordenado, total)``.
+
+        O conjunto que sai do ``filter-by-cols`` **não vem ordenado** — na captura
+        da task 2072 são 127 violações de ordem crescente em 619 linhas, em runs
+        curtos que não acompanham o NE. Sobre uma ordem assim, parar a paginação no
+        meio e gravar a marca d'água ``max(serialNo)`` apaga em silêncio as linhas
+        de serial menor que ainda não foram lidas.
+
+        A ordenação é **ascendente** de propósito: os dados novos entram no fim, o
+        que mantém estável o prefixo já consumido e dá sentido ao cursor por offset.
+        Descendente serve à tela, não a um coletor que retoma de onde parou.
+        """
+        body = {
+            "msgId": msg_id, "comparisonMsgId": -1, "taskId": task_id,
+            "isAscend": True, "sqlColumnName": "Time",
+            "startRow": 0, "pageSize": self._VIP_PAGE_SIZE, "templateName": [],
+            "isSetBenchMarkTime": False, "benchMarkTimeRowNo": -1,
+        }
+        response = session.post(
+            f"{self.base_url}/rest/oss/access/fars/v1/traceresult/query/sort",
+            params={"nocache": int(time.time() * 1000)}, json=body,
+            timeout=120, allow_redirects=False,
+        )
+        if not self._check_session_valid(response, "trace"):
+            raise SessionExpiredError("Sessão Trace expirada na ordenação")
+        response.raise_for_status()
+        return self._allocated_msg_id(response.json(), "query/sort")
+
+    def _fetch_trace_page(self, session, task_id: int, msg_id: int, start_row: int) -> list:
+        """Lê uma página de um ``msgId`` já materializado.
+
+        ``startRow`` além do fim devolve ``tableData`` vazio com HTTP 200 — é a
+        condição de parada natural do laço, sem erro.
+        """
+        response = session.get(
+            f"{self.base_url}/rest/oss/access/fars/v1/traceresult/query/result-paging",
+            params={
+                "nocache": int(time.time() * 1000), "startRow": start_row,
+                "pageSize": self._VIP_PAGE_SIZE, "taskId": task_id, "msgId": msg_id,
+                "isSetBenchMarkTime": "false", "benchMarkTimeRowNo": -1,
+            }, timeout=120, allow_redirects=False,
+        )
+        if not self._check_session_valid(response, "trace"):
+            raise SessionExpiredError("Sessão Trace expirada na paginação")
+        response.raise_for_status()
         payload = response.json()
         data = payload.get("data") if isinstance(payload, dict) else None
         if not isinstance(data, dict) or not isinstance(data.get("tableData"), list):
-            raise ValueError("filter-by-cols retornou contrato inválido")
-        try:
-            total = int(payload.get("recordCount") or 0)
-        except (TypeError, ValueError):
-            total = 0
-        return data["tableData"], total
+            raise ValueError("result-paging retornou contrato inválido")
+        return data["tableData"]
 
     @staticmethod
     def _trace_fields(message: dict) -> dict:
@@ -1748,8 +1814,10 @@ class HttpCollector(BaseCollector):
                         continue
                     try:
                         msg_id, win_start, win_end = self._open_trace_query(session, task_id)
-                        page, total = self._fetch_meas_report_page(
-                            session, task_id, msg_id, start_row, win_start, win_end)
+                        filtered_id, _ = self._filter_meas_reports(
+                            session, task_id, msg_id, win_start, win_end)
+                        sorted_id, total = self._sort_trace_by_time(
+                            session, task_id, filtered_id)
                         # Uma task reiniciada recria o conjunto filtrado: índices e
                         # seriais voltam a zero e o cursor antigo passaria do fim,
                         # travando a coleta. Reler do início é seguro porque a chave
@@ -1759,19 +1827,23 @@ class HttpCollector(BaseCollector):
                                 f"[vip/{vip_name}] task {task_id}: conjunto filtrado encolheu "
                                 f"({total} < offset {start_row}); relendo do início.")
                             last_serial, start_row = 0, 0
-                            page, total = self._fetch_meas_report_page(
-                                session, task_id, msg_id, 0, win_start, win_end)
+                        page = self._fetch_trace_page(session, task_id, sorted_id, start_row)
                         messages, row, pages = list(page), start_row + len(page), 1
                         while (len(page) == self._VIP_PAGE_SIZE
                                and pages < self._VIP_MAX_PAGES_PER_CYCLE):
-                            page, total = self._fetch_meas_report_page(
-                                session, task_id, msg_id, row, win_start, win_end)
+                            page = self._fetch_trace_page(session, task_id, sorted_id, row)
                             messages.extend(page)
                             row += len(page)
                             pages += 1
                         rows, safe_serial, undecoded = self._build_vip_measurements(
                             task_id, vip_name, messages, last_serial)
                         backlog = row < total
+                        # Marca d'água só avança sobre conjunto lido por inteiro. Num
+                        # ciclo parcial ela descartaria as linhas de serial menor que
+                        # ficaram para trás — o cursor `row` já garante a continuidade,
+                        # e a chave única (task_id, serial_no) descarta o replay.
+                        if backlog:
+                            safe_serial = last_serial
                     except SessionExpiredError:
                         raise
                     except (requests.exceptions.ConnectTimeout, requests.exceptions.ConnectionError,
@@ -1802,7 +1874,7 @@ class HttpCollector(BaseCollector):
                             "decode", f"Processando backlog de {vip_name}: {total - row} mensagens restantes",
                             "backlog", {"task_id": task_id, "serial": safe_serial}))
                     task_details.append({
-                        "task_id": task_id, "vip": vip_name, "msg_id": msg_id,
+                        "task_id": task_id, "vip": vip_name, "msg_id": sorted_id,
                         "serial_initial": last_serial, "serial_final": safe_serial,
                         "messages": len(messages), "rrc_measurements": len(messages),
                         "decoded": len(rows), "undecoded": undecoded,
