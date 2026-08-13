@@ -12,15 +12,51 @@ const STATUS_COLORS = {
   unknown:  "#484F58",
 };
 
+const STATUS_LABELS = {
+  ok:       "OK",
+  warning:  "Atenção",
+  critical: "Crítico",
+  unknown:  "Desconhecido",
+};
+
+// Desenha uma linha vertical pontilhada e semitransparente sobre o ponto
+// ativo do gráfico do popup de VIP. Plugin local (não registrado
+// globalmente) para não afetar os gráficos de kpi.js.
+const _vipHoverLinePlugin = {
+  id: "vipHoverLine",
+  afterDraw(chart) {
+    const active = chart.getActiveElements();
+    if (!active.length) return;
+    const { ctx, chartArea } = chart;
+    const x = active[0].element.x;
+    ctx.save();
+    ctx.beginPath();
+    ctx.moveTo(x, chartArea.top);
+    ctx.lineTo(x, chartArea.bottom);
+    ctx.lineWidth = 1;
+    ctx.setLineDash([4, 4]);
+    ctx.strokeStyle = "rgba(139, 148, 158, 0.5)";
+    ctx.stroke();
+    ctx.restore();
+  },
+};
+
 let _modalChart = null;
 let _currentVip = null;
 let _fullSeries = [];        // série completa do VIP aberto (cache p/ as abas)
 let _vipWindow  = "today";   // today | 3d | 7d | all
+let _requestGen = 0;         // token de geração: invalida respostas tardias
+let _lastFocusedEl = null;   // elemento a receber foco de volta ao fechar
 
 const _WINDOWS = ["today", "3d", "7d", "all"];
 
 export function initVip() {
   State.on("change:vips", render);
+  // Trocar o evento ativo/histórico invalida a associação célula-site do
+  // popup aberto (ela depende do evento visualizado); fechar é mais seguro
+  // do que tentar recalcular em cima de um VIP que pode nem existir mais.
+  State.on("change:activeEvent", _closeModal);
+  State.on("change:historicalEvent", _closeModal);
   _initModal();
   _initRefresh();
 }
@@ -109,11 +145,20 @@ function _card(vip, dim = false) {
       ${_signalBar("RSRQ", vip.rsrq, -20, -3, _rsrqStatus(vip.rsrq), "dB")}
     ` : ""}`;
 
+  card.tabIndex = 0;
+  card.setAttribute("role", "button");
+  card.setAttribute("aria-label", `Detalhes de ${vip.name}`);
+
   card.addEventListener("click", () => {
-    _openModal(vip);
+    _openModal(vip, card);
     if (vip.serving_site) {
       State.set("selectedSite", vip.serving_site);
     }
+  });
+  card.addEventListener("keydown", e => {
+    if (e.key !== "Enter" && e.key !== " ") return;
+    e.preventDefault();
+    card.click();
   });
 
   return card;
@@ -144,12 +189,26 @@ function _rsrqStatus(rsrq) {
 function _initModal() {
   const modal = document.getElementById("vip-detail-modal");
   const btnClose = document.getElementById("vip-modal-close");
+  const btnRetry = document.getElementById("vip-modal-retry");
   if (!modal || !btnClose) return;
 
   btnClose.addEventListener("click", _closeModal);
   modal.addEventListener("click", e => {
     if (e.target === modal) _closeModal();
   });
+
+  document.addEventListener("keydown", e => {
+    if (e.key !== "Escape") return;
+    if (modal.classList.contains("hidden")) return;
+    _closeModal();
+  });
+
+  if (btnRetry) {
+    btnRetry.addEventListener("click", () => {
+      if (!_currentVip) return;
+      _loadSeries(_currentVip);
+    });
+  }
 
   // Abas de janela temporal (Hoje / 3 dias / 7 dias / Total)
   document.querySelectorAll("#vip-modal-time-tabs .time-tab").forEach(btn => {
@@ -164,7 +223,9 @@ function _initModal() {
 
 function _syncWindowTabs() {
   document.querySelectorAll("#vip-modal-time-tabs .time-tab").forEach(b => {
-    b.classList.toggle("active", b.dataset.vipWindow === _vipWindow);
+    const active = b.dataset.vipWindow === _vipWindow;
+    b.classList.toggle("active", active);
+    b.setAttribute("aria-pressed", active ? "true" : "false");
   });
 }
 
@@ -196,20 +257,28 @@ function _pickDefaultWindow() {
 
 function _closeModal() {
   const modal = document.getElementById("vip-detail-modal");
+  const wasOpen = modal && !modal.classList.contains("hidden");
   if (modal) modal.classList.add("hidden");
   _currentVip = null;
   _fullSeries = [];
+  _requestGen++; // invalida qualquer requisição em curso
   if (_modalChart) {
     _modalChart.destroy();
     _modalChart = null;
   }
+  if (wasOpen && _lastFocusedEl) {
+    _lastFocusedEl.focus();
+  }
+  _lastFocusedEl = null;
 }
 
-async function _openModal(vip) {
+async function _openModal(vip, triggerEl) {
   const modal       = document.getElementById("vip-detail-modal");
+  const modalBox    = modal?.querySelector(".modal-box");
   const dotEl       = document.getElementById("vip-modal-dot");
   const nameEl      = document.getElementById("vip-modal-name");
   const roleEl      = document.getElementById("vip-modal-role");
+  const statusEl    = document.getElementById("vip-modal-status");
   const cellEl      = document.getElementById("vip-modal-cell");
   const rsrpEl      = document.getElementById("vip-modal-rsrp");
   const rsrqEl      = document.getElementById("vip-modal-rsrq");
@@ -217,13 +286,23 @@ async function _openModal(vip) {
   const lastSeenEl  = document.getElementById("vip-modal-last-seen");
   if (!modal) return;
 
+  _lastFocusedEl = triggerEl || document.activeElement;
   _currentVip = vip;
 
-  // Preenche cabeçalho
+  // Preenche cabeçalho e faixa de resumo com o estado atual do VIP (não
+  // depende da série histórica, então aparece imediatamente).
   const color = STATUS_COLORS[vip.status] || STATUS_COLORS.unknown;
   dotEl.style.background = color;
   nameEl.textContent = vip.name;
+  nameEl.title = vip.name;
   roleEl.textContent = vip.role || "";
+  roleEl.title = vip.role || "";
+
+  if (statusEl) {
+    statusEl.textContent = STATUS_LABELS[vip.status] || STATUS_LABELS.unknown;
+    statusEl.className = `vip-modal-status status-${vip.status || "unknown"}`;
+  }
+
   cellEl.textContent = vip.serving_cell || "—";
   rsrpEl.textContent = vip.rsrp != null ? `${vip.rsrp.toFixed(0)} dBm` : "—";
   rsrqEl.textContent = vip.rsrq != null ? `${vip.rsrq.toFixed(1)} dB`  : "—";
@@ -246,22 +325,107 @@ async function _openModal(vip) {
   }
 
   modal.classList.remove("hidden");
+  modalBox?.focus();
 
-  // Busca a série completa do VIP uma única vez; as abas filtram o cache.
+  await _loadSeries(vip);
+}
+
+// Busca a série completa do VIP (cache para as abas de janela) e alimenta
+// o gráfico. Protegido por token de geração: uma resposta de uma chamada
+// anterior (VIP fechado/trocado nesse meio tempo) nunca é renderizada.
+async function _loadSeries(vip) {
+  const gen = ++_requestGen;
+
   _fullSeries = [];
+  if (_modalChart) {
+    _modalChart.destroy();
+    _modalChart = null;
+  }
+  _showState("loading");
+
+  let res;
   try {
-    const res = await API.getVipSeries(State.eventId, vip.name, 525600);
-    if (res && res.ok) _fullSeries = res.series || [];
+    res = await API.getVipSeries(State.eventId, vip.name, 525600);
   } catch (e) {
     console.error("Erro ao buscar série VIP:", e);
+    if (gen !== _requestGen) return;
+    _showState("error");
+    return;
   }
 
-  // Se o VIP em foco mudou enquanto a busca corria, descarta este resultado.
-  if (_currentVip !== vip) return;
+  if (gen !== _requestGen) return; // resposta tardia de uma chamada obsoleta
 
+  if (!res || res.ok === false) {
+    _showState("error");
+    return;
+  }
+
+  _fullSeries = res.series || [];
   _vipWindow = _pickDefaultWindow();
   _syncWindowTabs();
   _renderChart(_filterSeries(_vipWindow));
+}
+
+// Alterna entre os estados mutuamente exclusivos da região do gráfico.
+function _showState(state) {
+  const wrapperEl = document.getElementById("vip-modal-chart-wrapper");
+  const loadingEl = document.getElementById("vip-modal-loading");
+  const noDataEl  = document.getElementById("vip-modal-no-data");
+  const errorEl   = document.getElementById("vip-modal-error");
+  const tooltipEl = document.getElementById("vip-modal-tooltip");
+
+  wrapperEl?.classList.toggle("hidden", state !== "chart");
+  loadingEl?.classList.toggle("hidden", state !== "loading");
+  noDataEl?.classList.toggle("hidden", state !== "empty");
+  errorEl?.classList.toggle("hidden", state !== "error");
+  tooltipEl?.classList.add("hidden");
+}
+
+// Callback "external" do Chart.js: renderiza o tooltip como HTML real (em
+// vez de desenhado no canvas) para que o conteúdo — data/hora, site, célula
+// e métricas do registro apontado — seja inspecionável no DOM.
+function _renderTooltip(context, series) {
+  const tooltipEl = document.getElementById("vip-modal-tooltip");
+  if (!tooltipEl) return;
+  const tooltipModel = context.tooltip;
+
+  const dataPoint = tooltipModel.opacity !== 0 ? tooltipModel.dataPoints?.[0] : null;
+  const r = dataPoint ? series[dataPoint.dataIndex] : null;
+  if (!r) {
+    tooltipEl.classList.add("hidden");
+    return;
+  }
+
+  const dt = new Date(r.timestamp).toLocaleString("pt-BR", {
+    day: "2-digit", month: "2-digit",
+    hour: "2-digit", minute: "2-digit", second: "2-digit",
+  });
+  const rsrpTxt = r.rsrp != null ? `${r.rsrp.toFixed(1)} dBm` : "—";
+  const rsrqTxt = r.rsrq != null ? `${r.rsrq.toFixed(1)} dB`  : "—";
+  const cellTxt = r.serving_cell || "—";
+  // Site do próprio registro apontado (nunca o site atual do VIP): cada
+  // instante carrega sua própria associação, resolvida pela API no
+  // contexto do evento visualizado.
+  const siteTxt = r.serving_site_name || r.serving_site
+    || (r.serving_cell ? "Site não identificado" : "—");
+
+  tooltipEl.innerHTML = `
+    <div class="vip-tooltip-time">${_esc(dt)}</div>
+    <div class="vip-tooltip-row"><span>Site</span><span class="vip-tooltip-site">${_esc(siteTxt)}</span></div>
+    <div class="vip-tooltip-row"><span>Célula</span><span class="vip-tooltip-cell">${_esc(cellTxt)}</span></div>
+    <div class="vip-tooltip-row"><span>RSRP</span><span class="vip-tooltip-rsrp">${_esc(rsrpTxt)}</span></div>
+    <div class="vip-tooltip-row"><span>RSRQ</span><span class="vip-tooltip-rsrq">${_esc(rsrqTxt)}</span></div>
+  `;
+  tooltipEl.classList.remove("hidden");
+
+  const wrapper = tooltipEl.parentElement;
+  let left = tooltipModel.caretX + 12;
+  const top = tooltipModel.caretY;
+  if (wrapper && left + tooltipEl.offsetWidth + 4 > wrapper.clientWidth) {
+    left = tooltipModel.caretX - tooltipEl.offsetWidth - 12;
+  }
+  tooltipEl.style.left = `${Math.max(0, left)}px`;
+  tooltipEl.style.top  = `${Math.max(0, top)}px`;
 }
 
 // Detecta a virada de dia entre pontos consecutivos e devolve anotações
@@ -289,12 +453,8 @@ function _dayDividers(series) {
 }
 
 function _renderChart(series) {
-  const vip       = _currentVip;
-  const noDataEl  = document.getElementById("vip-modal-no-data");
-  const wrapperEl = document.getElementById("vip-modal-chart-wrapper");
+  const vip = _currentVip;
   if (!vip) return;
-
-  const color = STATUS_COLORS[vip.status] || STATUS_COLORS.unknown;
 
   // Destrói chart anterior
   if (_modalChart) {
@@ -303,13 +463,13 @@ function _renderChart(series) {
   }
 
   if (!series.length) {
-    noDataEl.classList.remove("hidden");
-    wrapperEl.classList.add("hidden");
+    _showState("empty");
     return;
   }
 
-  noDataEl.classList.add("hidden");
-  wrapperEl.classList.remove("hidden");
+  _showState("chart");
+
+  const color = STATUS_COLORS[vip.status] || STATUS_COLORS.unknown;
 
   const labels = series.map(r => {
     const d = new Date(r.timestamp);
@@ -327,6 +487,7 @@ function _renderChart(series) {
   const canvas = document.getElementById("vip-modal-chart");
   _modalChart = new Chart(canvas, {
     type: "line",
+    plugins: [_vipHoverLinePlugin],
     data: {
       labels,
       datasets: [
@@ -374,20 +535,8 @@ function _renderChart(series) {
           },
         },
         tooltip: {
-          callbacks: {
-            title: (items) => {
-              const r = series[items[0]?.dataIndex];
-              if (!r) return "";
-              return new Date(r.timestamp).toLocaleString("pt-BR", {
-                day: "2-digit", month: "2-digit",
-                hour: "2-digit", minute: "2-digit",
-              });
-            },
-            label: (ctx) => {
-              const unit = ctx.dataset.yAxisID === "yRsrp" ? " dBm" : " dB";
-              return `${ctx.dataset.label}: ${ctx.raw?.toFixed(1)}${unit}`;
-            },
-          },
+          enabled: false,
+          external: (context) => _renderTooltip(context, series),
         },
         annotation: {
           annotations: {

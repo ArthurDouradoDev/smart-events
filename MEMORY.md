@@ -136,3 +136,41 @@ Regressões: `test_o_filtro_roda_uma_vez_e_a_paginacao_usa_o_conjunto_ordenado`,
   Problema de catálogo em `credentials.json`/`clientes.json`.
 
 Ambas falham no HEAD e são independentes da coleta de VIP.
+
+---
+
+## 2026-08-13 — Popup analítico de VIP: implementação completa do plano (U1+U2+U3)
+
+Uma tentativa anterior (Gemini) implementou só a U1 (enriquecimento de `get_vip_series` com
+`serving_site`/`serving_site_name` em `api/api.py`) mais um ajuste cosmético de CSS/HTML
+(`popup-chart-box`). `frontend/js/vip.js` não tinha sido tocado — por isso a interface parecia
+inalterada. Esta sessão completou U2 e U3 sobre o plano
+`docs/plans/2026-08-12-001-feat-vip-detail-popup-plan.md`.
+
+- **Reestruturação do modal** (`frontend/index.html`, `frontend/css/main.css`): cabeçalho
+  (nome, função, badge de status, último registro), faixa compacta (site/célula/RSRP/RSRQ) e
+  região de gráfico flexível com estados loading/vazio/erro mutuamente exclusivos.
+- **Tooltip via `external` callback do Chart.js, não callbacks de canvas.** O tooltip padrão do
+  Chart.js desenha no canvas (pixels), o que o torna impossível de inspecionar via DOM em
+  testes Playwright. Trocado por um `<div id="vip-modal-tooltip">` posicionado via
+  `tooltipModel.caretX/caretY`, alimentado pelo mesmo array canônico indexado por `dataIndex`.
+  Isso também é o que permite testar conteúdo do tooltip (site/célula/RSRP/RSRQ) sem comparação
+  de pixel — mitigação de risco que o próprio plano pedia.
+- **Linha-guia vertical**: plugin Chart.js local (`_vipHoverLinePlugin`, `afterDraw`), passado
+  via `plugins: [...]` no config do chart (não `Chart.register` global) para não vazar para os
+  gráficos de `kpi.js`.
+- **Proteção contra resposta tardia**: token `_requestGen` incrementado em `_openModal`/
+  `_closeModal`; comparado após o `await` antes de renderizar. `State.on("change:activeEvent"/
+  "change:historicalEvent", _closeModal)` fecha o popup ao trocar de evento.
+- **Cards de VIP viraram focáveis** (`tabIndex=0`, `role="button"`, Enter/Espaço abrem) — sem
+  isso, `_lastFocusedEl.focus()` no fechamento do modal é um no-op (elemento não focável) e a
+  restauração de foco (R13) não tem como funcionar.
+- **Mocks determinísticos** em `frontend/js/bridge.js` (`?vipSeriesScenario=`): `default`
+  (sequência fixa cruzando 2 sites, célula não mapeada, timestamp duplicado, métrica nula),
+  `empty`, `error`, `error_once` (falha uma vez por nome de VIP, depois recupera — testa retry),
+  `delay` (1.5s, para exercitar a proteção contra resposta tardia).
+- Suíte nova: `tests/test_frontend_vip_modal_ui.py` (11 testes Playwright, mesmo padrão de
+  `test_frontend_collection_ui.py`). Aponta o hover para pixels calculados via
+  `Chart.instances` + `getDatasetMeta` em vez de comparar imagem.
+- Gate completo (`pytest tests/ -v`): 258 passed, 3 failed (as pré-existentes documentadas
+  acima), 10 skipped. Nenhuma regressão nova.

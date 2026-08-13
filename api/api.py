@@ -672,58 +672,7 @@ class Api:
             rsrp_warn = thresholds.get("rsrp_warning", -100)
             rsrp_crit = thresholds.get("rsrp_critical", -110)
 
-            # Mapeamento para resolução de célula em site ID (case-insensitive)
-            cell_to_site = {}
-            for site in config.get("sites", []):
-                site_id = site["id"]
-                for cell in site.get("cells", []):
-                    if isinstance(cell, str):
-                        cell_to_site[cell.upper()] = site_id
-                    elif isinstance(cell, dict):
-                        c_id = cell.get("id")
-                        if c_id:
-                            cell_to_site[c_id.upper()] = site_id
-                        obj_no = cell.get("obj_no")
-                        if obj_no is not None:
-                            cell_to_site[str(obj_no).upper()] = site_id
-
-            def resolve_site_id(cell_id):
-                if not cell_id:
-                    return None
-                cell_id_str = str(cell_id).strip()
-                cell_id_upper = cell_id_str.upper()
-
-                # 1. Match exato com célula/obj_no mapeado
-                if cell_id_upper in cell_to_site:
-                    return cell_to_site[cell_id_upper]
-
-                # 2. Match por prefixo ou contendo no site ID/Nome
-                for site in config.get("sites", []):
-                    s_id = site["id"]
-                    s_id_upper = s_id.upper()
-                    s_name_upper = site.get("name", "").upper()
-                    if (cell_id_upper.startswith(s_id_upper) or s_id_upper in cell_id_upper or
-                            s_name_upper in cell_id_upper or cell_id_upper in s_name_upper):
-                        return s_id
-
-                # 3. Decodificação de ID global de célula (4G ECI // 256 ou 5G NCI // 4096)
-                if cell_id_str.isdigit():
-                    try:
-                        val = int(cell_id_str)
-                        for divisor in (256, 4096):
-                            inferred_site = val // divisor
-                            inferred_str = str(inferred_site)
-                            if inferred_site > 0:
-                                for site in config.get("sites", []):
-                                    s_id = site["id"]
-                                    s_id_upper = s_id.upper()
-                                    s_name_upper = site.get("name", "").upper()
-                                    if inferred_str in s_id_upper or inferred_str in s_name_upper:
-                                        return s_id
-                    except ValueError:
-                        pass
-
-                return None
+            resolve_site_id = self._create_cell_resolver(config.get("sites", []))
 
             site_id_to_name = {site["id"]: site["name"] for site in config.get("sites", [])}
 
@@ -798,7 +747,18 @@ class Api:
     def get_vip_series(self, event_id: str, vip_name: str, minutes: int = 60) -> dict:
         """Retorna série temporal de RSRP/RSRQ para um VIP específico."""
         try:
+            config = db.get_event(event_id) or _active_event
+            sites = config.get("sites", []) if config else []
+            resolve_site_id = self._create_cell_resolver(sites)
+            site_id_to_name = {site["id"]: site["name"] for site in sites}
+
             rows = db.get_vip_series(event_id, vip_name, minutes)
+            for row in rows:
+                cell = row.get("serving_cell")
+                site_id = resolve_site_id(cell)
+                row["serving_site"] = site_id
+                row["serving_site_name"] = site_id_to_name.get(site_id) if site_id else None
+
             return {"ok": True, "series": rows}
         except Exception as e:
             logger.error(f"get_vip_series error: {e}")
@@ -824,6 +784,61 @@ class Api:
         except Exception as e:
             logger.error(f"get_alarms error: {e}")
             return []
+
+    @staticmethod
+    def _create_cell_resolver(sites: list):
+        cell_to_site = {}
+        for site in sites:
+            site_id = site["id"]
+            for cell in site.get("cells", []):
+                if isinstance(cell, str):
+                    cell_to_site[cell.upper()] = site_id
+                elif isinstance(cell, dict):
+                    c_id = cell.get("id")
+                    if c_id:
+                        cell_to_site[c_id.upper()] = site_id
+                    obj_no = cell.get("obj_no")
+                    if obj_no is not None:
+                        cell_to_site[str(obj_no).upper()] = site_id
+
+        def resolve_site_id(cell_id):
+            if not cell_id:
+                return None
+            cell_id_str = str(cell_id).strip()
+            cell_id_upper = cell_id_str.upper()
+
+            # 1. Match exato com célula/obj_no mapeado
+            if cell_id_upper in cell_to_site:
+                return cell_to_site[cell_id_upper]
+
+            # 2. Match por prefixo ou contendo no site ID/Nome
+            for site in sites:
+                s_id = site["id"]
+                s_id_upper = s_id.upper()
+                s_name_upper = site.get("name", "").upper()
+                if (cell_id_upper.startswith(s_id_upper) or s_id_upper in cell_id_upper or
+                        s_name_upper in cell_id_upper or cell_id_upper in s_name_upper):
+                    return s_id
+
+            # 3. Decodificação de ID global de célula (4G ECI // 256 ou 5G NCI // 4096)
+            if cell_id_str.isdigit():
+                try:
+                    val = int(cell_id_str)
+                    for divisor in (256, 4096):
+                        inferred_site = val // divisor
+                        inferred_str = str(inferred_site)
+                        if inferred_site > 0:
+                            for site in sites:
+                                s_id = site["id"]
+                                s_id_upper = s_id.upper()
+                                s_name_upper = site.get("name", "").upper()
+                                if inferred_str in s_id_upper or inferred_str in s_name_upper:
+                                    return s_id
+                except ValueError:
+                    pass
+
+            return None
+        return resolve_site_id
 
     @staticmethod
     def _resolve_site_for_source(sites: list, source) -> tuple:

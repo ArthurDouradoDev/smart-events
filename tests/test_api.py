@@ -139,3 +139,73 @@ class TestApiCollectionStatus:
         status = api.get_app_status()
         assert "db_size_mb" in status
         assert "recording" in status
+
+
+class TestApiVipSeries:
+    @pytest.fixture
+    def mock_db_series(self, monkeypatch):
+        rows = [
+            {"timestamp": "2026-08-12T10:00:00Z", "serving_cell": "CELL1", "rsrp": -90, "rsrq": -10},
+            {"timestamp": "2026-08-12T10:01:00Z", "serving_cell": "CELL2", "rsrp": -95, "rsrq": -12},
+            {"timestamp": "2026-08-12T10:02:00Z", "serving_cell": "UNKNOWN", "rsrp": -100, "rsrq": -15},
+            {"timestamp": "2026-08-12T10:02:00Z", "serving_cell": "256", "rsrp": -85, "rsrq": -8},  # same timestamp, different cell
+        ]
+        monkeypatch.setattr(database, "get_vip_series", lambda *a, **k: rows)
+        return rows
+
+    def test_vip_series_resolves_sites(self, api, mock_db_series):
+        # Célula com ID exato (CELL1), substring (CELL2), não mapeada (UNKNOWN), decodificação ECI/NCI (256 -> Site 1)
+        # Note: 256 // 256 = 1 (se o site tiver id "1" ou name "1", ele acha)
+        event_cfg = {
+            "id": "evt1",
+            "name": "Test Event 1",
+            "sites": [
+                {"id": "SITE_A", "name": "Site Alpha", "lat": 0, "lng": 0, "cells": ["CELL1", {"id": "CELL_X"}]},
+                {"id": "SITE_B", "name": "Site Beta", "lat": 0, "lng": 0, "cells": [{"id": "CELL2"}]},
+                {"id": "1", "name": "Site One", "lat": 0, "lng": 0, "cells": []}
+            ]
+        }
+        database.save_event(event_cfg)
+
+        res = api.get_vip_series("evt1", "VIP_TEST", 60)
+        assert res["ok"] is True
+        series = res["series"]
+        assert len(series) == 4
+
+        # Covers AE2: Dois sites
+        assert series[0]["serving_cell"] == "CELL1"
+        assert series[0]["serving_site"] == "SITE_A"
+        assert series[0]["serving_site_name"] == "Site Alpha"
+
+        assert series[1]["serving_cell"] == "CELL2"
+        assert series[1]["serving_site"] == "SITE_B"
+
+        # Covers AE3: Desconhecido
+        assert series[2]["serving_cell"] == "UNKNOWN"
+        assert series[2]["serving_site"] is None
+        assert series[2]["serving_site_name"] is None
+        assert series[2]["rsrp"] == -100
+
+        # Covers AE4: Mesmo timestamp, ordem mantida
+        assert series[2]["timestamp"] == "2026-08-12T10:02:00Z"
+        assert series[3]["timestamp"] == "2026-08-12T10:02:00Z"
+        assert series[3]["serving_cell"] == "256"
+        assert series[3]["serving_site"] == "1"
+
+    def test_vip_series_different_event_maps(self, api, mock_db_series):
+        # Covers AE5: Eventos diferentes
+        evt2 = {
+            "id": "evt2",
+            "name": "Test Event 2",
+            "sites": [{"id": "SITE_X", "name": "Site X", "lat": 0, "lng": 0, "cells": ["CELL1"]}]
+        }
+        database.save_event(evt2)
+        res = api.get_vip_series("evt2", "VIP_TEST")
+        assert res["series"][0]["serving_site"] == "SITE_X"
+
+    def test_vip_series_no_event(self, api, mock_db_series):
+        # Covers AE6: Evento inexistente
+        res = api.get_vip_series("nao_existe", "VIP_TEST")
+        assert res["ok"] is True
+        series = res["series"]
+        assert all(r["serving_site"] is None for r in series)

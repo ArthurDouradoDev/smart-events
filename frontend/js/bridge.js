@@ -66,6 +66,34 @@ document.addEventListener("DOMContentLoaded", () => {
 // Cenários reproduzíveis: use `?collectionScenario=partial` (data, empty,
 // partial, error, auth_required ou stale) ao abrir o frontend sem pywebview.
 const _mockCollectionScenario = new URLSearchParams(window.location.search).get("collectionScenario") || "data";
+
+// Cenários reproduzíveis do histórico de VIP: use `?vipSeriesScenario=empty`
+// (default, empty, error, error_once ou delay) ao abrir o frontend sem pywebview.
+const _vipSeriesScenario = new URLSearchParams(window.location.search).get("vipSeriesScenario") || "default";
+const _vipErrorOnceSeen = new Set(); // nomes de VIP já vistos pelo cenário error_once
+
+// Sequência determinística (sem Math.random) que atravessa dois sites,
+// contém célula não mapeada, timestamp duplicado e métrica nula — para
+// exercitar o tooltip contextual e os estados do popup de forma repetível.
+function _mockVipSeriesRows() {
+  const now = Date.now();
+  const stepMs = 20 * 60 * 1000; // 20min entre pontos
+  const points = [
+    { offset: 6, cell: "ERB-07-A1",      site: "ERB-07", siteName: "ERB-07 Interlagos",     rsrp: -82,   rsrq: -6 },
+    { offset: 5, cell: "ERB-07-A1",      site: "ERB-07", siteName: "ERB-07 Interlagos",     rsrp: -85,   rsrq: -7 },
+    { offset: 4, cell: "ERB-07-A2",      site: "ERB-07", siteName: "ERB-07 Interlagos",     rsrp: -90,   rsrq: -9 },
+    { offset: 3, cell: "UNKNOWN-CELL-99", site: null,     siteName: null,                    rsrp: -101,  rsrq: -14 },
+    { offset: 2, cell: "ERB-03-A1",      site: "ERB-03", siteName: "ERB-03 Av. Interlagos", rsrp: -88,   rsrq: -8 },
+    { offset: 1, cell: "ERB-03-A1",      site: "ERB-03", siteName: "ERB-03 Av. Interlagos", rsrp: null,  rsrq: -8 },
+    { offset: 1, cell: "ERB-03-A2",      site: "ERB-03", siteName: "ERB-03 Av. Interlagos", rsrp: -84,   rsrq: -6 }, // timestamp duplicado (mesmo offset do ponto anterior)
+  ];
+  return points.map(p => ({
+    timestamp: new Date(now - p.offset * stepMs).toISOString(),
+    rsrp: p.rsrp, rsrq: p.rsrq,
+    serving_cell: p.cell, serving_site: p.site, serving_site_name: p.siteName,
+    in_event: 1,
+  }));
+}
 function _mockCollectionStatus() {
   const now = Date.now();
   const state = _mockCollectionScenario;
@@ -289,21 +317,17 @@ const _mock = {
   download_collection_logs: () => ({ ok: true, path: "C:\\Users\\Mock\\Downloads\\smart_events_coleta.log" }),
 
   get_vip_series: (event_id, vip_name, minutes) => {
-    // Espalha ~200 pontos pela janela (até 7 dias no mock) para exercitar
-    // os divisores de dia no gráfico do popup de VIP.
-    const span = Math.min(Math.max(Math.floor(minutes) || 60, 1), 7 * 24 * 60);
-    const points = 200;
-    const stepMs = (span * 60000) / points;
-    const series = [];
-    const now = Date.now();
-    for (let i = points; i >= 0; i--) {
-      series.push({
-        timestamp:    new Date(now - i * stepMs).toISOString(),
-        rsrp:         +(-88 + (Math.random() - 0.5) * 16).toFixed(1),
-        rsrq:         +(-9  + (Math.random() - 0.5) * 6).toFixed(1),
-        serving_cell: "ERB-07",
-        in_event:     1,
-      });
+    if (_vipSeriesScenario === "empty") return { ok: true, series: [] };
+    if (_vipSeriesScenario === "error") {
+      return { ok: false, error: "Falha simulada ao consultar o histórico do VIP." };
+    }
+    if (_vipSeriesScenario === "error_once" && !_vipErrorOnceSeen.has(vip_name)) {
+      _vipErrorOnceSeen.add(vip_name);
+      return { ok: false, error: "Falha simulada (única) ao consultar o histórico do VIP." };
+    }
+    const series = _mockVipSeriesRows();
+    if (_vipSeriesScenario === "delay") {
+      return new Promise(resolve => setTimeout(() => resolve({ ok: true, series }), 1500));
     }
     return { ok: true, series };
   },
