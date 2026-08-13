@@ -1,4 +1,6 @@
 """Testes de integração para core/database.py usando banco SQLite temporário."""
+import threading
+
 import pytest
 import core.database as database
 
@@ -44,6 +46,39 @@ class TestEventCRUD:
 
 
 # ── KPI Measurements ─────────────────────────────────────────────────
+
+def test_schema_do_evento_e_inicializado_uma_vez_entre_threads(tmp_db, monkeypatch):
+    original = database.init_event_db
+    calls = []
+    calls_lock = threading.Lock()
+    barrier = threading.Barrier(6)
+    errors = []
+
+    def counted(conn):
+        with calls_lock:
+            calls.append(1)
+        original(conn)
+
+    def open_from_thread():
+        try:
+            barrier.wait()
+            conn = database.get_event_conn("concorrente")
+            conn.execute("SELECT COUNT(*) FROM sites").fetchone()
+        except Exception as error:
+            errors.append(error)
+        finally:
+            database.close_conn()
+
+    monkeypatch.setattr(database, "init_event_db", counted)
+    threads = [threading.Thread(target=open_from_thread) for _ in range(6)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join(timeout=10)
+
+    assert errors == []
+    assert len(calls) == 1
+
 
 class TestKpiMeasurements:
     def _make_kpi(self, event_id, site_id, cell_id, metric, value, ts=None):

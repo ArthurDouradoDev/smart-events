@@ -141,6 +141,19 @@ class _ExpiredOnceTraceSession(_TraceSession):
         return super().get(url, params, **kwargs)
 
 
+class _EmptyBootstrapTraceSession(_TraceSession):
+    def get(self, url, params=None, **kwargs):
+        if url.endswith("/query/result"):
+            self.calls.append((url, dict(params or {})))
+            return _Response({
+                "recordCount": 0,
+                "data": {"msgId": next(self.msg_ids), "tableData": []},
+            })
+        if url.endswith("/fetch-field-values"):
+            raise AssertionError("task vazia não deve consultar fetch-field-values")
+        return super().get(url, params, **kwargs)
+
+
 def _collector(sample_event, monkeypatch, session=None):
     session = session or _TraceSession()
     monkeypatch.setattr(db, "get_event_vips", lambda *args: [
@@ -480,7 +493,7 @@ def test_contrato_invalido_da_paginacao_fica_visivel_como_parcial(tmp_db, sample
     assert result.measurements == []
 
 
-def test_task_recusada_no_pre_check_nao_vira_ciclo_saudavel(tmp_db, sample_event, monkeypatch):
+def test_task_recusada_no_pre_check_nao_vira_ciclo_saudavel(tmp_db, sample_event, monkeypatch, caplog):
     db.save_event(sample_event)
     session = _TraceSession()
     monkeypatch.setattr(session, "get", lambda url, params=None, **k: _Response(
@@ -491,6 +504,34 @@ def test_task_recusada_no_pre_check_nao_vira_ciclo_saudavel(tmp_db, sample_event
 
     assert result.state == "partial"
     assert result.coverage["tasks_valid"] == 0
+    assert any("task 2072" in record.message and "motivo=" in record.message
+               for record in caplog.records)
+
+
+def test_task_vazia_registra_diagnostico_por_task(tmp_db, sample_event, monkeypatch, caplog):
+    db.save_event(sample_event)
+    collector, _ = _collector(sample_event, monkeypatch, _TraceSession(rows=[]))
+
+    with caplog.at_level("INFO"):
+        result = collector.collect_vips()
+
+    assert result.state == "empty"
+    assert any("task 2072: recordCount=0 linhas_lidas=0 linhas_decodificadas=0" in record.message
+               for record in caplog.records)
+
+
+def test_task_sem_mensagens_nao_chama_endpoint_que_responde_500(
+        tmp_db, sample_event, monkeypatch, caplog):
+    db.save_event(sample_event)
+    collector, session = _collector(
+        sample_event, monkeypatch, _EmptyBootstrapTraceSession(rows=[]))
+
+    with caplog.at_level("INFO"):
+        result = collector.collect_vips()
+
+    assert result.state == "empty"
+    assert result.coverage["tasks_valid"] == 1
+    assert not any(url.endswith("/fetch-field-values") for url, _ in session.calls)
 
 
 def test_sem_vip_configurado_e_vazio_explicito(tmp_db, sample_event, monkeypatch):
@@ -510,11 +551,21 @@ def test_scheduler_persiste_os_cursores_depois_do_lote(tmp_db, sample_event, mon
     db.save_event(sample_event)
     collector, _ = _collector(sample_event, monkeypatch)
     scheduler = Scheduler()
+    from core.scheduler import CollectionContext
+    import threading
+    context = CollectionContext(
+        generation=1, event_id=sample_event["id"], oss="SP", collector=collector,
+        event_config=sample_event, stop_event=threading.Event(),
+    )
+    scheduler._generation = 1
+    scheduler._active_context = context
     scheduler._collector = collector
     scheduler._event_config = sample_event
+    scheduler._recording = True
 
-    scheduler._collect_vips(mode="incremental")
+    scheduler._collect_vips(context, mode="incremental")
 
     salvos = db.get_collection_checkpoints(sample_event["id"], "vip", 2072, "SP")
     assert salvos["serial"] == "335034"
     assert salvos["row"] == str(len(ALL_ROWS))
+    scheduler.stop()

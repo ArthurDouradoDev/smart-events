@@ -7,6 +7,7 @@ import json
 import logging
 import os
 import subprocess
+import threading
 from datetime import datetime
 from pathlib import Path
 from typing import Optional
@@ -22,12 +23,18 @@ logger = logging.getLogger(__name__)
 
 _active_event: Optional[dict] = None
 _update_callback = None  # função JS chamada quando novos dados chegam
+_activation_lock = threading.RLock()
 
 
 class Api:
 
     # URL do servidor FastAPI local embutido (injetada por main.py no startup).
     _server_url: str = ""
+
+    def __init__(self):
+        # Uma leitura transitoriamente bloqueada nunca deve ser traduzida para
+        # "o evento não tem sites", pois o frontend removeria todos do mapa.
+        self._sites_cache: dict[str, list] = {}
 
     # ── Ciclo de vida do evento ──────────────────────────────────────
 
@@ -60,7 +67,9 @@ class Api:
         """
         global _active_event
         try:
-            config = db.get_event(event_id) or _active_event
+            config = db.get_event(event_id)
+            if config is None and _active_event and _active_event.get("id") == event_id:
+                config = _active_event
             if not config:
                 return {"ok": False, "error": "Evento não encontrado"}
 
@@ -92,19 +101,29 @@ class Api:
                         "base_url": credentials.resolve_base_url(oss),
                     }
 
-            db.update_event_status(event_id, "ACTIVE")
-            config["status"] = "ACTIVE"
-            _active_event = config
+            with _activation_lock:
+                # A geração anterior é invalidada antes de qualquer mudança no banco.
+                # Workers que excederem o join podem terminar a requisição, mas seu
+                # contexto já não terá autorização para persistir ou atualizar status.
+                scheduler.stop()
+                db.activate_event_exclusively(event_id)
+                config["status"] = "ACTIVE"
+                _active_event = config
 
-            def _notify():
-                if _update_callback:
-                    try:
-                        _update_callback()
-                    except Exception:
-                        pass
+                def _notify():
+                    if _update_callback:
+                        try:
+                            _update_callback()
+                        except Exception:
+                            pass
 
-            scheduler.set_update_callback(_notify)
-            scheduler.start(config, mock=mock)
+                scheduler.set_update_callback(_notify)
+                try:
+                    scheduler.start(config, mock=mock)
+                except Exception:
+                    db.update_event_status(event_id, "ENDED")
+                    _active_event = None
+                    raise
 
             # Sincroniza os VIPs do cliente/OSS deste evento após ativá-lo
             try:
@@ -122,11 +141,12 @@ class Api:
     def end_event(self, event_id: str) -> dict:
         """Encerra evento e para gravação."""
         try:
-            scheduler.stop()
-            db.update_event_status(event_id, "ENDED")
-            global _active_event
-            if _active_event and _active_event.get("id") == event_id:
-                _active_event = None
+            with _activation_lock:
+                scheduler.stop()
+                db.update_event_status(event_id, "ENDED")
+                global _active_event
+                if _active_event and _active_event.get("id") == event_id:
+                    _active_event = None
             return {"ok": True}
         except Exception as e:
             return {"ok": False, "error": str(e)}
@@ -352,8 +372,9 @@ class Api:
     def get_sites(self, event_id: str, timestamp: Optional[str] = None,
                   metric: str = "utilization_dl") -> list:
         """Retorna sites com status atual para renderização no mapa."""
+        config = (_active_event if _active_event and _active_event.get("id") == event_id else None)
         try:
-            config = db.get_event(event_id) or _active_event
+            config = db.get_event(event_id) or config
             if not config:
                 return []
 
@@ -404,9 +425,24 @@ class Api:
                     "is_event_site":   site.get("is_event_site", True),
                 })
 
+            self._sites_cache[event_id] = sites_out
             return sites_out
         except Exception as e:
             logger.error(f"get_sites error: {e}")
+            cached = self._sites_cache.get(event_id)
+            if cached is not None:
+                return cached
+            if config:
+                fallback = [{
+                    "id": site["id"], "name": site["name"],
+                    "lat": site["lat"], "lng": site["lng"],
+                    "cells": site.get("cells", []), "status": "unknown",
+                    "utilization": None, "metric_value": None,
+                    "metric_is_share": False,
+                    "is_event_site": site.get("is_event_site", True),
+                } for site in config.get("sites", [])]
+                self._sites_cache[event_id] = fallback
+                return fallback
             return []
 
     def get_site_cells(self, event_id: str, site_id: str) -> list:
@@ -1080,6 +1116,34 @@ class Api:
             logger.error(f"download_collection_logs error: {e}")
             return {"ok": False, "error": str(e)}
 
+    def capture_diagnostics(self) -> dict:
+        """Captura a próxima resposta de Monitoring e devolve o arquivo gerado.
+
+        A coleta é executada pelo scheduler para manter a mesma persistência, status e
+        regras de cursor de um ciclo normal. A opção é consumida nesta única resposta.
+        """
+        collector = None
+        try:
+            from core.collector import HttpCollector
+
+            collector = scheduler._collector
+            if not scheduler.is_recording or not isinstance(collector, HttpCollector):
+                return {"ok": False, "error": "Ative um evento conectado ao OSS para capturar o diagnóstico."}
+            collector.arm_raw_capture("monitoring")
+            scheduler._collect_kpis()
+            path = collector._last_raw_dumps.get("monitoring")
+            if not path:
+                return {"ok": False, "error": "O OSS não devolveu uma resposta de Monitoring para capturar."}
+            return {"ok": True, "path": str(path)}
+        except Exception as e:
+            logger.error(f"capture_diagnostics error: {e}")
+            return {"ok": False, "error": str(e)}
+        finally:
+            # Se o OSS falhar antes de responder, não deixe a solicitação escapar
+            # para um ciclo futuro e inesperado.
+            if hasattr(collector, "disarm_raw_capture"):
+                collector.disarm_raw_capture("monitoring")
+
     # ── Estado da aplicação ──────────────────────────────────────────
 
     def get_app_status(self) -> dict:
@@ -1100,7 +1164,7 @@ class Api:
             try:
                 from core.collector import HttpCollector
                 if isinstance(coll, HttpCollector):
-                    interactive_modules = set(HttpCollector._needs_interactive)
+                    interactive_modules = HttpCollector.interactive_modules_for(coll.base_url)
                     needs_interactive = bool(interactive_modules)
             except Exception:
                 pass

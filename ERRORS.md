@@ -142,3 +142,45 @@ captura: `12:28:46 (778)` → `12:28:47 (98)` → `12:28:47 (179)`.
 **Regra:** preenchimento de campo numérico textual é `zfill`, não `ljust`. Quando houver dúvida
 sobre a semântica de um campo capturado, usar uma segunda ordenação independente (aqui, o
 `serialNo`) para desempatar.
+
+
+---
+
+## 2026-08-13 — Regional nova coletava ZERO KPI em silêncio (e o cursor avançava)
+
+**Sintoma:** ao trocar o projeto de SantoAmaro (OSS de SP) para Curitiba (OSS 10.220.30.9), os
+alarmes vinham normalmente e o monitoring não gravava nada. Nenhum erro, nenhum log: o ciclo
+aparecia como `partial`.
+
+**Prova nos bancos:** `data/smart_events_teste-curitiba.db` com `kpi_measurements` = **0 linhas**
+e, ao mesmo tempo, 117 checkpoints da task PM 2225 com `cursor` avançando a cada ciclo. Ou seja:
+o OSS respondeu, os objetos chegaram, e todos foram descartados.
+
+**Causa raiz:** `_resolve_monitoring_cell` exigia que a tecnologia da célula do evento fosse
+IGUAL à da task. A tecnologia da célula é inferida do nome por `_normalize_cell_technology`
+(procura os tokens `4G`/`LTE`/`5G`/`NR`/`NCI`). As células que aquele OSS de fato devolve chamam-se
+`18NLCTAL01GI` — sem token nenhum → tecnologia `None` → `None != "4G"` → nenhum candidato →
+100% não mapeado. Em SP nunca apareceu porque lá as células chamam-se `4G-SPSMG7-18-C`, com o
+token no nome. A regional errada no cadastro (`region: "SP"` apontando para a base_url do host
+30.9) era um segundo problema real, mas **não** era este: corrigi-la para `OUTRAS` não mudou o
+resultado (0 linhas, cursor continuou avançando) — foi o que separou as duas causas.
+
+**Agravante:** `Scheduler._apply_result` grava os checkpoints sempre que `result.cursors` existe,
+independentemente de ter havido medição. Como o `preExecTime` limita a próxima consulta, a janela
+descartada não volta mais. O dado dos ciclos de teste está perdido.
+
+**Correção:** tecnologia desconhecida (`None`) passa a ser candidata a qualquer task, e a
+tecnologia gravada no mapeamento e nas linhas é a da task consultada. Mais `_log_unmapped`, um
+WARNING por ciclo com os nomes vindos do OSS e exemplos das células do evento lado a lado.
+
+**Regras:**
+- **Heurística sobre nome não pode ser pré-condição de mapeamento.** O token de tecnologia no
+  nome da célula é convenção de UM OSS, não contrato. Quando um atributo é inferido, a ausência
+  dele tem que significar "desconhecido — não decide", nunca "diferente de tudo".
+- **Um filtro `campo == valor` sobre atributo opcional exclui silenciosamente todo `None`.**
+  Ao filtrar por atributo inferido, decidir explicitamente o que fazer com o desconhecido.
+- **Cobertura zero é falha, não `partial`.** Um ciclo que recebe N objetos e persiste 0 linhas
+  precisa dizer isso em voz alta; `coverage.unmapped_cells` era calculado e não era consumido
+  por ninguém — diagnóstico que não chega ao operador não existe.
+- **Nunca avance cursor sobre dado descartado** (pendente de correção): checkpoint é promessa
+  de que o dado foi persistido, e aqui ele estava sendo dado como cumprido sobre o lixo.

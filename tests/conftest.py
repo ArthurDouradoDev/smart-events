@@ -133,6 +133,8 @@ def tmp_db(tmp_path, monkeypatch):
     database._local.__dict__.clear()
     database._event_local.__dict__.clear()
     database._migrated_events.clear()
+    database._initialized_global_dbs.clear()
+    database._initialized_event_dbs.clear()
 
     database.init_db()
     yield tmp_path
@@ -140,6 +142,8 @@ def tmp_db(tmp_path, monkeypatch):
     database.close_conn()
     database._local.__dict__.clear()
     database._event_local.__dict__.clear()
+    database._initialized_global_dbs.clear()
+    database._initialized_event_dbs.clear()
 
 
 @pytest.fixture

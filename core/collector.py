@@ -23,6 +23,7 @@ from abc import ABC, abstractmethod
 from datetime import datetime
 from pathlib import Path
 from typing import List, Optional
+from urllib.parse import urlparse
 
 # Import requests safely without namespace package shadowing from the local workspace folder.
 # No executável compilado (PyInstaller) NÃO mexer no sys.path: ali Path(__file__).parent.parent
@@ -354,6 +355,49 @@ class BaseCollector(ABC):
             return []
         return known
 
+    def _monitoring_payload(self, tasks: list[dict], oss: str) -> list[dict]:
+        """Monta a consulta sem deixar um checkpoint antigo impedir descoberta.
+
+        Enquanto nenhum ``objNo`` da task foi associado a uma célula, a busca é
+        aberta desde zero. Um cursor geral gravado por versões anteriores não é
+        evidência de cobertura e não pode esconder novamente os nomes do OSS.
+        """
+        payload = []
+        for task in tasks:
+            checkpoints = db.get_collection_checkpoints(
+                self.event_id, "monitoring", task["task_id"], oss)
+            objects = self._request_objects_for_task(task)
+            fallback = checkpoints.get("")
+            discovering = not objects
+            payload.append({
+                "taskId": task["task_id"],
+                "preExecTime": 0 if discovering else (
+                    int(fallback) if fallback and str(fallback).isdigit() else 0),
+                "objNoExecTimes": [
+                    {
+                        "objNo": obj_no,
+                        "preExecTime": int(checkpoints.get(str(obj_no), fallback or 0)),
+                    }
+                    for obj_no in objects
+                ],
+            })
+        return payload
+
+    def _log_unmapped(self, parsed: dict) -> None:
+        """Torna visível a única falha de coleta que era silenciosa: o OSS responde, o
+        cursor avança e todas as linhas são descartadas porque o nome das células do
+        evento não é o nome que aquele OSS usa. Loga os dois lados da comparação — sem
+        isso o operador só vê o ciclo como 'parcial', sem causa."""
+        if not parsed["unmapped"]:
+            return
+        esperados = sorted(self.cell_ids)[:3]
+        logger.warning(
+            f"[monitoring] {parsed['unmapped']} de {parsed['received']} objetos não casaram "
+            f"com nenhuma célula do evento e foram DESCARTADOS. "
+            f"Nomes vindos do OSS (até 10): {parsed['unmapped_cells'][:10]} | "
+            f"exemplos de células cadastradas no evento: {esperados}"
+        )
+
     def _collect_kpis_v2(self) -> CollectionResult:
         session_data = self._load_session_data()
         tasks = self._configured_pm_tasks(session_data)
@@ -361,19 +405,10 @@ class BaseCollector(ABC):
             return CollectionResult.partial(cause="Nenhuma task PM foi configurada para as tecnologias do evento.",
                                             coverage={"cells_mapped": 0, "cells_expected": len(self.cell_ids)})
         oss = (self._region or self.base_url).upper()
-        payload = []
-        for task in tasks:
-            checkpoints = db.get_collection_checkpoints(self.event_id, "monitoring", task["task_id"], oss)
-            objects = self._request_objects_for_task(task)
-            fallback = checkpoints.get("")
-            payload.append({
-                "taskId": task["task_id"],
-                "preExecTime": int(fallback) if fallback and str(fallback).isdigit() else 0,
-                "objNoExecTimes": [
-                    {"objNo": obj_no, "preExecTime": int(checkpoints.get(str(obj_no), fallback or 0))}
-                    for obj_no in objects
-                ],
-            })
+        payload = self._monitoring_payload(tasks, oss)
+        discovery_tasks = {
+            str(item["taskId"]) for item in payload if not item["objNoExecTimes"]
+        }
         url = f"{self.base_url}/rest/oss/access/pm/v1/monitor/task/result"
         renewed = False
         for attempt in range(2):
@@ -383,13 +418,26 @@ class BaseCollector(ABC):
                 if not self._check_session_valid(response, "monitoring"):
                     raise SessionExpiredError("Sessão Monitoring expirada")
                 response.raise_for_status()
-                parsed = self._parse_monitoring_response(response.json(), {str(t["task_id"]): t["technology"] for t in tasks})
+                response_payload = response.json()
+                self._dump_raw(response_payload, "monitoring")
+                parsed = self._parse_monitoring_response(
+                    response_payload, {str(t["task_id"]): t["technology"] for t in tasks}
+                )
+                # Uma resposta vazia só confirma o cursor geral depois que a
+                # cobertura da task já foi estabelecida. Durante descoberta,
+                # mantemos a consulta em zero até vermos e resolvermos objetos.
+                if parsed["received"] == 0:
+                    for task_id in discovery_tasks:
+                        parsed["cursors"].pop(f"{task_id}:", None)
                 for task in tasks:
                     self._discovered_pm_tasks.add(str(task["task_id"]))
                 coverage = {
                     "cells_mapped": len(self._obj_to_cell), "cells_expected": len(self.cell_ids),
+                    "mapped_objects": parsed["received"] - parsed["unmapped"],
                     "unmapped_objects": parsed["unmapped"], "unmapped_cells": parsed["unmapped_cells"],
+                    "event_cells": sorted(self.cell_ids)[:5],
                 }
+                self._log_unmapped(parsed)
                 partial = bool(parsed["unmapped"] or parsed["invalid"] or len(self._obj_to_cell) < len(self.cell_ids))
                 kwargs = dict(cursors=parsed["cursors"], received=parsed["received"],
                               calculated=len(parsed["rows"]), invalid=parsed["invalid"],
@@ -596,21 +644,20 @@ class HttpCollector(BaseCollector):
         "accessibility":     ["{BRDC} Acessibilidade", "Acessibilidade RRC", "ACC RRC", "Accessibility", "Disponibilidade"],
     }
 
-    # Backoff de renovação de sessão — persiste entre instâncias (collector recriado ao
-    # trocar de evento).  Chave = nome do módulo ("trace" | "monitoring").
-    _renew_failures: dict = {}        # módulo → nº de falhas consecutivas
-    _renew_backoff_until: dict = {}   # módulo → datetime até quando não tentar
+    # O estado persiste entre instâncias, mas sempre é isolado por (host, módulo).
+    _renew_failures: dict = {}
+    _renew_backoff_until: dict = {}
     # Quando a renovação headless detecta CAPTCHA/SSO (exit 2), o módulo entra em
     # "requer reautenticação interativa": paramos de tentar renovar sozinhos e
     # mantemos um alerta acionável até o operador reautenticar (navegador visível).
     # Valor = snapshot do roarand no momento em que foi marcado (para detectar a
     # reauth do operador comparando com o roarand atual do session.json).
-    _needs_interactive: dict = {}     # módulo → roarand snapshot (str) | ""
-    # Reautenticação interativa (navegador visível): trava single-flight para nunca
-    # abrir duas janelas ao mesmo tempo (threads monitoring + trace) e cooldown para
-    # não reabrir em rajada após uma tentativa cancelada/falha pelo operador.
-    _interactive_lock = threading.Lock()
-    _interactive_cooldown_until = None  # datetime | None
+    _needs_interactive: dict = {}
+    # Single-flight também é por host: um CAPTCHA em SP não impede Curitiba de
+    # renovar sua própria sessão e seu próprio perfil de navegador.
+    _interactive_locks: dict = {}
+    _interactive_locks_guard = threading.Lock()
+    _interactive_cooldown_until: dict = {}
 
     _VIP_MAX_WORKERS = 3
 
@@ -624,6 +671,7 @@ class HttpCollector(BaseCollector):
     def __init__(self, event_config: dict, base_url: str, session_cookie: str = ""):
         super().__init__(event_config)
         self.base_url = base_url.rstrip("/")
+        self._session_host = self._normalize_session_host(self.base_url)
         self.session_cookie = session_cookie
         self._session_file = self._resolve_session_file(self.base_url)
         self._session_monitoring = None
@@ -633,6 +681,10 @@ class HttpCollector(BaseCollector):
         # operador) e a sessão em cache ficou obsoleta.
         self._session_built_roarand: dict = {}
         self._renew_lock = threading.Lock()
+        # A captura manual é consumida pela próxima resposta de cada tipo. A variável
+        # de ambiente continua útil para reproduções locais sem passar pela interface.
+        self._raw_capture_kinds: set[str] = set()
+        self._last_raw_dumps: dict[str, Path] = {}
         self._oss_tz_offset_min = event_config.get("oss", {}).get("timezone_offset_min", -180)
         # Cliente (TIM, Vivo, …) e regional do OSS (SP, RJ, …) — escolhem as credenciais
         # (Cliente → Regional) na renovação de sessão.
@@ -664,6 +716,27 @@ class HttpCollector(BaseCollector):
                         }
 
     @staticmethod
+    def _normalize_session_host(base_url: str) -> str:
+        parsed = urlparse((base_url or "").strip())
+        return (parsed.hostname or parsed.path or "unknown").strip().lower()
+
+    def _module_state_key(self, module: str) -> tuple[str, str]:
+        return self._session_host, module
+
+    @classmethod
+    def _interactive_lock_for(cls, host: str) -> threading.Lock:
+        with cls._interactive_locks_guard:
+            return cls._interactive_locks.setdefault(host, threading.Lock())
+
+    @classmethod
+    def interactive_modules_for(cls, base_url: str) -> set[str]:
+        host = cls._normalize_session_host(base_url)
+        return {
+            module for (state_host, module) in cls._needs_interactive
+            if state_host == host
+        }
+
+    @staticmethod
     def _resolve_session_file(base_url: str) -> Path:
         """Deriva o caminho do session file a partir da base_url.
 
@@ -691,6 +764,74 @@ class HttpCollector(BaseCollector):
             except Exception as e:
                 logger.warning(f"Não foi possível carregar session.json: {e}")
         return {}
+
+    def arm_raw_capture(self, *kinds: str) -> None:
+        """Pede um dump da próxima resposta de cada tipo informado.
+
+        É deliberadamente uma opção da instância do coletor, não uma alteração
+        global de ambiente: o botão da interface captura um ciclo sem deixar o
+        aplicativo gravando respostas indefinidamente.
+        """
+        self._raw_capture_kinds.update(kind for kind in kinds if kind in {"monitoring", "trace"})
+
+    def disarm_raw_capture(self, *kinds: str) -> None:
+        """Cancela uma captura manual que não chegou a receber resposta."""
+        for kind in kinds:
+            self._raw_capture_kinds.discard(kind)
+
+    @staticmethod
+    def _safe_raw_payload(value):
+        """Remove credenciais caso um contrato inesperado as inclua no corpo."""
+        blocked = {"roarand", "bspsession", "cookie", "cookies", "set-cookie", "headers", "authorization"}
+        if isinstance(value, dict):
+            return {
+                key: HttpCollector._safe_raw_payload(item)
+                for key, item in value.items()
+                if str(key).lower() not in blocked
+            }
+        if isinstance(value, list):
+            return [HttpCollector._safe_raw_payload(item) for item in value]
+        return value
+
+    def _dump_raw(self, payload, kind: str) -> Optional[Path]:
+        """Persiste somente o corpo de uma resposta para diagnóstico opt-in.
+
+        Cookies e headers nunca chegam a este método. Ainda assim, removemos os
+        nomes de sessão de corpos inesperados antes de serializar para evitar que
+        uma alteração de contrato transforme o diagnóstico em vazamento.
+        """
+        env_enabled = os.environ.get("SMARTEVENTS_CAPTURE_RAW") == "1"
+        manually_armed = kind in self._raw_capture_kinds
+        if not (env_enabled or manually_armed):
+            return None
+        try:
+            import urllib.parse
+
+            host = urllib.parse.urlparse(self.base_url).hostname or self._region or "oss"
+            oss = re.sub(r"[^A-Za-z0-9._-]+", "_", host)
+            diagnostics_dir = credentials.data_dir() / "diagnostics"
+            diagnostics_dir.mkdir(parents=True, exist_ok=True)
+            stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+            path = diagnostics_dir / f"{kind}_{oss}_{stamp}.json"
+            # Duas tasks de Trace podem iniciar no mesmo segundo. Nunca sobrescreva
+            # uma evidência já capturada; o primeiro arquivo conserva o nome pedido.
+            suffix = 2
+            while path.exists():
+                path = diagnostics_dir / f"{kind}_{oss}_{stamp}_{suffix}.json"
+                suffix += 1
+            path.write_text(
+                json.dumps(self._safe_raw_payload(payload), ensure_ascii=False, indent=2, default=str),
+                encoding="utf-8",
+            )
+            self._last_raw_dumps[kind] = path
+            logger.info("[diagnostics] Resposta bruta de %s salva em %s", kind, path)
+            return path
+        except Exception as error:
+            logger.warning("[diagnostics] Não foi possível salvar resposta bruta de %s: %s", kind, error)
+            return None
+        finally:
+            if manually_armed:
+                self._raw_capture_kinds.discard(kind)
 
     def _build_session(self, module: str) -> requests.Session:
         """Cria uma requests.Session com cookies e headers carregados do session.json."""
@@ -859,20 +1000,31 @@ class HttpCollector(BaseCollector):
             self._session_trace = None
 
     def _clear_interactive_state(self, module: str):
-        HttpCollector._needs_interactive.pop(module, None)
+        HttpCollector._needs_interactive.pop(self._module_state_key(module), None)
 
     @classmethod
-    def reset_interactive_state(cls, module: Optional[str] = None):
-        """Limpa o estado 'requer reauth interativa' (chamado após uma reauth bem-sucedida)."""
-        if module is None:
+    def reset_interactive_state(cls, module: Optional[str] = None,
+                                base_url: Optional[str] = None):
+        """Limpa estado de reauth somente no host informado.
+
+        Sem ``base_url`` mantém-se o reset global explícito, útil no startup/testes.
+        """
+        if base_url is None and module is None:
             cls._needs_interactive.clear()
             cls._renew_failures.clear()
             cls._renew_backoff_until.clear()
-            cls._interactive_cooldown_until = None
-        else:
-            cls._needs_interactive.pop(module, None)
-            cls._renew_failures.pop(module, None)
-            cls._renew_backoff_until.pop(module, None)
+            cls._interactive_cooldown_until.clear()
+            return
+        host = cls._normalize_session_host(base_url or "") if base_url else None
+        keys = set(cls._needs_interactive) | set(cls._renew_failures) | set(cls._renew_backoff_until)
+        keys |= set(cls._interactive_cooldown_until)
+        for key in keys:
+            key_host, key_module = key
+            if (host is None or key_host == host) and (module is None or key_module == module):
+                cls._needs_interactive.pop(key, None)
+                cls._renew_failures.pop(key, None)
+                cls._renew_backoff_until.pop(key, None)
+                cls._interactive_cooldown_until.pop(key, None)
 
     @staticmethod
     def _build_renew_cmd() -> list:
@@ -888,7 +1040,8 @@ class HttpCollector(BaseCollector):
 
     @classmethod
     def run_interactive_reauth(cls, base_url: str, session_file, region: str = "",
-                              respect_cooldown: bool = False, cliente: str = "") -> dict:
+                              respect_cooldown: bool = False, cliente: str = "",
+                              state_module: str = "both") -> dict:
         """Abre o navegador VISÍVEL (single-flight) para o operador concluir o login +
         CAPTCHA, captura a sessão e a grava. Retorna {'ok':bool,...}.
 
@@ -897,14 +1050,17 @@ class HttpCollector(BaseCollector):
         - cliente/region: escolhem as credenciais (Cliente → Regional) para o autofill do login.
         """
         from datetime import timedelta
+        base_url = (base_url or "").rstrip("/")
+        host = cls._normalize_session_host(base_url)
+        state_key = (host, state_module)
         if respect_cooldown:
-            cd = cls._interactive_cooldown_until
+            cd = cls._interactive_cooldown_until.get(state_key)
             if cd and datetime.utcnow() < cd:
                 return {"ok": False, "error": "cooldown", "skipped": True}
-        if not cls._interactive_lock.acquire(blocking=False):
+        interactive_lock = cls._interactive_lock_for(host)
+        if not interactive_lock.acquire(blocking=False):
             return {"ok": False, "error": "Reautenticação já em andamento.", "in_progress": True}
         try:
-            base_url = (base_url or "").rstrip("/")
             cmd = cls._build_renew_cmd() + [
                 "--module", "both",            # sem --headless → navegador visível
                 "--base-url", base_url,
@@ -918,11 +1074,11 @@ class HttpCollector(BaseCollector):
                 cwd=str(Path(__file__).parent.parent),
             )
             if result.returncode == EXIT_SUCCESS:
-                cls.reset_interactive_state()
+                cls.reset_interactive_state(base_url=base_url)
                 logger.info("[reauth] Reautenticação interativa concluída com sucesso. Coleta retomada.")
                 return {"ok": True, "base_url": base_url}
             tail = ((result.stdout or "")[-400:] + " " + (result.stderr or "")[-400:]).strip()
-            cls._interactive_cooldown_until = datetime.utcnow() + timedelta(minutes=5)
+            cls._interactive_cooldown_until[state_key] = datetime.utcnow() + timedelta(minutes=5)
             logger.error(f"[reauth] Reautenticação não concluída (rc={result.returncode}): {tail}")
             return {
                 "ok": False,
@@ -930,22 +1086,24 @@ class HttpCollector(BaseCollector):
                 "detail": tail,
             }
         except subprocess.TimeoutExpired:
-            cls._interactive_cooldown_until = datetime.utcnow() + timedelta(minutes=5)
+            cls._interactive_cooldown_until[state_key] = datetime.utcnow() + timedelta(minutes=5)
             return {"ok": False, "error": "Tempo limite de reautenticação excedido (5 min)."}
         except Exception as e:
-            cls._interactive_cooldown_until = datetime.utcnow() + timedelta(minutes=5)
+            cls._interactive_cooldown_until[state_key] = datetime.utcnow() + timedelta(minutes=5)
             logger.error(f"[reauth] erro ao executar reautenticação: {e}")
             return {"ok": False, "error": str(e)}
         finally:
-            cls._interactive_lock.release()
+            interactive_lock.release()
 
-    def _spawn_interactive_reauth(self):
+    def _spawn_interactive_reauth(self, module: str):
         """Dispara a reauth interativa em uma thread separada (não bloqueia a coleta).
         Abre o navegador automaticamente quando o CAPTCHA é detectado; o single-flight
         e o cooldown garantem que não abra janelas em excesso."""
-        if HttpCollector._interactive_lock.locked():
+        interactive_lock = HttpCollector._interactive_lock_for(self._session_host)
+        if interactive_lock.locked():
             return
-        cd = HttpCollector._interactive_cooldown_until
+        state_key = self._module_state_key(module)
+        cd = HttpCollector._interactive_cooldown_until.get(state_key)
         if cd and datetime.utcnow() < cd:
             return
         base_url, session_file, region = self.base_url, self._session_file, self._region
@@ -953,7 +1111,8 @@ class HttpCollector(BaseCollector):
 
         def _worker():
             res = HttpCollector.run_interactive_reauth(
-                base_url, session_file, region=region, respect_cooldown=True, cliente=cliente)
+                base_url, session_file, region=region, respect_cooldown=True,
+                cliente=cliente, state_module=module)
             if res.get("ok"):
                 # Descarta as sessões em cache desta instância para releitura imediata.
                 self._invalidate_session("monitoring")
@@ -964,10 +1123,13 @@ class HttpCollector(BaseCollector):
     def _engage_backoff(self, module: str) -> int:
         """Incrementa o contador de falhas e arma o backoff (60→300s). Retorna o backoff em s."""
         from datetime import timedelta
-        failures = HttpCollector._renew_failures.get(module, 0) + 1
-        HttpCollector._renew_failures[module] = failures
+        state_key = self._module_state_key(module)
+        failures = HttpCollector._renew_failures.get(state_key, 0) + 1
+        HttpCollector._renew_failures[state_key] = failures
         backoff_s = min(300, 60 * failures)
-        HttpCollector._renew_backoff_until[module] = datetime.utcnow() + timedelta(seconds=backoff_s)
+        HttpCollector._renew_backoff_until[state_key] = (
+            datetime.utcnow() + timedelta(seconds=backoff_s)
+        )
         return backoff_s
 
     def _oss_region_label(self) -> str:
@@ -1017,9 +1179,10 @@ class HttpCollector(BaseCollector):
         - Detecção de reauth do operador / de renovação por outra thread: se o roarand do
           session.json mudou, recarrega a sessão sem rodar Playwright.
         """
+        state_key = self._module_state_key(module)
         # ── Já aguardando reauth interativa? Só sai disso quando o operador reautentica ──
-        if module in HttpCollector._needs_interactive:
-            roarand_marked = HttpCollector._needs_interactive.get(module) or ""
+        if state_key in HttpCollector._needs_interactive:
+            roarand_marked = HttpCollector._needs_interactive.get(state_key) or ""
             module_data = self._load_session_data().get(module, {}) or {}
             roarand_now = module_data.get("roarand") or ""
             if roarand_now and roarand_now != roarand_marked and module_data.get("cookies"):
@@ -1027,25 +1190,25 @@ class HttpCollector(BaseCollector):
                     f"[renew/{module}] Reautenticação interativa detectada (roarand mudou). "
                     "Recarregando sessão e retomando a coleta."
                 )
-                HttpCollector._renew_failures.pop(module, None)
-                HttpCollector._renew_backoff_until.pop(module, None)
+                HttpCollector._renew_failures.pop(state_key, None)
+                HttpCollector._renew_backoff_until.pop(state_key, None)
                 self._clear_interactive_state(module)
                 self._invalidate_session(module)
                 return True
             # Continua bloqueado: mantém o alerta acionável e reabre o navegador
             # automaticamente (single-flight + cooldown), sem rodar Playwright headless.
             self._raise_reauth_alert(module)
-            self._spawn_interactive_reauth()
+            self._spawn_interactive_reauth(module)
             return False
 
         # ── Backoff: se falhou recentemente, pula esta tentativa ─────────
         now = datetime.utcnow()
-        backoff_until = HttpCollector._renew_backoff_until.get(module)
+        backoff_until = HttpCollector._renew_backoff_until.get(state_key)
         if backoff_until and now < backoff_until:
             remaining = int((backoff_until - now).total_seconds())
             logger.warning(
                 f"[renew/{module}] Backoff ativo — pulando renovação por mais {remaining}s "
-                f"({HttpCollector._renew_failures.get(module, 0)} falha(s) consecutiva(s))."
+                f"({HttpCollector._renew_failures.get(state_key, 0)} falha(s) consecutiva(s))."
             )
             return False
 
@@ -1137,8 +1300,8 @@ class HttpCollector(BaseCollector):
                     logger.info(f"[renew/{module}] Sessão renovada e autenticada com sucesso.")
                     if stdout_tail:
                         logger.debug(f"[renew/{module}] stdout:\n{stdout_tail}")
-                    HttpCollector._renew_failures[module] = 0
-                    HttpCollector._renew_backoff_until.pop(module, None)
+                    HttpCollector._renew_failures[state_key] = 0
+                    HttpCollector._renew_backoff_until.pop(state_key, None)
                     self._clear_interactive_state(module)
                     # Cookies são compartilhados, mas cada módulo mantém seu
                     # próprio requests.Session. Reconstrói ambos para não deixar
@@ -1152,19 +1315,19 @@ class HttpCollector(BaseCollector):
                     # alerta acionável e ABRE o navegador visível automaticamente para o
                     # operador logar (single-flight evita janela duplicada monitoring+trace).
                     snapshot = (self._load_session_data().get(module, {}) or {}).get("roarand") or ""
-                    HttpCollector._needs_interactive[module] = snapshot
+                    HttpCollector._needs_interactive[state_key] = snapshot
                     logger.error(
                         f"[renew/{module}] Login bloqueado por CAPTCHA/SSO — abrindo navegador "
                         f"para reautenticação interativa. Coleta deste módulo pausada até logar.\n"
                         f"  STDOUT: {stdout_tail or '(vazio)'}\n  STDERR: {stderr_tail or '(vazio)'}"
                     )
                     self._raise_reauth_alert(module)
-                    self._spawn_interactive_reauth()
+                    self._spawn_interactive_reauth(module)
                     return False
 
                 # Falha genérica (EXIT_GENERIC_FAIL ou returncode inesperado)
                 backoff_s = self._engage_backoff(module)
-                failures = HttpCollector._renew_failures.get(module, 0)
+                failures = HttpCollector._renew_failures.get(state_key, 0)
                 logger.error(
                     f"[renew/{module}] Renovação falhou "
                     f"(returncode={result.returncode}, tentativa #{failures}). "
@@ -1175,7 +1338,7 @@ class HttpCollector(BaseCollector):
                 return False
             except subprocess.TimeoutExpired:
                 backoff_s = self._engage_backoff(module)
-                failures = HttpCollector._renew_failures.get(module, 0)
+                failures = HttpCollector._renew_failures.get(state_key, 0)
                 logger.error(
                     f"[renew/{module}] Renovação TIMEOUT após 120s "
                     f"(tentativa #{failures}). Próxima tentativa em {backoff_s}s."
@@ -1183,7 +1346,7 @@ class HttpCollector(BaseCollector):
                 return False
             except Exception as e:
                 backoff_s = self._engage_backoff(module)
-                failures = HttpCollector._renew_failures.get(module, 0)
+                failures = HttpCollector._renew_failures.get(state_key, 0)
                 logger.error(
                     f"[renew/{module}] Erro ao executar a renovação "
                     f"(tentativa #{failures}): {e}. Próxima tentativa em {backoff_s}s."
@@ -1299,12 +1462,23 @@ class HttpCollector(BaseCollector):
         # matching amplo por substring de site/célula.
         match = re.search(r"Cell Name\s*=\s*([^,]+)", obj_name or "", re.I)
         candidate = self._normalized_name(match.group(1) if match else obj_name)
+        # A tecnologia da célula é inferida do NOME (``_normalize_cell_technology``) e nem todo
+        # OSS a carrega ali: em SP as células chamam-se ``4G-SPSMG7-18-C`` (token explícito),
+        # no OSS de Curitiba chamam-se ``18NLCTAL01GI`` — sem 4G/5G no nome, a tecnologia sai
+        # ``None`` e o casamento por igualdade com a tecnologia da task nunca acontecia: 100%
+        # dos objetos ficavam não mapeados. Célula de tecnologia DESCONHECIDA é candidata a
+        # qualquer task (quem define a tecnologia do dado é a task consultada); célula de
+        # tecnologia CONHECIDA e diferente continua fora — essa é a troca silenciosa de 4G por
+        # 5G que o gate existe para impedir.
         choices = [cell_id for cell_id, metadata in self._cell_metadata.items()
-                   if metadata.get("technology") == technology and self._normalized_name(cell_id) == candidate]
+                   if metadata.get("technology") in (technology, None)
+                   and self._normalized_name(cell_id) == candidate]
         if len(choices) != 1:
             return None
         cell_id = choices[0]
-        result = {"cell_id": cell_id, **self._cell_metadata[cell_id]}
+        # A task é a fonte da tecnologia do dado. Gravá-la aqui faz os ciclos seguintes
+        # pedirem este objNo explicitamente (ver _request_objects_for_task).
+        result = {**self._cell_metadata[cell_id], "cell_id": cell_id, "technology": technology}
         self._obj_to_cell[obj_no] = result
         return result
 
@@ -1361,7 +1535,9 @@ class HttpCollector(BaseCollector):
     def _parse_monitoring_response(self, response_json: dict, task_technologies: dict[str, str]) -> dict:
         from core.collection_result import CollectionDiagnostic
 
-        rows, source, diagnostics, cursors = [], [], [], {}
+        rows, source, diagnostics = [], [], []
+        task_cursor_candidates, object_cursor_candidates = {}, {}
+        persisted_object_keys = set()
         site_counter_groups = {}
         received = invalid = unmapped = 0
         unmapped_cells = []
@@ -1374,10 +1550,10 @@ class HttpCollector(BaseCollector):
                 continue
             task_cursor = task_data.get("execTime")
             if task_cursor is not None:
-                cursors[f"{task_id}:"] = {"task_id": task_id, "object_key": "", "cursor": task_cursor}
+                task_cursor_candidates[task_id] = task_cursor
             for checkpoint in task_data.get("objNoExecTimes") or []:
                 if checkpoint.get("objNo") is not None and checkpoint.get("preExecTime") is not None:
-                    cursors[f"{task_id}:{checkpoint['objNo']}"] = {"task_id": task_id, "object_key": str(checkpoint["objNo"]), "cursor": checkpoint["preExecTime"]}
+                    object_cursor_candidates[(task_id, str(checkpoint["objNo"]))] = checkpoint["preExecTime"]
             for result in task_data.get("results") or []:
                 timestamp = self._timestamp_from_exec_time(result.get("execTime") or task_cursor)
                 latest_data_at = max(latest_data_at or timestamp, timestamp)
@@ -1392,10 +1568,14 @@ class HttpCollector(BaseCollector):
                         diagnostics.append(CollectionDiagnostic("parsing", "Objeto Monitoring sem objNo válido", "missing_obj_no"))
                         continue
                     received += 1
-                    info = self._resolve_monitoring_cell(obj_no, item.get("objName") or obj.get("objName") or "", technology)
+                    obj_name = item.get("objName") or obj.get("objName") or ""
+                    info = self._resolve_monitoring_cell(obj_no, obj_name, technology)
                     if not info:
                         unmapped += 1
-                        unmapped_cells.append(str(obj.get("objName") or obj_no))
+                        # O nome registrado é o MESMO que a resolução tentou casar; antes
+                        # daqui saía o objNo quando o objName vinha no item (e não no obj),
+                        # o que tornava o diagnóstico inútil justamente no caso a diagnosticar.
+                        unmapped_cells.append(obj_name or str(obj_no))
                         continue
                     counters, counter_errors = self._counter_map(item.get("counterRes"))
                     period = result.get("period") or task_data.get("period")
@@ -1415,6 +1595,11 @@ class HttpCollector(BaseCollector):
                                        "scope": "CELL", "technology": technology}
                         rows.append(measurement)
                         per_metric.append((definition, measurement))
+                    # Checkpoint é uma confirmação de persistência, não apenas
+                    # de que o nome do objeto foi reconhecido. Fórmulas sem
+                    # linha válida também precisam poder ser reprocessadas.
+                    if per_metric:
+                        persisted_object_keys.add((task_id, str(obj_no)))
                     for name, reason in counter_errors.items():
                         diagnostics.append(CollectionDiagnostic("counter", reason, "invalid_counter", {"counter": name, "cell_id": info["cell_id"]}))
                     source.extend(per_metric)
@@ -1439,6 +1624,16 @@ class HttpCollector(BaseCollector):
                 rows.append({"event_id": self.event_id, "site_id": site_id, "cell_id": "__site__",
                              "timestamp": timestamp, "metric": definition.id, "value": value,
                              "scope": "SITE", "technology": technology})
+        cursors = {
+            f"{task_id}:{object_key}": {"task_id": task_id, "object_key": object_key, "cursor": cursor}
+            for (task_id, object_key), cursor in object_cursor_candidates.items()
+            if (task_id, object_key) in persisted_object_keys
+        }
+        if not unmapped:
+            cursors.update({
+                f"{task_id}:": {"task_id": task_id, "object_key": "", "cursor": cursor}
+                for task_id, cursor in task_cursor_candidates.items()
+            })
         return {"rows": rows, "received": received, "invalid": invalid, "unmapped": unmapped,
                 "unmapped_cells": sorted(set(unmapped_cells)), "diagnostics": diagnostics,
                 "cursors": cursors, "latest_data_at": latest_data_at}
@@ -1571,7 +1766,7 @@ class HttpCollector(BaseCollector):
     def _trace_oss(self) -> str:
         return (self._region or self.base_url).upper()
 
-    def _open_trace_query(self, session, task_id: int) -> tuple[int, str, str]:
+    def _open_trace_query(self, session, task_id: int) -> tuple[int, Optional[str], Optional[str]]:
         """Abre a consulta FARS e devolve ``msgId`` e a janela da task do ciclo.
 
         O ``msgId`` é um handle descartável: cada chamada de ``query/result`` com
@@ -1607,10 +1802,21 @@ class HttpCollector(BaseCollector):
         if not self._check_session_valid(initial, "trace"):
             raise SessionExpiredError("Sessão Trace expirada ao abrir a consulta")
         initial.raise_for_status()
-        data = initial.json().get("data") or {}
+        initial_payload = initial.json()
+        data = initial_payload.get("data") or {}
         if not isinstance(data, dict) or data.get("msgId") is None:
             raise ValueError("A abertura da consulta de Trace não retornou msgId")
         msg_id = int(data["msgId"])
+        # Algumas regionais devolvem HTTP 500 em fetch-field-values quando a
+        # task ainda não tem nenhuma mensagem. O recordCount do bootstrap já é
+        # conclusivo e permite encerrar o ciclo vazio sem transformar isso em
+        # falha de contrato.
+        if "recordCount" in initial_payload:
+            try:
+                if int(initial_payload.get("recordCount") or 0) == 0:
+                    return msg_id, None, None
+            except (TypeError, ValueError):
+                pass
 
         fields = session.get(
             f"{self.base_url}/rest/oss/access/fars/v1/traceresult/query/fetch-field-values",
@@ -1712,7 +1918,8 @@ class HttpCollector(BaseCollector):
         response.raise_for_status()
         return self._allocated_msg_id(response.json(), "query/sort")
 
-    def _fetch_trace_page(self, session, task_id: int, msg_id: int, start_row: int) -> list:
+    def _fetch_trace_page(self, session, task_id: int, msg_id: int, start_row: int,
+                          capture_raw: bool = False) -> list:
         """Lê uma página de um ``msgId`` já materializado.
 
         ``startRow`` além do fim devolve ``tableData`` vazio com HTTP 200 — é a
@@ -1730,6 +1937,8 @@ class HttpCollector(BaseCollector):
             raise SessionExpiredError("Sessão Trace expirada na paginação")
         response.raise_for_status()
         payload = response.json()
+        if capture_raw:
+            self._dump_raw(payload, "trace")
         data = payload.get("data") if isinstance(payload, dict) else None
         if not isinstance(data, dict) or not isinstance(data.get("tableData"), list):
             raise ValueError("result-paging retornou contrato inválido")
@@ -1784,6 +1993,19 @@ class HttpCollector(BaseCollector):
             safe_serial = max(safe_serial, serial)
         return rows, safe_serial, undecoded
 
+    @staticmethod
+    def _log_vip_task(task_id, vip_name: str, record_count: int = 0, read: int = 0,
+                      decoded: int = 0, reason: str = "") -> None:
+        """Registra cada task de VIP, inclusive as que devolvem vazio ou falham cedo."""
+        message = (
+            f"[vip/{vip_name}] task {task_id}: recordCount={record_count} "
+            f"linhas_lidas={read} linhas_decodificadas={decoded}"
+        )
+        if reason:
+            logger.warning("%s motivo=%s", message, reason)
+        else:
+            logger.info(message)
+
     def collect_vips(self, mode: str = "incremental") -> CollectionResult:
         """Consome o Trace por ``filter-by-cols``, decodificando RSRP/RSRQ localmente."""
         from core.collection_result import CollectionDiagnostic
@@ -1806,7 +2028,9 @@ class HttpCollector(BaseCollector):
                     try:
                         task_id = int(raw_task_id)
                     except (TypeError, ValueError):
-                        failures.append(("configuration", f"Task inválida para VIP {vip_name}: {raw_task_id}"))
+                        reason = f"Task inválida para VIP {vip_name}: {raw_task_id}"
+                        failures.append(("configuration", reason))
+                        self._log_vip_task(raw_task_id, vip_name, reason=reason)
                         continue
                     checkpoints = db.get_collection_checkpoints(
                         self.event_id, "vip", task_id, self._trace_oss())
@@ -1815,10 +2039,23 @@ class HttpCollector(BaseCollector):
                         last_serial = int(checkpoints.get("serial") or checkpoints.get("") or 0)
                         start_row = int(checkpoints.get("row") or 0)
                     except (TypeError, ValueError):
-                        failures.append(("contract", f"Checkpoint inválido da task {task_id}"))
+                        reason = f"Checkpoint inválido da task {task_id}"
+                        failures.append(("contract", reason))
+                        self._log_vip_task(task_id, vip_name, reason=reason)
                         continue
                     try:
                         msg_id, win_start, win_end = self._open_trace_query(session, task_id)
+                        if win_start is None or win_end is None:
+                            task_details.append({
+                                "task_id": task_id, "vip": vip_name, "msg_id": msg_id,
+                                "serial_initial": last_serial, "serial_final": last_serial,
+                                "messages": 0, "rrc_measurements": 0,
+                                "decoded": 0, "undecoded": 0,
+                                "row_initial": start_row, "row_final": start_row,
+                                "record_count": 0, "backlog": False,
+                            })
+                            self._log_vip_task(task_id, vip_name)
+                            continue
                         filtered_id, _ = self._filter_meas_reports(
                             session, task_id, msg_id, win_start, win_end)
                         sorted_id, total = self._sort_trace_by_time(
@@ -1832,7 +2069,9 @@ class HttpCollector(BaseCollector):
                                 f"[vip/{vip_name}] task {task_id}: conjunto filtrado encolheu "
                                 f"({total} < offset {start_row}); relendo do início.")
                             last_serial, start_row = 0, 0
-                        page = self._fetch_trace_page(session, task_id, sorted_id, start_row)
+                        page = self._fetch_trace_page(
+                            session, task_id, sorted_id, start_row, capture_raw=True
+                        )
                         messages, row, pages = list(page), start_row + len(page), 1
                         while (len(page) == self._VIP_PAGE_SIZE
                                and pages < self._VIP_MAX_PAGES_PER_CYCLE):
@@ -1853,13 +2092,19 @@ class HttpCollector(BaseCollector):
                         raise
                     except (requests.exceptions.ConnectTimeout, requests.exceptions.ConnectionError,
                             requests.exceptions.Timeout) as error:
-                        failures.append(("network", f"Task {task_id} sem conexão: {error}"))
+                        reason = f"Task {task_id} sem conexão: {error}"
+                        failures.append(("network", reason))
+                        self._log_vip_task(task_id, vip_name, reason=reason)
                         continue
                     except requests.exceptions.HTTPError as error:
-                        failures.append(("http", f"Task {task_id} retornou erro HTTP: {error}"))
+                        reason = f"Task {task_id} retornou erro HTTP: {error}"
+                        failures.append(("http", reason))
+                        self._log_vip_task(task_id, vip_name, reason=reason)
                         continue
                     except (ValueError, TypeError, KeyError, json.JSONDecodeError) as error:
-                        failures.append(("contract", f"Task {task_id} inválida ou indisponível: {error}"))
+                        reason = f"Task {task_id} inválida ou indisponível: {error}"
+                        failures.append(("contract", reason))
+                        self._log_vip_task(task_id, vip_name, reason=reason)
                         continue
                     all_rows.extend(rows)
                     if safe_serial > last_serial or row > start_row:
@@ -1886,6 +2131,9 @@ class HttpCollector(BaseCollector):
                         "row_initial": start_row, "row_final": row, "record_count": total,
                         "backlog": backlog,
                     })
+                    self._log_vip_task(
+                        task_id, vip_name, record_count=total, read=len(messages), decoded=len(rows)
+                    )
                 break
             except SessionExpiredError:
                 if renewed or attempt:

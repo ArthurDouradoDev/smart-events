@@ -218,3 +218,42 @@ exceeded ... ConnectTimeout`). Decisão: o popup é do **usuário**, não do des
   esperando `list` em vez de `CollectionResult`, 1 de catálogo em `test_credentials`), 10
   skipped. Rodar com `--basetemp` dentro do projeto/scratch: o tmp padrão do pytest dá
   `PermissionError` neste Windows.
+
+
+---
+
+## 2026-08-13 — Mapeamento objeto→célula deixa de depender do token de tecnologia no nome
+
+**Contexto:** análise de multi-regional (troca SantoAmaro → Curitiba). Ver a entrada
+correspondente no `ERRORS.md` para a causa raiz e a prova nos bancos.
+
+- **A tecnologia do dado é da TASK PM consultada, não do palpite pelo nome da célula.**
+  `_normalize_cell_technology` continua existindo (é o que separa 4G de 5G quando o inventário
+  declara), mas `_resolve_monitoring_cell` passa a aceitar célula de tecnologia DESCONHECIDA
+  (`None`) como candidata de qualquer task, gravando no `_obj_to_cell` a tecnologia da task.
+  Célula de tecnologia CONHECIDA e diferente continua recusada — o gate existe para impedir a
+  troca silenciosa de 4G por 5G, e essa parte se mantém.
+- **A regra de candidato único (`len(choices) != 1`) é o que segura a ambiguidade.** Com o
+  filtro relaxado, dois nomes iguais em tecnologias diferentes continuam falhando visivelmente
+  em vez de escolher um.
+- **Convenção de nome de célula é por OSS, não por cliente.** SP responde `4G-SPSMG7-18-C`
+  (token no nome); o OSS de Curitiba/OUTRAS responde `18NLCTAL01GI`. O inventário do evento de
+  Curitiba mistura as duas convenções (5.637 células `4G-CT…` vindas do servidor central e 605
+  `18NL…`), e só as `18NL…` têm chance de casar com o que aquele OSS devolve. Isso limita a
+  cobertura mesmo depois desta correção — o log novo é o que mede o quanto.
+- **Cobertura parcial agora tem causa visível:** `_log_unmapped` emite um WARNING por ciclo com
+  os nomes vindos do OSS e exemplos das células cadastradas, lado a lado. `coverage.unmapped_cells`
+  já viajava em `get_collection_status`, mas nenhum arquivo do frontend o consome — o log é a
+  superfície operacional (painel de Logs + download).
+- Regressões: `test_celula_sem_tecnologia_no_nome_e_mapeada_pela_task`,
+  `test_celula_de_outra_tecnologia_nao_e_sequestrada_pela_task`,
+  `test_objeto_nao_mapeado_e_diagnosticado_pelo_nome`. As duas primeiras falham com a correção
+  revertida (verificado), a terceira falha com o `objName` lido só de `obj`.
+- Gate: `pytest tests/ -q --basetemp=.pytest-work/tmp` = 261 passed, 3 failed (as mesmas
+  pré-existentes), 10 skipped.
+
+**Pendências desta análise, em ordem (não implementadas):** cursor não avançar quando o ciclo
+descarta tudo; `region` do evento com fonte única de verdade e sem fallback silencioso para SP;
+troca de projeto encerrando o anterior de verdade (`stop()` com `join(timeout=5)` + `_stop_event.clear()`
+pode vazar thread de coleta); estado de renovação de sessão (`_needs_interactive`, backoff,
+`browser_profile`) chaveado por regional; `task_id` de VIP validado contra o OSS conectado.

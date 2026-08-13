@@ -7,6 +7,7 @@ para não subir threads reais.
 import pytest
 import core.database as database
 from api.api import Api
+import api.api as api_module
 
 
 @pytest.fixture
@@ -21,6 +22,7 @@ def api(tmp_db, monkeypatch):
     monkeypatch.setattr(sched_module.scheduler, "set_update_callback", lambda *a, **k: None)
     monkeypatch.setattr(sched_module.scheduler, "get_status",
                         lambda: {"kpi": {"state": "idle"}, "vip": {"state": "idle"}})
+    monkeypatch.setattr(api_module, "_active_event", None)
     return Api()
 
 
@@ -45,6 +47,20 @@ class TestApiEvents:
         result = api.activate_event(ev["id"], mock=True)
         assert result.get("ok") is True
 
+    def test_activate_event_encerra_ativo_anterior(self, api, sample_event):
+        first = {**sample_event, "id": "event-a", "name": "Evento A"}
+        second = {**sample_event, "id": "event-b", "name": "Evento B"}
+        database.save_event(first)
+        database.save_event(second)
+        database.update_event_status(first["id"], "ACTIVE")
+
+        result = api.activate_event(second["id"], mock=True)
+
+        assert result["ok"] is True
+        assert database.get_event(first["id"])["status"] == "ENDED"
+        assert database.get_event(second["id"])["status"] == "ACTIVE"
+        assert [row["id"] for row in database.get_events(status="ACTIVE")] == [second["id"]]
+
     def test_end_event(self, api_with_event):
         api, ev = api_with_event
         result = api.end_event(ev["id"])
@@ -53,6 +69,18 @@ class TestApiEvents:
     def test_activate_nonexistent_event(self, api):
         result = api.activate_event("nao-existe", mock=True)
         assert result.get("ok") is False
+
+    def test_get_sites_preserva_ultimo_resultado_quando_banco_bloqueia(
+            self, api_with_event, monkeypatch):
+        api, event = api_with_event
+        first = api.get_sites(event["id"])
+        assert first
+
+        def locked(*args, **kwargs):
+            raise RuntimeError("database is locked")
+
+        monkeypatch.setattr(database, "get_event", locked)
+        assert api.get_sites(event["id"]) == first
 
 
 class TestApiVips:

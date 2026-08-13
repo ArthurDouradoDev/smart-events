@@ -44,6 +44,9 @@ def test_collection_modal_renders_all_operational_states(scenario, label, css):
             page.locator("#sync-indicator").click()
             assert page.locator("#sync-modal-body").get_by_text(label).count() >= 1
             assert page.locator(f".sync-dot.{css}").count() >= 1
+            assert page.locator("#sync-modal-body").get_by_text("Cobertura").count() == 1
+            if scenario == "partial":
+                assert page.locator("#sync-modal-body").get_by_text("18NLCTAL01GI").count() == 1
             browser.close()
     except Exception as exc:
         if "Executable doesn't exist" in str(exc):

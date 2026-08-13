@@ -5,6 +5,9 @@ Cobre: parsers de RSRP/RSRQ, detecção de célula por evento,
 MockCollector, CsvCollector e factory build_collector.
 Nenhum teste aqui requer VPN — ver test_http_vpn.py para integração real.
 """
+import json
+from datetime import datetime, timedelta
+
 import pytest
 import core.database as db
 from core.collector import (
@@ -15,6 +18,7 @@ from core.collector import (
     NullCollector,
     build_collector,
 )
+from core.session_renew import _browser_profile_path
 from core.collection_result import CollectionResult
 
 
@@ -22,6 +26,64 @@ from core.collection_result import CollectionResult
 def patched_db(monkeypatch):
     """Isola collectors do DB real para testes puramente unitários."""
     monkeypatch.setattr(db, "get_event_vips", lambda *a, **k: [])
+
+
+def test_dump_raw_is_opt_in_and_never_persists_session_tokens(sample_event, tmp_path, monkeypatch):
+    monkeypatch.setattr(db, "get_event_vips", lambda *a, **k: [])
+    monkeypatch.setattr("core.collector.credentials.data_dir", lambda: tmp_path)
+    collector = HttpCollector(sample_event, "https://10.220.30.9:31943")
+    payload = {"data": [{"value": 1}], "roarand": "secret", "bspsession": "secret"}
+
+    assert collector._dump_raw(payload, "monitoring") is None
+    assert not (tmp_path / "diagnostics").exists()
+
+    monkeypatch.setenv("SMARTEVENTS_CAPTURE_RAW", "1")
+    path = collector._dump_raw(payload, "monitoring")
+
+    assert path and path.exists()
+    dumped = path.read_text(encoding="utf-8").lower()
+    assert "roarand" not in dumped and "bspsession" not in dumped
+    assert json.loads(dumped) == {"data": [{"value": 1}]}
+
+
+def test_backoff_e_captcha_sao_isolados_por_host(sample_event, monkeypatch):
+    monkeypatch.setattr(db, "get_event_vips", lambda *a, **k: [])
+    HttpCollector.reset_interactive_state()
+    sp = HttpCollector(sample_event, "https://10.220.50.9:31943")
+    curitiba_event = {**sample_event, "id": "curitiba",
+                      "oss": {**sample_event["oss"], "region": "OUTRAS"}}
+    curitiba = HttpCollector(curitiba_event, "https://10.220.30.9:31943")
+
+    sp_key = sp._module_state_key("monitoring")
+    curitiba_key = curitiba._module_state_key("monitoring")
+    sp._engage_backoff("monitoring")
+    HttpCollector._needs_interactive[sp_key] = "token-sp"
+    HttpCollector._interactive_cooldown_until[sp_key] = datetime.utcnow() + timedelta(minutes=5)
+
+    assert sp_key in HttpCollector._renew_backoff_until
+    assert curitiba_key not in HttpCollector._renew_backoff_until
+    assert HttpCollector.interactive_modules_for(sp.base_url) == {"monitoring"}
+    assert HttpCollector.interactive_modules_for(curitiba.base_url) == set()
+    assert HttpCollector._interactive_cooldown_until.get(curitiba_key) is None
+    HttpCollector.reset_interactive_state()
+
+
+def test_session_files_e_browser_profiles_sao_separados_por_host(
+        sample_event, tmp_path, monkeypatch):
+    monkeypatch.setattr(db, "get_event_vips", lambda *a, **k: [])
+    monkeypatch.setattr(db, "BASE_DIR", tmp_path)
+    sp_url = "https://10.220.50.9:31943"
+    curitiba_url = "https://10.220.30.9:31943"
+
+    sp_session = HttpCollector._resolve_session_file(sp_url)
+    curitiba_session = HttpCollector._resolve_session_file(curitiba_url)
+    sp_profile = _browser_profile_path(sp_session, sp_url)
+    curitiba_profile = _browser_profile_path(curitiba_session, curitiba_url)
+
+    assert sp_session != curitiba_session
+    assert sp_profile != curitiba_profile
+    assert sp_profile.name == "browser_profile_10_220_50_9"
+    assert curitiba_profile.name == "browser_profile_10_220_30_9"
 
 
 # ── _extract_rsrp_rsrq ────────────────────────────────────────────────

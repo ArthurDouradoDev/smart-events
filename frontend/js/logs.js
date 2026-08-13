@@ -20,6 +20,7 @@ export function initLogs() {
   document.getElementById("logs-btn")?.addEventListener("click", _toggleDrawer);
   document.getElementById("logs-drawer-close")?.addEventListener("click", _closeDrawer);
   document.getElementById("logs-download-btn")?.addEventListener("click", _downloadLogs);
+  document.getElementById("logs-capture-diagnostics-btn")?.addEventListener("click", _captureDiagnostics);
   document.getElementById("logs-clear-btn")?.addEventListener("click", _clearLogs);
 }
 
@@ -111,6 +112,20 @@ async function _downloadLogs() {
   } catch (err) {
     console.error("Erro ao baixar logs de coleta:", err);
     alert("Erro ao baixar logs de coleta.");
+  }
+}
+
+async function _captureDiagnostics() {
+  try {
+    const res = await API.captureDiagnostics();
+    if (res?.ok) {
+      alert(`Diagnóstico salvo em:\n${res.path}`);
+    } else {
+      alert(`Erro ao capturar diagnóstico: ${res ? res.error : "desconhecido"}`);
+    }
+  } catch (err) {
+    console.error("Erro ao capturar diagnóstico:", err);
+    alert("Erro ao capturar diagnóstico.");
   }
 }
 

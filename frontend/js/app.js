@@ -997,6 +997,23 @@ function _syncLine(title, s, isVip) {
   return _syncRow(title, val) + (hint ? `<div class="${hintCls}">${hint}</div>` : "");
 }
 
+function _syncCoverageLine(kpi) {
+  const coverage = kpi?.coverage || {};
+  const discarded = Number(coverage.unmapped_objects || 0);
+  const received = Number(kpi?.received || 0);
+  const mapped = Number(coverage.mapped_objects ?? Math.max(0, received - discarded));
+  let html = _syncRow(
+    "Cobertura",
+    `<span>recebidos ${received} · mapeados ${mapped} · descartados ${discarded}</span>`
+  );
+  if (discarded > 0) {
+    const ossNames = (coverage.unmapped_cells || []).slice(0, 5).map(_esc).join(", ") || "não informado";
+    const eventNames = (coverage.event_cells || []).slice(0, 5).map(_esc).join(", ") || "não informado";
+    html += `<div class="sync-hint err">nomes vindos do OSS: ${ossNames} | o evento espera nomes como: ${eventNames}</div>`;
+  }
+  return html;
+}
+
 function _syncSessionLine(sess) {
   if (!sess) return "";
   const needsAuth = !!sess.needs_interactive;
@@ -1015,6 +1032,7 @@ function _renderSyncModal(st) {
   body.innerHTML =
     `<div class="sync-section">` +
     _syncLine("Sites (KPI)", st.kpi, false) +
+    _syncCoverageLine(st.kpi) +
     _syncLine("VIPs", st.vip, true) +
     (st.alarms ? _syncLine("Alarmes", st.alarms, false) : "") +
     _syncSessionLine(st.session) +

@@ -38,6 +38,15 @@ server_data/
 # --- PyInstaller / Executable Builds ---
 dist/
 build/
+
+# --- Testes / artefatos temporários locais ---
+.pytest-work/
+.pytest-cache/
+.pytest_cache/
+.phase3-pytest-*/
+.tmp/
+
+# --- PyInstaller metadata ---
 *.manifest
 # *.spec removido: main.spec é o spec do PyInstaller e deve ser rastreado
 

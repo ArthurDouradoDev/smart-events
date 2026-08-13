@@ -102,9 +102,15 @@ function _mockCollectionStatus() {
     state, last_attempt_at: new Date(now - 3000).toISOString(),
     last_cycle_ok_at: ["data", "empty", "stale"].includes(state) ? new Date(now - age).toISOString() : null,
     last_data_at: ["data", "empty", "stale"].includes(state) ? new Date(now - age).toISOString() : null,
-    last_success: null, last_count: count, received: count, calculated: count,
+    last_success: null, last_count: count, received: state === "partial" ? count + 2 : count, calculated: count,
     invalid: state === "partial" ? 2 : 0, duplicate: 0, inserted: count,
-    coverage: { cells_mapped: state === "partial" ? 4 : 6, cells_expected: 6 },
+    coverage: {
+      cells_mapped: state === "partial" ? 4 : 6, cells_expected: 6,
+      mapped_objects: count,
+      unmapped_objects: state === "partial" ? 2 : 0,
+      unmapped_cells: state === "partial" ? ["18NLCTAL01GI", "18NLCTAL02GI"] : [],
+      event_cells: ["4G-CTJA02-18-A", "4G-CTJA02-18-B"],
+    },
     duration_s: 0.84, error: state === "error" ? "HTTP 500 no iManager" : null,
     cause: state === "auth_required" ? "Sessão expirada; o retry ainda não foi confirmado." : (state === "partial" ? "Duas células configuradas não responderam." : null),
     interval_s: interval,
@@ -315,6 +321,7 @@ const _mock = {
   },
   clear_collection_logs: () => ({ ok: true }),
   download_collection_logs: () => ({ ok: true, path: "C:\\Users\\Mock\\Downloads\\smart_events_coleta.log" }),
+  capture_diagnostics: () => ({ ok: true, path: "C:\\Users\\Mock\\data\\diagnostics\\monitoring_10.220.50.9_20260813-120000.json" }),
 
   get_vip_series: (event_id, vip_name, minutes) => {
     if (_vipSeriesScenario === "empty") return { ok: true, series: [] };
@@ -431,6 +438,7 @@ const API = {
   getCollectionLogs: (limit=800)             => API.call("get_collection_logs", limit),
   clearCollectionLogs: ()                    => API.call("clear_collection_logs"),
   downloadCollectionLogs: ()                 => API.call("download_collection_logs"),
+  captureDiagnostics: ()                     => API.call("capture_diagnostics"),
 
   getVipSeries:     (eventId, vipName, minutes)  => API.call("get_vip_series", eventId, vipName, minutes),
   clearEventHistory: (eventId)                  => API.call("clear_event_history", eventId),

@@ -44,6 +44,18 @@ def _resolve_credentials(cliente: str = "", region: str = "") -> tuple:
     Faltando credencial, devolve vazio para preenchimento manual no navegador."""
     return _credentials.resolve_credentials(cliente, region)
 
+
+def _browser_profile_path(session_path: Path, base_url: str) -> Path:
+    """Perfil persistente exclusivo do host do OSS.
+
+    O session file já é separado por host, mas todos ficavam no mesmo diretório e
+    acabavam usando ``data/browser_profile``. O slug explícito impede cookies, SSO,
+    cache e CAPTCHA de uma regional influenciarem outra.
+    """
+    host = (urlparse(base_url).hostname or "oss").lower()
+    slug = "".join(ch if ch.isalnum() else "_" for ch in host).strip("_") or "oss"
+    return session_path.parent / f"browser_profile_{slug}"
+
 # Códigos de saída — o collector os usa para diferenciar a causa da falha.
 EXIT_SUCCESS = 0           # sessão renovada E autenticada (sonda REST OK)
 EXIT_GENERIC_FAIL = 1      # falha genérica (erro de execução, sem tokens, etc.)
@@ -241,7 +253,7 @@ def run(headless: bool = True, module: str = "both",
         # o que fazia os waits de PM/Trace expirarem antes da SPA disparar as chamadas REST
         # que carregam o roarand → "Nenhuma sessão ou token pôde ser capturado". O perfil
         # persistente também guarda os cookies, então muitas renovações dispensam novo login.
-        user_data_dir = session_path.parent / "browser_profile"
+        user_data_dir = _browser_profile_path(session_path, base_url)
         user_data_dir.mkdir(parents=True, exist_ok=True)
         context = p.chromium.launch_persistent_context(
             str(user_data_dir),
@@ -389,10 +401,9 @@ def run(headless: bool = True, module: str = "both",
                     logger.warning(f"Falha ao ir para Trace: {e}")
 
         # 4. Cookies e tokens globais — filtrados pelo HOST da regional ativa.
-        # O perfil do Chromium é compartilhado entre regionais (data/browser_profile),
-        # então capturar tudo vazaria cookies de outros OSS no session.json. Filtramos por
-        # HOST (e não por context.cookies(urls=...), que também casa o PATH e descartava o
-        # bspsession quando ele não está no path "/"). Preservamos o 'path' de cada cookie:
+        # O perfil já é separado por host. Mantemos também o filtro defensivo por HOST
+        # (e não por context.cookies(urls=...), que casa o PATH e descartava o bspsession
+        # quando ele não está no path "/"). Preservamos o 'path' de cada cookie:
         # o iManager usa cookies homônimos (ex.: JSESSIONID) em paths distintos (/unisso vs /);
         # sem path, o requests assume "/" e um sobrescreve o outro.
         import urllib.parse

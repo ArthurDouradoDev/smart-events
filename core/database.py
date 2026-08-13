@@ -25,6 +25,14 @@ DB_PATH = BASE_DIR / "data" / "smart_events.db"
 
 _local = threading.local()
 
+# O pywebview atende chamadas simultâneas em threads distintas. As conexões são
+# thread-local, mas a preparação do schema deve acontecer uma única vez por
+# arquivo: repetir DELETE/DROP INDEX/CREATE INDEX em cada thread disputa lock
+# exclusivo com as leituras do mapa e com os coletores.
+_db_init_lock = threading.Lock()
+_initialized_global_dbs: set[Path] = set()
+_initialized_event_dbs: set[Path] = set()
+
 _requests_lib = None
 def _get_requests():
     global _requests_lib
@@ -165,10 +173,20 @@ def get_event_conn(event_id: str) -> sqlite3.Connection:
     if not hasattr(_event_local, attr_name) or getattr(_event_local, attr_name) is None:
         db_path = get_event_db_path(event_id)
         db_path.parent.mkdir(parents=True, exist_ok=True)
-        conn = sqlite3.connect(str(db_path), check_same_thread=False)
+        conn = sqlite3.connect(str(db_path), timeout=30, check_same_thread=False)
         conn.row_factory = sqlite3.Row
-        conn.execute("PRAGMA journal_mode=WAL")
-        init_event_db(conn)
+        conn.execute("PRAGMA busy_timeout=30000")
+        resolved_path = db_path.resolve()
+        with _db_init_lock:
+            if resolved_path not in _initialized_event_dbs:
+                try:
+                    conn.execute("PRAGMA journal_mode=WAL")
+                    init_event_db(conn)
+                except Exception:
+                    conn.rollback()
+                    conn.close()
+                    raise
+                _initialized_event_dbs.add(resolved_path)
         setattr(_event_local, attr_name, conn)
     return getattr(_event_local, attr_name)
 
@@ -176,9 +194,14 @@ def get_event_conn(event_id: str) -> sqlite3.Connection:
 def get_conn() -> sqlite3.Connection:
     """Retorna conexão thread-local com o banco."""
     if not hasattr(_local, "conn") or _local.conn is None:
-        _local.conn = sqlite3.connect(str(DB_PATH), check_same_thread=False)
+        _local.conn = sqlite3.connect(str(DB_PATH), timeout=30, check_same_thread=False)
         _local.conn.row_factory = sqlite3.Row
-        _local.conn.execute("PRAGMA journal_mode=WAL")
+        _local.conn.execute("PRAGMA busy_timeout=30000")
+        resolved_path = DB_PATH.resolve()
+        with _db_init_lock:
+            if resolved_path not in _initialized_global_dbs:
+                _local.conn.execute("PRAGMA journal_mode=WAL")
+                _initialized_global_dbs.add(resolved_path)
         _local.conn.execute("PRAGMA foreign_keys=ON")
     return _local.conn
 
@@ -334,7 +357,9 @@ def init_db():
         )
         conn.commit()
     except Exception:
-        pass
+        # Uma migração parcialmente executada mantém uma transação de escrita
+        # aberta nesta conexão e bloqueia todas as outras threads.
+        conn.rollback()
 
 
 # ── Events ──────────────────────────────────────────────────────────
@@ -438,6 +463,41 @@ def update_event_status(event_id: str, status: str):
     conn.commit()
 
 
+def activate_event_exclusively(event_id: str) -> None:
+    """Ativa um evento e encerra todos os demais em uma única transação.
+
+    ``BEGIN IMMEDIATE`` serializa duas ativações concorrentes antes da leitura dos
+    ativos; sem isso, ambas poderiam observar o estado antigo e terminar com dois
+    eventos ``ACTIVE``.
+    """
+    conn = get_conn()
+    try:
+        conn.execute("BEGIN IMMEDIATE")
+        rows = conn.execute(
+            "SELECT id, config_json, status FROM events WHERE status = 'ACTIVE' OR id = ?",
+            (event_id,),
+        ).fetchall()
+        if not any(row["id"] == event_id for row in rows):
+            raise ValueError(f"Evento não encontrado: {event_id}")
+        for row in rows:
+            status = "ACTIVE" if row["id"] == event_id else "ENDED"
+            try:
+                config = json.loads(row["config_json"])
+                config["status"] = status
+                conn.execute(
+                    "UPDATE events SET status = ?, config_json = ? WHERE id = ?",
+                    (status, json.dumps(config), row["id"]),
+                )
+            except Exception:
+                conn.execute(
+                    "UPDATE events SET status = ? WHERE id = ?", (status, row["id"])
+                )
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+
+
 def get_events(status: Optional[str] = None) -> List[dict]:
     conn = get_conn()
     if status:
@@ -492,6 +552,7 @@ def delete_event(event_id: str):
             pass
     try:
         path = get_event_db_path(event_id)
+        _initialized_event_dbs.discard(path.resolve())
         if path.exists():
             path.unlink()
     except Exception as e:

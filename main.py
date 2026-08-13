@@ -17,6 +17,7 @@ import atexit
 import time
 import threading
 from pathlib import Path
+from logging.handlers import RotatingFileHandler
 
 # Em um .exe sem console (windowed, console=False), sys.stdout/sys.stderr são None. Qualquer
 # escrita (incluindo o StreamHandler do logging) quebraria com AttributeError, e mensagens com
@@ -33,10 +34,26 @@ if sys.stdout is None or sys.stderr is None:
 sys.path.insert(0, str(Path(__file__).parent))
 
 from core import database as db
+from core import credentials
+
+_log_handlers = [logging.StreamHandler()]
+try:
+    # ``data_dir`` é persistente também no executável onefile; nunca use _MEIPASS
+    # para logs que precisam sobreviver ao fechamento do aplicativo.
+    _log_path = credentials.data_dir() / "logs" / "smart_events.log"
+    _log_path.parent.mkdir(parents=True, exist_ok=True)
+    _log_handlers.append(RotatingFileHandler(
+        _log_path, maxBytes=5 * 1024 * 1024, backupCount=3, encoding="utf-8"
+    ))
+except Exception as exc:
+    # A interface continua abrindo mesmo se, por exemplo, a pasta ao lado do .exe
+    # estiver momentaneamente sem permissão de escrita.
+    logging.getLogger(__name__).warning("Não foi possível configurar o log em disco: %s", exc)
 
 logging.basicConfig(
     level=logging.DEBUG if "--dev" in sys.argv else logging.INFO,
     format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+    handlers=_log_handlers,
 )
 logger = logging.getLogger("main")
 
