@@ -38,6 +38,29 @@ linhas restantes (parada no offset 534).
   de origem era ordenado e estável (0 violações em 1000 linhas de `query/result`) e mesmo assim
   o filtro devolveu desordem. Um filtro determinístico sobre conjunto ordenado *deveria* dar
   subsequência ordenada; não deu.
+
+---
+
+## 2026-08-13 — Gráfico "Site completo" perdeu as linhas por célula (regressão da Fase 2)
+
+**Sintoma:** no popup "Visualização Detalhada" com `Site completo` selecionado, o gráfico
+mostrava uma única linha reta (ex.: 100% de Acessibilidade) em vez de uma linha por célula.
+
+**Causa raiz:** `Api.get_kpi_series` (`api/api.py`), no branch `cell_id == "__all__"`, passou a
+priorizar o agregado de site já persistido (`db.get_kpi_site_series`, linhas SITE gravadas por
+`core/collector.py::_site_rows`/recalculo de "recalculate"). Quando esse agregado existe, a
+função retornava cedo com `"cells_data": {}` — nunca calculava a quebra por célula. No frontend
+(`frontend/js/kpi.js:569`), o gráfico só desenha uma linha por célula quando `cells_data` não
+está vazio; do contrário cai no fallback de uma linha única, escondendo todas as células.
+
+**Correção:** no mesmo branch de retorno antecipado, também consultar `db.get_kpi_series`
+(linhas `scope='CELL'`) e montar `cells_data` alinhado aos `labels` do agregado — igual ao que
+o branch de fallback (linhas 525-536) já fazia para métricas sem agregado persistido.
+
+**Regra:** um retorno antecipado que populava só parte da resposta esperada (`cells_data`)
+quebrou um consumidor que dependia daquele campo para decidir o modo de render. Ao adicionar um
+"fast path"/cache para um campo de uma resposta multi-campo, os demais campos que o chamador já
+dependia precisam continuar sendo preenchidos, não zerados silenciosamente.
 - **Um teste que passa com a correção revertida não testa a correção.** O teste
   `test_ciclos_parciais_sucessivos_nao_perdem_nenhuma_linha` passava dos dois jeitos, porque a
   fixture já vinha ordenada. Só `test_conjunto_fora_de_ordem_nao_perde_linhas_em_ciclo_parcial`

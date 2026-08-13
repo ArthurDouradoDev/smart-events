@@ -452,9 +452,16 @@ class Api:
                 site_rows = db.get_kpi_site_series(event_id, site_id, metric, minutes, technology)
                 if site_rows:
                     labels = [row["timestamp"] for row in site_rows]
+                    # O agregado persistido não substitui as linhas por célula do
+                    # gráfico "Site completo" — só a série somada/recalculada.
+                    cell_rows = db.get_kpi_series(event_id, site_id, metric, minutes)
+                    cell_ids = sorted({r["cell_id"] for r in cell_rows if r.get("cell_id")})
+                    cell_ts_vals = {(r["cell_id"], r["timestamp"]): r["value"]
+                                     for r in cell_rows if r.get("cell_id") and r.get("timestamp")}
+                    cells_data = {cid: [cell_ts_vals.get((cid, ts)) for ts in labels] for cid in cell_ids}
                     return {
                         "ok": True, "labels": labels, "values": [row["value"] for row in site_rows],
-                        "cells_data": {}, "gaps": self._detect_gaps(labels, max_gap_seconds=90),
+                        "cells_data": cells_data, "gaps": self._detect_gaps(labels, max_gap_seconds=90),
                         "technology": technology, "persisted_site_aggregate": True,
                         "thresholds": self._metric_thresholds(event_id, metric),
                     }

@@ -174,3 +174,17 @@ inalterada. Esta sessão completou U2 e U3 sobre o plano
   `Chart.instances` + `getDatasetMeta` em vez de comparar imagem.
 - Gate completo (`pytest tests/ -v`): 258 passed, 3 failed (as pré-existentes documentadas
   acima), 10 skipped. Nenhuma regressão nova.
+
+---
+
+## 2026-08-13 — Fix: `cells_data` vazio no fast path do agregado de site persistido
+
+`Api.get_kpi_series` (`api/api.py:451-465`) tem dois caminhos para `cell_id == "__all__"`: um
+fast path que devolve o agregado SITE já persistido (`db.get_kpi_site_series`, gravado por
+`core/collector.py::_site_rows` e pelo recalculo de métricas `site_aggregation="recalculate"`,
+ex. `accessibility`), e um fallback que agrega on-the-fly a partir das linhas CELL. Só o
+fallback populava `cells_data` (linhas por célula do gráfico "Site completo"); o fast path
+devolvia `cells_data: {}`, e `frontend/js/kpi.js:569` cai para uma linha única quando isso
+acontece. Corrigido: o fast path agora também monta `cells_data` a partir de
+`db.get_kpi_series` (linhas CELL), alinhado aos `labels` do agregado. Ver detalhe da causa em
+`ERRORS.md` ("Gráfico 'Site completo' perdeu as linhas por célula").
