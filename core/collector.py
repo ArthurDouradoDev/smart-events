@@ -402,15 +402,20 @@ class BaseCollector(ABC):
                 return CollectionResult.empty("Monitoring respondeu sem medições novas.", **kwargs)
             except SessionExpiredError:
                 if renewed or attempt:
+                    logger.error("Sessão de Monitoring continuou inválida após a renovação (KPIs v2).")
                     return CollectionResult.auth_required("A sessão de Monitoring continuou inválida após a renovação.")
                 if not self._renew_session("monitoring"):
+                    logger.error("Não foi possível renovar a sessão de Monitoring (KPIs v2).")
                     return CollectionResult.auth_required("Não foi possível renovar a sessão de Monitoring.")
                 renewed = True
             except (requests.exceptions.ConnectTimeout, requests.exceptions.ConnectionError, requests.exceptions.Timeout) as error:
+                logger.error(f"Erro de conexão ao consultar KPIs: {error}")
                 return CollectionResult.error(f"Falha de conexão ao consultar KPIs: {error}", code="network")
             except requests.exceptions.HTTPError as error:
+                logger.error(f"HTTP ao consultar KPIs: {error}")
                 return CollectionResult.error(f"Falha HTTP ao consultar KPIs: {error}", code="http")
             except (ValueError, TypeError, KeyError) as error:
+                logger.error(f"Resposta inválida do Monitoring: {error}")
                 return CollectionResult.error(f"Resposta inválida do Monitoring: {error}", stage="parsing", code="contract")
         return CollectionResult.error("Monitoring terminou sem resposta.", code="unknown")
 
@@ -1884,15 +1889,20 @@ class HttpCollector(BaseCollector):
                 break
             except SessionExpiredError:
                 if renewed or attempt:
+                    logger.error("Sessão de Trace continuou inválida após a renovação.")
                     return CollectionResult.auth_required("A sessão de Trace continuou inválida após a renovação.")
                 if not self._renew_session("trace"):
+                    logger.error("Não foi possível renovar a sessão de Trace.")
                     return CollectionResult.auth_required("Não foi possível renovar a sessão de Trace.")
                 renewed = True
             except (requests.exceptions.ConnectTimeout, requests.exceptions.ConnectionError, requests.exceptions.Timeout) as error:
+                logger.error(f"Erro de conexão no Trace: {error}")
                 return CollectionResult.error(f"Falha de conexão no Trace: {error}", code="network")
             except requests.exceptions.HTTPError as error:
+                logger.error(f"HTTP no Trace: {error}")
                 return CollectionResult.error(f"Falha HTTP no Trace: {error}", code="http")
             except (ValueError, TypeError, KeyError, json.JSONDecodeError) as error:
+                logger.error(f"Contrato inválido do Trace: {error}")
                 return CollectionResult.error(f"Contrato inválido do Trace: {error}", stage="parsing", code="contract")
 
         self._last_vip_subscription = task_details
@@ -2025,14 +2035,17 @@ class HttpCollector(BaseCollector):
                 if attempt < retries - 1 and self._renew_session("monitoring"):
                     renewed_this_call = True
                     continue
+                logger.error("Não foi possível renovar a sessão de alarmes.")
                 return CollectionResult.auth_required("Não foi possível renovar a sessão de alarmes.")
             except (requests.exceptions.ConnectTimeout, requests.exceptions.ConnectionError,
                     requests.exceptions.Timeout) as e:
                 logger.error(f"Erro de conexão ao coletar alarmes: {e}")
                 return CollectionResult.error(f"Falha de conexão ao coletar alarmes: {e}", code="network")
             except requests.exceptions.HTTPError as e:
+                logger.error(f"HTTP ao coletar alarmes: {e}")
                 return CollectionResult.error(f"Falha HTTP ao coletar alarmes: {e}", code="http")
             except (ValueError, TypeError, KeyError) as e:
+                logger.error(f"Resposta inválida de alarmes: {e}")
                 return CollectionResult.error(f"Resposta inválida de alarmes: {e}", stage="parsing", code="contract")
         return CollectionResult.error("Coleta de alarmes terminou sem resposta.", code="unknown")
 

@@ -211,9 +211,11 @@ class Scheduler:
         status["duplicate"] = result.duplicate
 
     def _apply_unexpected_error(self, collector: str, error: Exception, started_at: float) -> None:
+        # ``diagnostics`` é zerado porque a UI classifica a falha pelo ``code`` do
+        # último diagnóstico; manter o do ciclo anterior descreveria outra falha.
         self._status[collector].update({
             "state": "error", "duration_s": round(time.time() - started_at, 2),
-            "error": str(error), "cause": str(error),
+            "error": str(error), "cause": str(error), "diagnostics": [],
         })
 
     def _collect_kpis(self):

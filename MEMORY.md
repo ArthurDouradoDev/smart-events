@@ -188,3 +188,33 @@ devolvia `cells_data: {}`, e `frontend/js/kpi.js:569` cai para uma linha única 
 acontece. Corrigido: o fast path agora também monta `cells_data` a partir de
 `db.get_kpi_series` (linhas CELL), alinhado aos `labels` do agregado. Ver detalhe da causa em
 `ERRORS.md` ("Gráfico 'Site completo' perdeu as linhas por célula").
+
+---
+
+## 2026-08-13 — Painel "Status de coleta" enxuto; erro técnico só nos logs
+
+O popup listava ~10 linhas por coletor (tentativa, ciclo válido, medições, cobertura, próximo
+ciclo) e despejava a exceção crua em "Diagnóstico" (ex.: `HTTPSConnectionPool(...) Max retries
+exceeded ... ConnectTimeout`). Decisão: o popup é do **usuário**, não do desenvolvedor.
+
+- **Uma linha por coletor** (`frontend/js/app.js::_syncLine`): Sites (KPI) / VIPs / Alarmes /
+  Sessão → `● estado · idade do último dado [· n/N VIPs]`. O timestamp absoluto virou `title`
+  (hover). Removidas as linhas de tentativa/ciclo/medições/cobertura/serial/próximo ciclo e o
+  `_syncSection`/`_syncSessionSection` antigos (com `_nextCycleText` e `_formatStatusTime`).
+- **Erro traduzido** (`_syncHint`): classifica pelo `code` do último diagnóstico
+  (`network`/`http`/`contract`/`catalog`/`auth_required`) → frase acionável
+  ("Sem conexão com o servidor — verifique a VPN.", "Sessão expirada — reconecte…"). Sem código
+  reconhecido: "Falha na coleta — detalhes nos logs técnicos.". Botão **Ver logs técnicos**
+  abre a gaveta `</>` (clica em `logs-btn`).
+- **Texto cru garantido nos logs:** os ramos `except` de `_collect_kpis_v2`, do Trace e parte
+  dos alarmes (`core/collector.py`) retornavam `CollectionResult.error/auth_required` **sem**
+  logar; como a UI não mostra mais a exceção, cada ramo ganhou `logger.error` (root handler →
+  buffer do painel `</>`).
+- `core/scheduler.py::_apply_unexpected_error` agora zera `diagnostics`: a UI classifica pelo
+  `code` do último diagnóstico e o do ciclo anterior descreveria outra falha.
+- CSS (`frontend/css/main.css`): `.sync-hint`/`.sync-hint.err` e `.sync-logs`; removidos
+  `.sync-section-title` e `.sync-err`, órfãos após a mudança.
+- Gate: `pytest -q` = 258 passed, 3 failed (as pré-existentes: 2 de `TestMockCollectAlarms`
+  esperando `list` em vez de `CollectionResult`, 1 de catálogo em `test_credentials`), 10
+  skipped. Rodar com `--basetemp` dentro do projeto/scratch: o tmp padrão do pytest dá
+  `PermissionError` neste Windows.

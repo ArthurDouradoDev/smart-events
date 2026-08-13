@@ -299,22 +299,12 @@ input[type="range"] {
 /* Sync modal (detalhes de KPI/VIP/sessão) */
 .sync-section { margin-bottom: 14px; }
 .sync-section:last-child { margin-bottom: 0; }
-.sync-section-title {
-  font-size: 11px;
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-  color: var(--text-secondary);
-  margin-bottom: 6px;
-  padding-bottom: 4px;
-  border-bottom: 1px solid var(--border);
-}
 .sync-row {
   display: flex;
   justify-content: space-between;
   align-items: center;
   font-size: 12px;
-  padding: 3px 0;
+  padding: 5px 0;
 }
 .sync-row-label { color: var(--text-secondary); }
 .sync-row-val {
@@ -333,9 +323,16 @@ input[type="range"] {
 .sync-dot.st-error { background: var(--danger); }
 .sync-dot.st-running { background: var(--accent); animation: pulse-rec 1.2s ease infinite; }
 .sync-dot.st-idle { background: var(--text-muted); }
-.sync-err { color: var(--danger); font-family: var(--font-mono); }
+.sync-hint {
+  font-size: 11px;
+  color: var(--warning);
+  padding: 0 0 5px 0;
+  text-align: right;
+}
+.sync-hint.err { color: var(--danger); }
 .sync-reauth-wrap { margin-top: 10px; }
 .sync-reauth { width: 100%; }
+.sync-logs { width: 100%; margin-top: 12px; font-size: 12px; }
 
 /* Icon buttons */
 .icon-btn {

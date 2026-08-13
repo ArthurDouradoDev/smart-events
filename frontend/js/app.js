@@ -842,6 +842,10 @@ function _setupSyncIndicator() {
   document.getElementById("sync-modal-body")?.addEventListener("click", (e) => {
     const btn = e.target.closest(".sync-reauth");
     if (btn) _handleSyncReauth(btn);
+    if (e.target.closest(".sync-logs")) {
+      modal.classList.add("hidden");
+      document.getElementById("logs-btn")?.click();
+    }
   });
 }
 
@@ -963,72 +967,59 @@ function _syncRow(label, valueHtml) {
   return `<div class="sync-row"><span class="sync-row-label">${label}</span><span class="sync-row-val">${valueHtml}</span></div>`;
 }
 
-function _nextCycleText(s) {
-  const last = _parseUtc(s.last_attempt_at || s.last_cycle_ok_at || s.last_success);
-  if (!last || !s.interval_s) return "—";
-  const rem = Math.round((last.getTime() + s.interval_s * 1000 - Date.now()) / 1000);
-  return rem <= 0 ? "agora" : `em ~${rem}s`;
+// Mensagem para o usuário. O texto técnico (exceção, URL, host, timeout) fica
+// só nos logs do desenvolvedor; aqui vai o que dá para entender e agir.
+function _syncHint(s) {
+  if (s.state === "auth_required") return "Sessão expirada — reconecte para retomar a coleta.";
+  if (s.state === "stale") return "Sem dados novos há mais de um ciclo.";
+  if (s.state === "partial") return "Coleta parcial — parte dos dados não chegou neste ciclo.";
+  if (s.state !== "error") return "";
+  const code = s.diagnostics?.[s.diagnostics.length - 1]?.code;
+  switch (code) {
+    case "network":  return "Sem conexão com o servidor — verifique a VPN.";
+    case "http":     return "O servidor recusou a consulta.";
+    case "contract": return "O servidor respondeu em formato inesperado.";
+    case "catalog":  return "Não foi possível ler o catálogo de tarefas.";
+    default:         return "Falha na coleta — detalhes nos logs técnicos.";
+  }
 }
 
-function _syncSection(title, s, isVip) {
+function _syncLine(title, s, isVip) {
   const info = _stateInfo(s.state);
-  const last = _parseUtc(s.last_cycle_ok_at || s.last_success);
-  let rows = _syncRow("Status",
-    `<span class="sync-dot ${info.cls}"></span>${info.label}${last ? " · " + _agoLabel(last) : ""}`);
-  if (isVip) {
-    const modeLabel = s.mode === "incremental" ? "incremental" : "—";
-    rows += _syncRow("Modo", modeLabel);
-    rows += _syncRow("VIPs com dados", `${s.vips_with_data}/${s.vips_total}`);
-    if (s.coverage?.backlog_tasks) {
-      rows += _syncRow("Backlog", `${s.coverage.backlog_messages || 0} mensagens em ${s.coverage.backlog_tasks} task(s)`);
-    }
-    if (s.coverage?.latest_serial != null) rows += _syncRow("Último serial", _esc(s.coverage.latest_serial));
-  }
-  const meas = `${s.inserted ?? s.last_count ?? 0} inseridas · ${s.invalid ?? 0} inválidas`;
-  rows += _syncRow("Medições", meas + (s.duration_s != null ? " · " + s.duration_s + "s" : ""));
-  rows += _syncRow("Última tentativa", _formatStatusTime(s.last_attempt_at));
-  rows += _syncRow("Último ciclo válido", _formatStatusTime(s.last_cycle_ok_at || s.last_success));
-  rows += _syncRow("Último dado", _formatStatusTime(s.last_data_at));
-  if (s.coverage && Object.keys(s.coverage).length) {
-    const coverage = Object.entries(s.coverage).map(([key, value]) => `${_esc(key.replaceAll("_", " "))}: ${_esc(value)}`).join(" · ");
-    rows += _syncRow("Cobertura", coverage);
-  }
-  rows += _syncRow("Próximo ciclo", _nextCycleText(s));
-  if (s.error || (["partial", "error", "auth_required"].includes(s.state) && s.cause)) {
-    rows += _syncRow("Diagnóstico", `<span class="sync-err">${_esc(s.error || s.cause)}</span>`);
-  }
-  return `<div class="sync-section"><div class="sync-section-title">${title}</div>${rows}</div>`;
+  const last = _parseUtc(s.last_data_at || s.last_cycle_ok_at || s.last_success);
+  const parts = [info.label];
+  if (last) parts.push(_agoLabel(last));
+  if (isVip && s.vips_total) parts.push(`${s.vips_with_data}/${s.vips_total} VIPs`);
+  const val = `<span class="sync-dot ${info.cls}"></span>` +
+    `<span${last ? ` title="${_esc(last.toLocaleString())}"` : ""}>${parts.join(" · ")}</span>`;
+  const hint = _syncHint(s);
+  const hintCls = ["error", "auth_required"].includes(s.state) ? "sync-hint err" : "sync-hint";
+  return _syncRow(title, val) + (hint ? `<div class="${hintCls}">${hint}</div>` : "");
 }
 
-function _formatStatusTime(iso) {
-  const date = _parseUtc(iso);
-  return date ? `${date.toLocaleString()} (${_agoLabel(date)})` : "—";
-}
-
-function _syncSessionSection(sess) {
+function _syncSessionLine(sess) {
   if (!sess) return "";
-  const region = sess.region ? _esc(sess.region) : "—";
   const needsAuth = !!sess.needs_interactive;
-  const monitoring = _stateInfo(sess.monitoring?.state || (needsAuth ? "auth_required" : "idle"));
-  const trace = _stateInfo(sess.trace?.state || (needsAuth ? "auth_required" : "idle"));
-  let html = `<div class="sync-section"><div class="sync-section-title">Sessão</div>` +
-    _syncRow("Região", region) +
-    _syncRow("Monitoring/Alarmes", `<span class="sync-dot ${monitoring.cls}"></span>${monitoring.label}`) +
-    _syncRow("Trace", `<span class="sync-dot ${trace.cls}"></span>${trace.label}`);
+  const info = _stateInfo(needsAuth ? "auth_required" : "ok");
+  const label = needsAuth ? "Reautenticação necessária" : "Ativa";
+  let html = _syncRow("Sessão", `<span class="sync-dot ${info.cls}"></span>${label}`);
   if (needsAuth) {
     html += `<div class="sync-reauth-wrap"><button class="btn btn-primary sync-reauth">Reconectar sessão</button></div>`;
   }
-  return html + `</div>`;
+  return html;
 }
 
 function _renderSyncModal(st) {
   const body = document.getElementById("sync-modal-body");
   if (!body) return;
   body.innerHTML =
-    _syncSection("KPI (sites)", st.kpi, false) +
-    _syncSection("VIPs (rastreamento)", st.vip, true) +
-    (st.alarms ? _syncSection("Alarmes", st.alarms, false) : "") +
-    _syncSessionSection(st.session);
+    `<div class="sync-section">` +
+    _syncLine("Sites (KPI)", st.kpi, false) +
+    _syncLine("VIPs", st.vip, true) +
+    (st.alarms ? _syncLine("Alarmes", st.alarms, false) : "") +
+    _syncSessionLine(st.session) +
+    `</div>` +
+    `<button class="btn sync-logs">Ver logs técnicos</button>`;
 }
 
 // ── Init ──────────────────────────────────────────────────────────
