@@ -245,15 +245,12 @@ class BaseCollector(ABC):
     def _load_vips_by_task(self) -> dict:
         """Lê task_ids dos VIPs do banco filtrados pelo OSS do evento atual."""
         result = {}
-        try:
-            event_vips = db.get_event_vips(self.event_id)
-            for v in event_vips:
-                task_id = v.get("task_id")
-                name = v.get("name")
-                if task_id is not None and name:
-                    result[task_id] = name
-        except Exception as e:
-            logger.error(f"Erro ao carregar VIPs do evento {self.event_id}: {e}")
+        event_vips = db.get_event_vips(self.event_id)
+        for v in event_vips:
+            task_id = v.get("task_id")
+            name = v.get("name")
+            if task_id is not None and name:
+                result[task_id] = name
         return result
 
     def _cell_in_event(self, cell_id: str) -> bool:
@@ -2177,7 +2174,11 @@ class HttpCollector(BaseCollector):
         """Consome o Trace por ``filter-by-cols``, decodificando RSRP/RSRQ localmente."""
         from core.collection_result import CollectionDiagnostic
 
-        self.vips_by_task = self._load_vips_by_task()
+        try:
+            self.vips_by_task = self._load_vips_by_task()
+        except ValueError as error:
+            logger.error("Configuração de VIP bloqueada para evento %s: %s", self.event_id, error)
+            return CollectionResult.error(str(error), stage="configuration", code="configuration")
         if not self.vips_by_task:
             return CollectionResult.empty(
                 "Nenhum VIP com task configurada para coleta de Trace.",
@@ -2196,7 +2197,7 @@ class HttpCollector(BaseCollector):
                         task_id = int(raw_task_id)
                     except (TypeError, ValueError):
                         reason = f"Task inválida para VIP {vip_name}: {raw_task_id}"
-                        failures.append(("configuration", reason))
+                        failures.append(("configuration", reason, raw_task_id, vip_name))
                         self._log_vip_task(raw_task_id, vip_name, reason=reason)
                         continue
                     checkpoints = db.get_collection_checkpoints(
@@ -2207,7 +2208,7 @@ class HttpCollector(BaseCollector):
                         start_row = int(checkpoints.get("row") or 0)
                     except (TypeError, ValueError):
                         reason = f"Checkpoint inválido da task {task_id}"
-                        failures.append(("contract", reason))
+                        failures.append(("contract", reason, task_id, vip_name))
                         self._log_vip_task(task_id, vip_name, reason=reason)
                         continue
                     try:
@@ -2262,17 +2263,17 @@ class HttpCollector(BaseCollector):
                     except (requests.exceptions.ConnectTimeout, requests.exceptions.ConnectionError,
                             requests.exceptions.Timeout) as error:
                         reason = f"Task {task_id} sem conexão: {error}"
-                        failures.append(("network", reason))
+                        failures.append(("network", reason, task_id, vip_name))
                         self._log_vip_task(task_id, vip_name, reason=reason)
                         continue
                     except requests.exceptions.HTTPError as error:
                         reason = f"Task {task_id} retornou erro HTTP: {error}"
-                        failures.append(("http", reason))
+                        failures.append(("http", reason, task_id, vip_name))
                         self._log_vip_task(task_id, vip_name, reason=reason)
                         continue
                     except (ValueError, TypeError, KeyError, json.JSONDecodeError) as error:
                         reason = f"Task {task_id} inválida ou indisponível: {error}"
-                        failures.append(("contract", reason))
+                        failures.append(("contract", reason, task_id, vip_name))
                         self._log_vip_task(task_id, vip_name, reason=reason)
                         continue
                     all_rows.extend(rows)
@@ -2337,8 +2338,10 @@ class HttpCollector(BaseCollector):
             "undecoded_messages": sum(item["undecoded"] for item in task_details),
             "latest_serial": max((item["serial_final"] for item in task_details), default=None),
         }
-        for stage, message in failures:
-            diagnostics.append(CollectionDiagnostic(stage, message, "task_invalid"))
+        for stage, message, task_id, vip_name in failures:
+            diagnostics.append(CollectionDiagnostic(
+                stage, message, "task_invalid", {"task_id": task_id, "vip": vip_name}
+            ))
         # Um ciclo sem log foi o que escondeu a falha anterior: registre sempre o
         # resultado, inclusive quando ele é zero.
         logger.info(

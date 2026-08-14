@@ -287,3 +287,27 @@ sempre geram `invalid_formula`; o ciclo fica `partial` por isso mesmo com dados 
 **Estado das fases:** Fase 4 fechada em 14/08 — replay do dump real dá 464 recebidos, 0 não
 mapeados, 5.124 linhas. Fase 5 (contrato FARS assíncrono para VIP) segue pendente: em Curitiba
 `query/fetch-field-values` responde HTTP 500 em todo ciclo.
+
+---
+
+## 2026-08-14 — Fases 5 e 6: contrato FARS regional e saneamento seguro
+
+O FARS deve ser selecionado por capacidade do host e versão autenticada da sessão:
+
+- **síncrono (SP):** `fetch-field-values` + `filter-by-cols`;
+- **assíncrono (Curitiba/OUTRAS):** `fetch-field` + um `filter-by-cols-start`, seguido de polling
+  em `filter-by-cols-result`; `sort` e `result-paging` continuam síncronos nos dois OSS.
+
+A interface operacional mostra regional, host, contrato FARS detectado e a causa de cada task
+VIP que falhou. Não inferir o contrato pelo IP nem esconder falha de task numa causa agregada.
+
+O saneamento de checkpoints é deliberadamente em duas etapas: `tools/checkpoint_hygiene.py audit`
+gera relatório somente leitura; `apply` exige o arquivo, seu `confirmation_hash`, nenhum evento
+`ACTIVE` e cria backup SQLite validado por `integrity_check` antes de qualquer `DELETE`. Cada linha
+é revalidada por chave, cursor e `updated_at`; se mudou desde a auditoria, toda a transação sofre
+rollback. Nunca editar/apagar checkpoints diretamente em produção.
+
+Persistência de KPI, VIP, alarmes, alertas e checkpoints usa WAL, `busy_timeout=30000`, transações
+curtas e rollback explícito. `resolve_base_url` e `get_event_vips` falham fechado quando
+cliente/regional não estão resolvidos; não existe mais fallback silencioso para SP ou para toda a
+lista global de VIPs.

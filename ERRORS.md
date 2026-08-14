@@ -235,3 +235,24 @@ foi comprovado como bloqueio). Replay do dump real: 464 recebidos, 0 não mapead
 - **`received` só conta depois da conversão.** Um contador de "recebidos" posterior ao parse do
   identificador mostra 0 justamente quando o corpo veio cheio; `invalid` era o único número que
   crescia e não estava no painel.
+
+---
+
+## 2026-08-14 — Checkpoints cruzados e fallback SP podiam contaminar outra regional
+
+**Sintoma:** bancos de evento continham task VIP de SP sob `OUTRAS`, task PM de Curitiba sob `SP`
+e logs históricos de `database is locked`. Um evento sem cliente/regional também podia listar
+todos os VIPs ou resolver silenciosamente o host padrão de SP.
+
+**Causas:** estado legado contaminado não tinha auditoria baseada no inventário do evento; escritas
+em lote podiam lançar exceção antes do `commit` sem rollback explícito; `resolve_base_url` devolvia
+SP como último recurso; `get_event_vips` montava a consulta sem filtros quando a identidade faltava.
+
+**Correção:** auditoria somente leitura classifica incompatibilidade de evento, OSS, coletor e task.
+A aplicação exige hash do relatório, evento encerrado, backup consistente e correspondência exata
+da linha antes do `DELETE`. Escritas do caminho de coleta fazem rollback garantido. Resolução de
+host e VIPs agora falha fechado. O status expõe regional/host/contrato FARS e detalhes por task.
+
+**Regra:** uma lista vazia por configuração ausente não é sucesso operacional; não capturar a
+exceção e fingir “nenhum VIP configurado”. Uma limpeza reproduzível sempre parte de relatório
+imutável e backup, nunca de IDs digitados diretamente num `DELETE`.

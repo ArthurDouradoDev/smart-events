@@ -40,7 +40,9 @@ _DEFAULT_CLIENTES: dict[str, dict[str, str]] = {
     "Brisanet": {},
 }
 
-# base_url de último recurso quando não há catálogo nem base_url explícita no evento.
+# Mantida somente para compatibilidade de importações antigas. A resolução de
+# eventos não usa mais este valor: cair silenciosamente em SP pode coletar no OSS
+# errado quando cliente/regional estão incompletos.
 _DEFAULT_BASE_URL = "https://10.220.50.9:31943"
 
 
@@ -127,8 +129,11 @@ def _regionais_map(entry) -> dict:
 
 
 def resolve_base_url(oss: dict) -> str:
-    """Resolve a base_url do iManager a partir do bloco `oss` do evento.
-    Precedência: oss.base_url → catálogo[CLIENTE][REGIÃO] → _DEFAULT_BASE_URL."""
+    """Resolve a base_url por ``oss.base_url`` ou cliente/regional exatos.
+
+    A função falha fechado quando não existe uma correspondência. Assumir SP
+    para um evento incompleto pode enviar credenciais e checkpoints ao OSS errado.
+    """
     oss = oss or {}
     explicit = (oss.get("base_url") or "").strip()
     if explicit:
@@ -139,7 +144,11 @@ def resolve_base_url(oss: dict) -> str:
     for rk, url in regionais.items():
         if rk.upper() == region and url:
             return url.rstrip("/")
-    return _DEFAULT_BASE_URL
+    identity = f"cliente='{cliente or 'N/D'}' regional='{region or 'N/D'}'"
+    raise ValueError(
+        f"OSS sem base_url configurada para {identity}. "
+        "Cadastre a regional em data/clientes.json ou informe oss.base_url."
+    )
 
 
 def clientes_summary() -> dict:

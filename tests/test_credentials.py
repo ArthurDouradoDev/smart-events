@@ -45,7 +45,8 @@ def test_catalogo_rico_resolve_e_summary(tmp_path, monkeypatch):
 
 # ── Catálogo / base_url ──────────────────────────────────────────────
 
-def test_resolve_base_url_pelo_catalogo():
+def test_resolve_base_url_pelo_catalogo(monkeypatch):
+    monkeypatch.setattr(credentials, "load_clientes", lambda: credentials._DEFAULT_CLIENTES)
     assert credentials.resolve_base_url({"cliente": "TIM", "region": "SP"}) == "https://10.220.50.9:31943"
     assert credentials.resolve_base_url({"cliente": "TIM", "region": "RJ"}) == "https://10.220.30.9:31943"
 
@@ -55,8 +56,14 @@ def test_resolve_base_url_override_explicito():
     assert credentials.resolve_base_url(oss) == "https://1.2.3.4:9999"
 
 
-def test_resolve_base_url_desconhecido_cai_no_default():
-    assert credentials.resolve_base_url({"cliente": "X", "region": "ZZ"}) == credentials._DEFAULT_BASE_URL
+def test_resolve_base_url_desconhecido_falha_fechado():
+    with pytest.raises(ValueError, match="sem base_url configurada"):
+        credentials.resolve_base_url({"cliente": "X", "region": "ZZ"})
+
+
+def test_resolve_base_url_sem_identidade_nao_presume_sp():
+    with pytest.raises(ValueError, match="cliente='N/D'.*regional='N/D'"):
+        credentials.resolve_base_url({})
 
 
 # ── Precedência das credenciais ──────────────────────────────────────
@@ -167,6 +174,16 @@ def test_get_event_vips_inclui_legados_sem_cliente(tmp_db, sample_event):
 
     names = sorted(v["name"] for v in database.get_event_vips("e-rj"))
     assert names == ["Legado", "TimVip"]
+
+
+def test_get_event_vips_bloqueia_evento_sem_cliente(tmp_db, sample_event):
+    import core.database as database
+    ev = {**sample_event, "id": "sem-identidade", "oss": {"region": "SP"}}
+    database.save_event(ev)
+    database.save_vip({"id": "vip-sp", "name": "VIP SP", "oss": "SP"})
+
+    with pytest.raises(ValueError, match="consulta de VIPs foi bloqueada"):
+        database.get_event_vips(ev["id"])
 
 
 def test_activate_event_mock_nao_pede_credenciais(tmp_db, monkeypatch, tmp_creds, sample_event):

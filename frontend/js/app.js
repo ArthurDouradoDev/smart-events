@@ -990,6 +990,24 @@ function _syncSessionLine(sess) {
   return _syncRow("Sessão", `<span class="sync-dot ${info.cls}"></span>${label}`);
 }
 
+function _syncOperationalContext(sess) {
+  if (!sess) return "";
+  const contract = sess.fars_contract === "assincrono" ? "Assíncrono" :
+    (sess.fars_contract === "sincrono" ? "Síncrono" : "A detectar");
+  return _syncRow("Regional ativa", _esc(sess.region || "Não resolvida")) +
+    _syncRow("Host OSS", _esc(sess.host || "Não resolvido")) +
+    _syncRow("Contrato FARS", contract);
+}
+
+function _syncTaskCauses(vip) {
+  const causes = vip?.task_causes || [];
+  if (!causes.length) return "";
+  return causes.map(item => {
+    const label = `Task ${item.task_id}${item.vip ? ` · ${_esc(item.vip)}` : ""}`;
+    return _syncRow(label, `<span class="sync-hint err">${_esc(item.cause || "Falha não classificada")}</span>`);
+  }).join("");
+}
+
 function _renderSyncModal(st) {
   const body = document.getElementById("sync-modal-body");
   if (!body) return;
@@ -998,8 +1016,10 @@ function _renderSyncModal(st) {
     _syncLine("Sites (KPI)", st.kpi, false) +
     _syncCoverageLine(st.kpi) +
     _syncLine("VIPs", st.vip, true) +
+    _syncTaskCauses(st.vip) +
     (st.alarms ? _syncLine("Alarmes", st.alarms, false) : "") +
     _syncSessionLine(st.session) +
+    _syncOperationalContext(st.session) +
     `</div>` +
     `<button class="btn sync-logs">Ver logs técnicos</button>`;
 }

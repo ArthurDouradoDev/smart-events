@@ -535,7 +535,7 @@ multi-regional completa deve estar operacional.
 
 ---
 
-## Fase 6 — Endurecimento, saneamento e rollout
+## Fase 6 — Endurecimento, saneamento e rollout — IMPLEMENTADA EM 14/08
 
 ### Objetivo
 
@@ -559,6 +559,21 @@ funcionando.
 - remover fallback silencioso de `resolve_base_url` para SP;
 - exibir na interface regional/host ativo, contrato FARS selecionado e causa por task;
 - atualizar `MEMORY.md` e `ERRORS.md` com os dois contratos regionais.
+
+### Resultado da implementação (14/08)
+
+- WAL, `busy_timeout=30000`, transações curtas e rollback explícito cobrem o caminho de escrita de
+  KPIs, VIPs, alarmes, alertas e checkpoints;
+- `resolve_base_url` não assume mais SP e `get_event_vips` não abre mais o catálogo inteiro quando
+  cliente/regional faltam;
+- o painel operacional mostra regional, host, contrato FARS e causa por task VIP;
+- `tools/checkpoint_hygiene.py audit` produz relatório somente leitura; `apply` exige hash exato,
+  nenhum evento `ACTIVE`, backup via API SQLite com `integrity_check` e revalidação de cada linha;
+- auditoria real: **123 checkpoints inválidos**, todos no banco de Curitiba (117 PM 2225 sob `SP`,
+  2 VIP 2073 sob `SP` e 4 VIP 2072/2073 sob `OUTRAS`), zero no banco de Santo Amaro e zero itens de
+  revisão manual;
+- a tentativa de aplicação foi corretamente bloqueada porque havia evento `ACTIVE`; nenhuma linha
+  foi removida. O mesmo relatório/hash deve ser aplicado após o operador encerrar a coleta ativa.
 
 ### Validação final
 

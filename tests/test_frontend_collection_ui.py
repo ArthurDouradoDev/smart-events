@@ -45,8 +45,14 @@ def test_collection_modal_renders_all_operational_states(scenario, label, css):
             assert page.locator("#sync-modal-body").get_by_text(label).count() >= 1
             assert page.locator(f".sync-dot.{css}").count() >= 1
             assert page.locator("#sync-modal-body").get_by_text("Cobertura").count() == 1
+            assert page.locator("#sync-modal-body").get_by_text("Regional ativa").count() == 1
+            assert page.locator("#sync-modal-body").get_by_text("10.220.50.9").count() == 1
+            assert page.locator("#sync-modal-body").get_by_text("Síncrono").count() == 1
             if scenario == "partial":
                 assert page.locator("#sync-modal-body").get_by_text("18NLCTAL01GI").count() == 1
+            if scenario == "error":
+                assert page.locator("#sync-modal-body").get_by_text("Task 2072").count() == 1
+                assert page.locator("#sync-modal-body").get_by_text("Task recusada pelo OSS").count() == 1
             browser.close()
     except Exception as exc:
         if "Executable doesn't exist" in str(exc):

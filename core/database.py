@@ -176,11 +176,13 @@ def get_event_conn(event_id: str) -> sqlite3.Connection:
         conn = sqlite3.connect(str(db_path), timeout=30, check_same_thread=False)
         conn.row_factory = sqlite3.Row
         conn.execute("PRAGMA busy_timeout=30000")
+        conn.execute("PRAGMA foreign_keys=ON")
         resolved_path = db_path.resolve()
         with _db_init_lock:
             if resolved_path not in _initialized_event_dbs:
                 try:
                     conn.execute("PRAGMA journal_mode=WAL")
+                    conn.execute("PRAGMA synchronous=NORMAL")
                     init_event_db(conn)
                 except Exception:
                     conn.rollback()
@@ -201,6 +203,7 @@ def get_conn() -> sqlite3.Connection:
         with _db_init_lock:
             if resolved_path not in _initialized_global_dbs:
                 _local.conn.execute("PRAGMA journal_mode=WAL")
+                _local.conn.execute("PRAGMA synchronous=NORMAL")
                 _initialized_global_dbs.add(resolved_path)
         _local.conn.execute("PRAGMA foreign_keys=ON")
     return _local.conn
@@ -569,13 +572,17 @@ def insert_kpi_batch(measurements: List[dict]):
     conn = get_event_conn(event_id)
     rows = [{**item, "scope": item.get("scope", "CELL"), "technology": item.get("technology", "")} for item in measurements]
     before = conn.total_changes
-    conn.executemany("""
-        INSERT INTO kpi_measurements
-            (site_id, cell_id, event_id, timestamp, metric, value, scope, technology)
-        VALUES (:site_id, :cell_id, :event_id, :timestamp, :metric, :value, :scope, :technology)
-        ON CONFLICT(event_id, site_id, cell_id, timestamp, metric, scope, technology) DO NOTHING
-    """, rows)
-    conn.commit()
+    try:
+        conn.executemany("""
+            INSERT INTO kpi_measurements
+                (site_id, cell_id, event_id, timestamp, metric, value, scope, technology)
+            VALUES (:site_id, :cell_id, :event_id, :timestamp, :metric, :value, :scope, :technology)
+            ON CONFLICT(event_id, site_id, cell_id, timestamp, metric, scope, technology) DO NOTHING
+        """, rows)
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
     inserted = conn.total_changes - before
     return {"inserted": inserted, "duplicate": len(rows) - inserted}
 
@@ -613,13 +620,19 @@ def save_collection_checkpoints(event_id: str, cursors: dict, collector: str = "
         if task_id is None or cursor is None:
             continue
         rows.append((event_id, oss or "", collector, str(task_id), str(object_key or ""), str(cursor), now))
-    conn.executemany("""
-        INSERT INTO collection_checkpoints(event_id, oss, collector, task_id, object_key, cursor, updated_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?)
-        ON CONFLICT(event_id, oss, collector, task_id, object_key)
-        DO UPDATE SET cursor = excluded.cursor, updated_at = excluded.updated_at
-    """, rows)
-    conn.commit()
+    if not rows:
+        return
+    try:
+        conn.executemany("""
+            INSERT INTO collection_checkpoints(event_id, oss, collector, task_id, object_key, cursor, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(event_id, oss, collector, task_id, object_key)
+            DO UPDATE SET cursor = excluded.cursor, updated_at = excluded.updated_at
+        """, rows)
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
 
 
 def get_kpi_series(
@@ -806,12 +819,16 @@ def insert_vip_batch(measurements: List[dict]):
     rows = [{**item, "task_id": item.get("task_id"), "serial_no": item.get("serial_no")}
             for item in measurements]
     before = conn.total_changes
-    conn.executemany("""
-        INSERT OR IGNORE INTO vip_measurements
-            (vip_name, event_id, task_id, serial_no, timestamp, serving_cell, rsrp, rsrq, in_event)
-        VALUES (:vip_name, :event_id, :task_id, :serial_no, :timestamp, :serving_cell, :rsrp, :rsrq, :in_event)
-    """, rows)
-    conn.commit()
+    try:
+        conn.executemany("""
+            INSERT OR IGNORE INTO vip_measurements
+                (vip_name, event_id, task_id, serial_no, timestamp, serving_cell, rsrp, rsrq, in_event)
+            VALUES (:vip_name, :event_id, :task_id, :serial_no, :timestamp, :serving_cell, :rsrp, :rsrq, :in_event)
+        """, rows)
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
     inserted = conn.total_changes - before
     return {"inserted": inserted, "duplicate": len(rows) - inserted}
 
@@ -888,14 +905,18 @@ def insert_alarms_batch(measurements: List[dict]):
         return
     event_id = measurements[0]["event_id"]
     conn = get_event_conn(event_id)
-    conn.executemany("""
-        INSERT OR IGNORE INTO alarms
-            (csn, event_id, alarm_id, alarm_group_id, alarm_name, severity,
-             source, ip, location, occur_time, arrive_time, additional_info, collected_at)
-        VALUES (:csn, :event_id, :alarm_id, :alarm_group_id, :alarm_name, :severity,
-                :source, :ip, :location, :occur_time, :arrive_time, :additional_info, :collected_at)
-    """, measurements)
-    conn.commit()
+    try:
+        conn.executemany("""
+            INSERT OR IGNORE INTO alarms
+                (csn, event_id, alarm_id, alarm_group_id, alarm_name, severity,
+                 source, ip, location, occur_time, arrive_time, additional_info, collected_at)
+            VALUES (:csn, :event_id, :alarm_id, :alarm_group_id, :alarm_name, :severity,
+                    :source, :ip, :location, :occur_time, :arrive_time, :additional_info, :collected_at)
+        """, measurements)
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
 
 
 def get_alarms(event_id: str, timestamp: Optional[str] = None, limit: int = 500) -> List[dict]:
@@ -926,12 +947,16 @@ def get_alarms(event_id: str, timestamp: Optional[str] = None, limit: int = 500)
 def insert_alert(alert: dict) -> int:
     event_id = alert["event_id"]
     conn = get_event_conn(event_id)
-    cur = conn.execute("""
-        INSERT INTO alerts
-            (event_id, level, severity, site_id, cell_id, message, timestamp)
-        VALUES (:event_id, :level, :severity, :site_id, :cell_id, :message, :timestamp)
-    """, alert)
-    conn.commit()
+    try:
+        cur = conn.execute("""
+            INSERT INTO alerts
+                (event_id, level, severity, site_id, cell_id, message, timestamp)
+            VALUES (:event_id, :level, :severity, :site_id, :cell_id, :message, :timestamp)
+        """, alert)
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
     return cur.lastrowid
 
 
@@ -954,25 +979,37 @@ def get_active_alerts(event_id: str, max_timestamp: Optional[str] = None) -> Lis
 
 def acknowledge_alert(event_id: str, alert_id: int):
     conn = get_event_conn(event_id)
-    conn.execute(
-        "UPDATE alerts SET acknowledged = 1 WHERE id = ?", (alert_id,)
-    )
-    conn.commit()
+    try:
+        conn.execute(
+            "UPDATE alerts SET acknowledged = 1 WHERE id = ?", (alert_id,)
+        )
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
 
 
 def acknowledge_all_alerts(event_id: str):
     conn = get_event_conn(event_id)
-    conn.execute(
-        "UPDATE alerts SET acknowledged = 1 WHERE event_id = ? AND acknowledged = 0", (event_id,)
-    )
-    conn.commit()
+    try:
+        conn.execute(
+            "UPDATE alerts SET acknowledged = 1 WHERE event_id = ? AND acknowledged = 0", (event_id,)
+        )
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
 
 
 def delete_all_alerts(event_id: str):
     """Exclui todos os alertas do evento do banco de dados."""
     conn = get_event_conn(event_id)
-    conn.execute("DELETE FROM alerts WHERE event_id = ?", (event_id,))
-    conn.commit()
+    try:
+        conn.execute("DELETE FROM alerts WHERE event_id = ?", (event_id,))
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
 
 
 def get_all_alerts(event_id: str) -> List[dict]:
@@ -1260,32 +1297,32 @@ def unassign_vip_from_event(event_id: str, vip_id: str):
 
 
 def get_event_vips(event_id: str) -> List[dict]:
-    """Retorna os VIPs (cadastro global) filtrados pelo cliente + regional (OSS) do evento atual."""
+    """Retorna VIPs filtrados pelo cliente + regional, sempre em modo fechado.
+
+    Um evento inexistente ou sem ambas as dimensões nunca pode cair na listagem
+    global: isso faria uma coleta usar tasks de outro cliente/OSS.
+    """
     conn = get_conn()
 
     # Busca cliente e regional/OSS do evento
-    oss = None
-    cliente = None
     event = get_event(event_id)
-    if event and isinstance(event.get("oss"), dict):
-        oss = event["oss"].get("region")
-        cliente = event["oss"].get("cliente")
+    identity = event.get("oss") if event and isinstance(event.get("oss"), dict) else {}
+    oss = (identity.get("region") or "").strip().upper()
+    cliente = (identity.get("cliente") or "").strip()
+    if not event or not oss or not cliente:
+        raise ValueError(
+            f"Evento '{event_id}' sem cliente/regional resolvidos; "
+            "a consulta de VIPs foi bloqueada para evitar tasks cruzadas."
+        )
 
-    clauses, params = [], []
-    if oss:
-        clauses.append("oss = ?")
-        params.append(oss)
-    if cliente:
-        # Compatível com VIPs legados sem cliente (cliente NULL/''): eles ainda aparecem;
-        # só excluímos VIPs marcados com um cliente DIFERENTE.
-        clauses.append("(cliente = ? OR cliente IS NULL OR cliente = '')")
-        params.append(cliente)
-
-    if clauses:
-        sql = f"SELECT * FROM vips WHERE {' AND '.join(clauses)} ORDER BY name"
-        vips = conn.execute(sql, params).fetchall()
-    else:
-        vips = conn.execute("SELECT * FROM vips ORDER BY name").fetchall()
+    # VIPs legados sem cliente continuam compatíveis dentro da regional exata;
+    # um cliente explicitamente diferente é sempre excluído.
+    vips = conn.execute("""
+        SELECT * FROM vips
+        WHERE UPPER(COALESCE(oss, '')) = ?
+          AND (cliente = ? OR cliente IS NULL OR cliente = '')
+        ORDER BY name
+    """, (oss, cliente)).fetchall()
 
     return [dict(v) for v in vips]
 

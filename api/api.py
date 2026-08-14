@@ -93,12 +93,18 @@ class Api:
                 cliente = (oss.get("cliente") or "").strip()
                 region = (oss.get("region") or "").strip().upper()
                 if not credentials.has_credentials(cliente, region):
+                    try:
+                        base_url = credentials.resolve_base_url(oss)
+                    except ValueError:
+                        # Evento legado ainda precisa do modal para o operador escolher
+                        # o cliente. Nenhum host é presumido enquanto essa identidade falta.
+                        base_url = ""
                     return {
                         "ok": False,
                         "needs_credentials": True,
                         "cliente": cliente,
                         "region": region,
-                        "base_url": credentials.resolve_base_url(oss),
+                        "base_url": base_url,
                     }
 
             with _activation_lock:
@@ -308,7 +314,7 @@ class Api:
         """Verifica a conexão com a VPN pingando o IP do OSS do evento ativo.
 
         Resolve o alvo na mesma ordem de precedência de build_collector()
-        (oss.base_url → mapa regional → fallback SP) e confirma a conectividade
+        (oss.base_url → mapa regional exato) e confirma a conectividade
         pela presença de "TTL=" no retorno do ping nativo do Windows.
         """
         try:
@@ -316,7 +322,9 @@ class Api:
             oss = (_active_event or {}).get("oss", {}) if _active_event else {}
 
             base_url = credentials.resolve_base_url(oss)
-            target = urlparse(base_url).hostname or urlparse(credentials._DEFAULT_BASE_URL).hostname
+            target = urlparse(base_url).hostname
+            if not target:
+                raise ValueError("base_url do OSS não contém um host válido")
 
             flags = subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0
             result = subprocess.run(
@@ -1154,7 +1162,10 @@ class Api:
         try:
             status = scheduler.get_status()
             coll = scheduler._collector
-            region = getattr(coll, "_region", "") or ""
+            active_oss = (_active_event or {}).get("oss", {}) if _active_event else {}
+            region = getattr(coll, "_region", "") or active_oss.get("region", "") or ""
+            host = getattr(coll, "_session_host", "") or ""
+            fars_contract = None
             needs_interactive = False
             interactive_modules = set()
             try:
@@ -1162,10 +1173,21 @@ class Api:
                 if isinstance(coll, HttpCollector):
                     interactive_modules = HttpCollector.interactive_modules_for(coll.base_url)
                     needs_interactive = bool(interactive_modules)
+                    fars_contract = coll._trace_contract()
             except Exception:
                 pass
             kpi = status.get("kpi", {"state": "idle"})
-            vip = status.get("vip", {"state": "idle"})
+            vip = dict(status.get("vip", {"state": "idle"}))
+            vip["task_causes"] = [
+                {
+                    "task_id": item.get("details", {}).get("task_id"),
+                    "vip": item.get("details", {}).get("vip"),
+                    "cause": item.get("message") or vip.get("cause"),
+                    "code": item.get("code"),
+                }
+                for item in vip.get("diagnostics", [])
+                if item.get("details", {}).get("task_id") is not None
+            ]
             alarms = status.get("alarms", {"state": "idle"})
 
             def module_state(names, fallback):
@@ -1193,6 +1215,8 @@ class Api:
                 "session":    {
                     "needs_interactive": needs_interactive,
                     "region": region,
+                    "host": host,
+                    "fars_contract": fars_contract,
                     "monitoring": {"state": monitoring_state},
                     "trace": {"state": trace_state},
                 },

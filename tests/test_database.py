@@ -130,6 +130,20 @@ class TestKpiMeasurements:
         latest = database.get_latest_kpi(sample_event["id"])
         assert latest == []
 
+    def test_batch_invalido_faz_rollback_integral(self, event_in_db, sample_event):
+        valid = self._make_kpi(sample_event["id"], "SITE", "CELL-1", "availability", 99.0)
+        invalid = self._make_kpi(sample_event["id"], "SITE", None, "availability", 98.0)
+
+        with pytest.raises(Exception):
+            database.insert_kpi_batch([valid, invalid])
+
+        conn = database.get_event_conn(sample_event["id"])
+        count = conn.execute(
+            "SELECT COUNT(*) FROM kpi_measurements WHERE site_id='SITE'"
+        ).fetchone()[0]
+        assert count == 0
+        assert conn.in_transaction is False
+
 
 # ── VIP Measurements ─────────────────────────────────────────────────
 

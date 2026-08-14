@@ -173,6 +173,8 @@ class TestApiCollectionStatus:
         assert "kpi" in status
         assert "vip" in status
         assert "overall_state" in status
+        assert {"region", "host", "fars_contract"} <= set(status["session"])
+        assert "task_causes" in status["vip"]
 
     def test_collection_status_ok_is_local_envelope_not_health(self, api, monkeypatch):
         from core import scheduler as sched_module

@@ -110,7 +110,7 @@ def sample_event():
             "utilization_critical": 95.0,
             "availability_critical": 95.0,
         },
-        "oss": {"base_url": "", "region": "SP", "import_folder": ""},
+        "oss": {"cliente": "TIM", "base_url": "", "region": "SP", "import_folder": ""},
     }
 
 
