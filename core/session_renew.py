@@ -117,33 +117,82 @@ def _is_auth_response(status: int, content_type: str, body: str, url: str = "") 
     return True
 
 
-def _probe_authenticated(page, base_url: str, module: str, session_data: dict) -> bool:
-    """Bate em um endpoint REST com os cookies VIVOS do navegador (page.request
-    compartilha o cookie store do contexto) para confirmar que a sessão está de
-    fato autenticada, e não presa no SSO/CAPTCHA. Retorna True só se autenticada."""
-    roarand = session_data["trace"].get("roarand") or session_data["monitoring"].get("roarand")
-    headers = {"roarand": roarand} if roarand else {}
-    # Cookies são compartilhados entre os módulos (mesmo bspsession), então uma
-    # única sonda confirma a autenticação para 'trace', 'monitoring' ou 'both'.
-    task_id = session_data["trace"].get("task_id") or session_data["monitoring"].get("task_id") or 1
-    nocache = int(time.time() * 1000)
-    probe_url = (f"{base_url}/rest/oss/access/fars/v1/traceresult/pre-check"
-                 f"?taskId={task_id}&queryType=0&nocache={nocache}")
-    try:
-        resp = page.request.get(probe_url, headers=headers, timeout=30000)
-        url = resp.url
-        try:
-            ctype = resp.headers.get("content-type", "")
-        except Exception:
-            ctype = ""
-        try:
-            body = resp.text()
-        except Exception:
-            body = ""
-        return _is_auth_response(resp.status, ctype, body, url)
-    except Exception as e:
-        logger.warning(f"Sonda de autenticação falhou: {e}")
+def _requested_modules(module: str) -> tuple[str, ...]:
+    if module == "both":
+        return "monitoring", "trace"
+    if module in ("monitoring", "trace"):
+        return (module,)
+    raise ValueError(f"Módulo desconhecido: {module}")
+
+
+def _valid_probe_contract(module: str, payload) -> bool:
+    if not isinstance(payload, dict):
         return False
+    if module == "monitoring":
+        return payload.get("success") is True and isinstance(payload.get("data"), list)
+    return isinstance(payload.get("checkState"), bool)
+
+
+def _probe_authenticated(page, base_url: str, module: str, session_data: dict) -> bool:
+    """Confirma cada módulo no seu próprio contrato autenticado.
+
+    ``page.request`` compartilha os cookies vivos do contexto, mas Monitoring e
+    Trace podem aceitar/rejeitar a mesma sessão de formas diferentes. Por isso
+    ``both`` executa duas sondas e somente retorna sucesso se ambas entregarem
+    HTTP 200 com o envelope JSON esperado.
+    """
+    for requested in _requested_modules(module):
+        module_data = session_data.get(requested, {}) or {}
+        roarand = module_data.get("roarand")
+        if not roarand:
+            logger.warning("[renew/%s] probe recusado: roarand ausente.", requested)
+            return False
+        headers = {"roarand": roarand}
+        nocache = int(time.time() * 1000)
+        if requested == "monitoring":
+            probe_url = (
+                f"{base_url}/rest/oss/access/pm/v1/monitor/task/view-tree"
+                f"?nocache={nocache}"
+            )
+        else:
+            task_id = module_data.get("task_id") or 1
+            probe_url = (
+                f"{base_url}/rest/oss/access/fars/v1/traceresult/pre-check"
+                f"?taskId={task_id}&queryType=0&nocache={nocache}"
+            )
+        try:
+            resp = page.request.get(probe_url, headers=headers, timeout=30000)
+            try:
+                content_type = resp.headers.get("content-type", "")
+            except Exception:
+                content_type = ""
+            try:
+                body = resp.text()
+            except Exception:
+                body = ""
+            if (
+                resp.status != 200
+                or not _is_auth_response(resp.status, content_type, body, resp.url)
+                or "json" not in (content_type or "").lower()
+            ):
+                logger.warning(
+                    "[renew/%s] probe recusado: HTTP %s content-type=%r.",
+                    requested, resp.status, content_type,
+                )
+                return False
+            try:
+                payload = json.loads(body)
+            except (TypeError, ValueError):
+                logger.warning("[renew/%s] probe recusado: JSON inválido.", requested)
+                return False
+            if not _valid_probe_contract(requested, payload):
+                logger.warning("[renew/%s] probe recusado: contrato JSON inesperado.", requested)
+                return False
+            logger.info("[renew/%s] probe aceito.", requested)
+        except Exception as error:
+            logger.warning("[renew/%s] probe recusado: %s", requested, error)
+            return False
+    return True
 
 
 def run(headless: bool = True, module: str = "both",
@@ -199,6 +248,7 @@ def run(headless: bool = True, module: str = "both",
     session_data["monitoring"].setdefault("tasks", [])
     reset_sections = ("trace", "monitoring") if module == "both" else (module,)
     for section in reset_sections:
+        session_data[section]["bspsession"] = None
         session_data[section]["task_id"] = None
         session_data[section]["roarand"] = None
         session_data[section]["cookies"] = []
@@ -275,22 +325,46 @@ def run(headless: bool = True, module: str = "both",
         page = context.pages[0] if context.pages else context.new_page()
         page.on("request", monitor_requests)
 
+        def _capture_requested_roarand_from_storage():
+            """Copia o token do browser apenas para os módulos desta renovação."""
+            try:
+                storage_roarand = page.evaluate("sessionStorage.getItem('u2020Showedrand')")
+            except Exception:
+                return
+            if storage_roarand:
+                for requested in _requested_modules(module):
+                    session_data[requested]["roarand"] = (
+                        session_data[requested].get("roarand") or storage_roarand
+                    )
+
         # 1. Login — preenche as credenciais. O CAPTCHA (código exibido em imagem)
         #    NÃO pode ser resolvido automaticamente: em headless o login não conclui
         #    e retornamos EXIT_NEEDS_INTERACTIVE; em modo visível o operador digita o
         #    CAPTCHA (e ajusta usuário/senha por regional, se preciso) e conclui o login.
         already_auth = False
+        profile_probe_accepted = False
+        interactive_probe_accepted = False
         try:
             # 'domcontentloaded' (não 'load'): a página de login do iManager é uma SPA
             # pesada que frequentemente não dispara o evento 'load' dentro de 30s
             # (sub-recursos/long-polling pendentes), causando timeout antes mesmo de
             # exibir o formulário. O formulário (#username) já existe no DOM inicial.
             page.goto(login_url, timeout=60000, wait_until="domcontentloaded")
+            _capture_requested_roarand_from_storage()
             # Com perfil persistente a sessão pode já estar autenticada (SSO redireciona
             # para o app e o formulário nem aparece). Nesse caso, pula o login.
-            if not _still_on_login(page) and _probe_authenticated(page, base_url, module, session_data):
-                logger.info("Sessão do perfil persistente já autenticada — pulando login.")
+            if not _still_on_login(page):
                 already_auth = True
+                profile_probe_accepted = _probe_authenticated(
+                    page, base_url, module, session_data
+                )
+                if profile_probe_accepted:
+                    logger.info("Sessão do perfil persistente autenticada — pulando login.")
+                else:
+                    logger.info(
+                        "Perfil persistente fora da tela de login, mas probe recusado; "
+                        "navegando no módulo para recapturar a sessão."
+                    )
             else:
                 page.wait_for_selector("#username", timeout=15000)
                 page.fill("#username", username)
@@ -346,13 +420,7 @@ def run(headless: bool = True, module: str = "both",
                 if not _alive():
                     break
                 # Garante um roarand para a sonda (CSRF), via sessionStorage, se ainda não houver.
-                try:
-                    sr = page.evaluate("sessionStorage.getItem('u2020Showedrand')")
-                    if sr:
-                        for _m in ("trace", "monitoring"):
-                            session_data[_m]["roarand"] = session_data[_m].get("roarand") or sr
-                except Exception:
-                    pass
+                _capture_requested_roarand_from_storage()
                 # Concluído quando a sonda REST autentica (verdade-base, independente
                 # de heurística de URL/DOM — que é justamente o que falhava antes).
                 if _probe_authenticated(page, base_url, module, session_data):
@@ -369,6 +437,7 @@ def run(headless: bool = True, module: str = "both",
                 except Exception:
                     pass
                 return EXIT_NEEDS_INTERACTIVE
+            interactive_probe_accepted = True
             page.wait_for_timeout(2000)
 
         # Caminho RÁPIDO: na reauth do operador (janela visível) ou quando o perfil
@@ -377,11 +446,13 @@ def run(headless: bool = True, module: str = "both",
         # já tivermos capturado o roarand (anti-CSRF) com sucesso. Caso contrário,
         # precisamos ir para os módulos PM/Trace para que os requests de inicialização
         # do iManager disparem o cabeçalho 'roarand' e nós possamos capturá-lo.
-        has_roarand = (
-            session_data["trace"].get("roarand") is not None
-            and session_data["monitoring"].get("roarand") is not None
+        has_roarand = all(
+            session_data[requested].get("roarand") is not None
+            for requested in _requested_modules(module)
         )
-        fast_capture = (already_auth or not headless) and has_roarand
+        fast_capture = (
+            profile_probe_accepted or interactive_probe_accepted
+        ) and has_roarand
 
         # 2-3. Navegação por Performance Monitor / Signaling Trace — apenas quando
         # não pudermos fazer a captura rápida (por exemplo, no login headless limpo ou
@@ -435,11 +506,7 @@ def run(headless: bool = True, module: str = "both",
         # (monitor_requests). Só usa o sessionStorage como fallback quando o header
         # não foi observado — evita enviar um CSRF que o backend REST rejeita.
         try:
-            showedrand = page.evaluate("sessionStorage.getItem('u2020Showedrand')")
-            if showedrand:
-                for _m in ("trace", "monitoring"):
-                    if not session_data[_m].get("roarand"):
-                        session_data[_m]["roarand"] = showedrand
+            _capture_requested_roarand_from_storage()
         except Exception as e:
             logger.warning(f"Não foi possível ler token do sessionStorage: {e}")
 
@@ -468,10 +535,11 @@ def run(headless: bool = True, module: str = "both",
 
         # ── Verificação de autenticação real ────────────────────────────
         # Sem tokens não há nem o que validar.
-        tokens_present = (
-            session_data["trace"]["bspsession"] is not None
-            and (session_data["trace"]["roarand"] is not None
-                 or session_data["monitoring"]["roarand"] is not None)
+        tokens_present = all(
+            bool(session_data[requested].get("cookies"))
+            and session_data[requested].get("bspsession") is not None
+            and session_data[requested].get("roarand") is not None
+            for requested in _requested_modules(module)
         )
         if not tokens_present:
             logger.error("Nenhuma sessão ou token pôde ser capturado.")

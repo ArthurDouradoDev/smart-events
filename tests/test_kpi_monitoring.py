@@ -1,3 +1,8 @@
+import json
+import re
+from functools import lru_cache
+from pathlib import Path
+
 from core.collector import HttpCollector
 from core import database as db
 
@@ -23,6 +28,42 @@ _COUNTERS_4G = {
     "L.RRC.ConnReq.Succ": 10, "L.RRC.ConnReq.Att": 10, "L.E-RAB.SuccEst": 10, "L.E-RAB.AttEst": 10,
     "L.S1Sig.ConnEst.Succ": 10, "L.S1Sig.ConnEst.Att": 10,
 }
+
+
+@lru_cache(maxsize=1)
+def _curitiba_task_objects():
+    """Objetos reais e não sensíveis da abertura da task PM 2225."""
+    har_path = Path(__file__).parents[1] / "har-oss-outros" / "har-monitoring-oss-tsl.har"
+    har = json.loads(har_path.read_text(encoding="utf-8"))
+    entry = next(
+        item for item in har["log"]["entries"]
+        if "/monitor/task/2225/start" in item["request"]["url"]
+    )
+    task = json.loads(entry["response"]["content"]["text"])["data"]["task"]
+    return tuple(
+        {"fdn": group["fdn"], **obj}
+        for group in task["objectList"]
+        for obj in group["objInstanceInfos"]
+    )
+
+
+def _curitiba_event_from_task():
+    sites = {}
+    for obj in _curitiba_task_objects():
+        cell_match = re.search(r"Cell Name\s*=\s*([^,]+)", obj["objName"], re.I)
+        assert cell_match, obj["objName"]
+        cell_id = cell_match.group(1).strip()
+        site_id = cell_id.split("-", 2)[1]
+        sites.setdefault(site_id, []).append({"id": cell_id, "tech": "4G"})
+    return {
+        "id": "teste-curitiba-task-2225",
+        "oss": {"region": "OUTRAS"},
+        "integration": {"pm_task_id": 2225},
+        "sites": [
+            {"id": site_id, "name": site_id, "cells": cells}
+            for site_id, cells in sites.items()
+        ],
+    }
 
 
 def _event_com_celula(cell_id, tech=None):
@@ -80,6 +121,59 @@ def test_celula_sem_tecnologia_no_nome_e_mapeada_pela_task(tmp_db, monkeypatch):
     assert {row["cell_id"] for row in linhas} == {"18NLCTAL01GI"}
     # A tecnologia do dado vem da task consultada, não do palpite pelo nome.
     assert {row["technology"] for row in linhas} == {"4G"}
+
+
+def test_os_116_objetos_reais_da_task_2225_mapeiam_116_de_116(tmp_db, monkeypatch):
+    monkeypatch.setattr(db, "get_event_vips", lambda *_: [])
+    collector = HttpCollector(_curitiba_event_from_task(), "https://10.220.30.9:31943")
+    objects = _curitiba_task_objects()
+
+    mapped = [
+        collector._resolve_monitoring_cell(int(obj["objectNo"]), obj["objName"], "4G")
+        for obj in objects
+    ]
+
+    assert len(objects) == 116
+    assert sum(item is not None for item in mapped) == 116
+    assert len({item["cell_id"] for item in mapped if item}) == 116
+
+
+def test_12_objetos_indisponiveis_nao_bloqueiam_as_outras_104_celulas(
+        tmp_db, monkeypatch):
+    monkeypatch.setattr(db, "get_event_vips", lambda *_: [])
+    collector = HttpCollector(_curitiba_event_from_task(), "https://10.220.30.9:31943")
+    objects = _curitiba_task_objects()
+    unavailable = [obj for obj in objects if "CTFD60" in obj["objName"]]
+    available = [obj for obj in objects if "CTFD60" not in obj["objName"]]
+    response = {"data": [{
+        "taskId": 2225,
+        "execTime": 1_700_000_000_000,
+        "objNoExecTimes": [
+            {"objNo": int(obj["objectNo"]), "preExecTime": 1_700_000_000_000}
+            for obj in available
+        ],
+        "results": [{
+            "execTime": 1_700_000_000_000,
+            "period": 5,
+            "objRes": [
+                _item(int(obj["objectNo"]), re.search(
+                    r"Cell Name\s*=\s*([^,]+)", obj["objName"], re.I
+                ).group(1), _COUNTERS_4G)
+                for obj in available
+            ],
+        }],
+    }]}
+
+    parsed = collector._parse_monitoring_response(response, {"2225": "4G"})
+    measured_cells = {
+        row["cell_id"] for row in parsed["rows"] if row["scope"] == "CELL"
+    }
+
+    assert len(unavailable) == 12
+    assert len(available) == 104
+    assert parsed["received"] == 104
+    assert parsed["unmapped"] == 0
+    assert len(measured_cells) == 104
 
 
 def test_celula_de_outra_tecnologia_nao_e_sequestrada_pela_task(tmp_db, monkeypatch):

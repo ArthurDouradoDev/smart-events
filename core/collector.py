@@ -999,6 +999,74 @@ class HttpCollector(BaseCollector):
         elif module == "trace":
             self._session_trace = None
 
+    def _probe_session(self, module: str) -> bool:
+        """Valida a sessão recém-carregada no contrato do próprio módulo.
+
+        Uma troca de ``roarand`` apenas indica que o arquivo mudou. Ela não prova
+        que os cookies foram autenticados no PM ou no FARS. O probe é deliberadamente
+        sem efeito colateral e falha fechado: exige HTTP 200 e o envelope JSON que a
+        regional deve devolver para aquele módulo.
+        """
+        session = self._get_session(module)
+        try:
+            if module == "monitoring":
+                response = session.get(
+                    f"{self.base_url}/rest/oss/access/pm/v1/monitor/task/view-tree",
+                    params={"nocache": int(time.time() * 1000)},
+                    timeout=30,
+                    allow_redirects=False,
+                )
+            elif module == "trace":
+                session_data = self._load_session_data()
+                task_id = (
+                    next(iter(self.vips_by_task), None)
+                    or (session_data.get("trace", {}) or {}).get("task_id")
+                    or 1
+                )
+                response = session.get(
+                    f"{self.base_url}/rest/oss/access/fars/v1/traceresult/pre-check",
+                    params={
+                        "taskId": task_id,
+                        "queryType": 0,
+                        "nocache": int(time.time() * 1000),
+                    },
+                    timeout=30,
+                    allow_redirects=False,
+                )
+            else:
+                raise ValueError(f"Módulo desconhecido: {module}")
+
+            if response.status_code != 200 or not self._check_session_valid(response, module):
+                return False
+            content_type = (response.headers.get("Content-Type", "") or "").lower()
+            if "json" not in content_type:
+                return False
+            payload = response.json()
+            if module == "monitoring":
+                return (
+                    isinstance(payload, dict)
+                    and payload.get("success") is True
+                    and isinstance(payload.get("data"), list)
+                )
+            return (
+                isinstance(payload, dict)
+                and isinstance(payload.get("checkState"), bool)
+            )
+        except (requests.exceptions.RequestException, ValueError, TypeError, KeyError) as error:
+            logger.warning("[renew/%s] probe falhou: %s", module, error)
+            return False
+
+    def _reload_and_probe(self, module: str, source: str) -> bool:
+        """Recarrega o arquivo e só o aceita depois do probe do módulo."""
+        self._invalidate_session(module)
+        logger.info("[renew/%s] arquivo recarregado (%s).", module, source)
+        if self._probe_session(module):
+            logger.info("[renew/%s] probe aceito (%s).", module, source)
+            return True
+        logger.warning("[renew/%s] probe recusado (%s).", module, source)
+        self._invalidate_session(module)
+        return False
+
     def _clear_interactive_state(self, module: str):
         HttpCollector._needs_interactive.pop(self._module_state_key(module), None)
 
@@ -1061,8 +1129,9 @@ class HttpCollector(BaseCollector):
         if not interactive_lock.acquire(blocking=False):
             return {"ok": False, "error": "Reautenticação já em andamento.", "in_progress": True}
         try:
+            requested_module = state_module if state_module in ("monitoring", "trace") else "both"
             cmd = cls._build_renew_cmd() + [
-                "--module", "both",            # sem --headless → navegador visível
+                "--module", requested_module,   # sem --headless → navegador visível
                 "--base-url", base_url,
                 "--session-file", str(session_file),
                 "--region", region or "",
@@ -1074,8 +1143,12 @@ class HttpCollector(BaseCollector):
                 cwd=str(Path(__file__).parent.parent),
             )
             if result.returncode == EXIT_SUCCESS:
-                cls.reset_interactive_state(base_url=base_url)
-                logger.info("[reauth] Reautenticação interativa concluída com sucesso. Coleta retomada.")
+                reset_module = None if requested_module == "both" else requested_module
+                cls.reset_interactive_state(module=reset_module, base_url=base_url)
+                logger.info(
+                    "[reauth/%s] Reautenticação interativa concluída com sucesso. "
+                    "Coleta do módulo retomada.", requested_module,
+                )
                 return {"ok": True, "base_url": base_url}
             tail = ((result.stdout or "")[-400:] + " " + (result.stderr or "")[-400:]).strip()
             cls._interactive_cooldown_until[state_key] = datetime.utcnow() + timedelta(minutes=5)
@@ -1177,7 +1250,7 @@ class HttpCollector(BaseCollector):
           renovar sozinho até o operador reautenticar (api.reauth_session) — isto elimina
           o loop infinito de renovações que nunca autenticavam.
         - Detecção de reauth do operador / de renovação por outra thread: se o roarand do
-          session.json mudou, recarrega a sessão sem rodar Playwright.
+          session.json mudou, recarrega e executa o probe do módulo antes de aceitar.
         """
         state_key = self._module_state_key(module)
         # ── Já aguardando reauth interativa? Só sai disso quando o operador reautentica ──
@@ -1186,15 +1259,13 @@ class HttpCollector(BaseCollector):
             module_data = self._load_session_data().get(module, {}) or {}
             roarand_now = module_data.get("roarand") or ""
             if roarand_now and roarand_now != roarand_marked and module_data.get("cookies"):
-                logger.info(
-                    f"[renew/{module}] Reautenticação interativa detectada (roarand mudou). "
-                    "Recarregando sessão e retomando a coleta."
-                )
-                HttpCollector._renew_failures.pop(state_key, None)
-                HttpCollector._renew_backoff_until.pop(state_key, None)
-                self._clear_interactive_state(module)
-                self._invalidate_session(module)
-                return True
+                if self._reload_and_probe(module, "reauth interativa detectada"):
+                    HttpCollector._renew_failures.pop(state_key, None)
+                    HttpCollector._renew_backoff_until.pop(state_key, None)
+                    self._clear_interactive_state(module)
+                    return True
+                # O arquivo mudou, mas a sessão deste módulo continua recusada.
+                # Mantém o estado interativo e solicita nova autenticação visível.
             # Continua bloqueado: mantém o alerta acionável e reabre o navegador
             # automaticamente (single-flight + cooldown), sem rodar Playwright headless.
             self._raise_reauth_alert(module)
@@ -1220,12 +1291,9 @@ class HttpCollector(BaseCollector):
         _file_roarand = _mod_data.get("roarand")
         if (_file_roarand and _file_roarand != self._session_built_roarand.get(module)
                 and _mod_data.get("cookies")):
-            logger.info(
-                f"[renew/{module}] session.json mais novo que a sessão em cache "
-                "(renovado externamente) — recarregando sem Playwright."
-            )
-            self._invalidate_session(module)
-            return True
+            if self._reload_and_probe(module, "arquivo renovado externamente"):
+                return True
+            # Mudança sem autenticação comprovada: segue para o Playwright.
 
         # ── Captura roarand ANTES do lock para detectar renovação concorrente ──
         roarand_before = self._load_session_data().get(module, {}).get("roarand")
@@ -1239,12 +1307,12 @@ class HttpCollector(BaseCollector):
                 module_data = current_data.get(module, {})
                 has_valid = bool(module_data.get("cookies")) and bool(module_data.get("roarand"))
                 if has_valid:
-                    logger.info(
-                        f"[renew/{module}] Sessão já renovada por outra thread. "
-                        "Recarregando sessão local sem rodar Playwright."
+                    if self._reload_and_probe(module, "arquivo renovado por outra thread"):
+                        return True
+                    logger.warning(
+                        f"[renew/{module}] Outra thread publicou uma sessão que o probe "
+                        "recusou. Executando Playwright para este módulo."
                     )
-                    self._invalidate_session(module)
-                    return True
                 else:
                     logger.warning(
                         f"[renew/{module}] Outra thread renovou mas a seção '{module}' está "
@@ -1277,7 +1345,7 @@ class HttpCollector(BaseCollector):
                 script_path = Path(__file__).parent.parent / "scratch" / "get_session.py"
                 renew_cmd = [str(python_exe), str(script_path)]
 
-            logger.info(f"[renew/{module}] Iniciando renovação de sessão via Playwright (subprocesso, timeout=120s)")
+            logger.info(f"[renew/{module}] Playwright usado (subprocesso, timeout=120s).")
             try:
                 result = subprocess.run(
                     renew_cmd + [
@@ -1297,18 +1365,24 @@ class HttpCollector(BaseCollector):
                 stderr_tail = result.stderr.strip()[-500:] if result.stderr.strip() else ""
 
                 if result.returncode == EXIT_SUCCESS:
-                    logger.info(f"[renew/{module}] Sessão renovada e autenticada com sucesso.")
                     if stdout_tail:
                         logger.debug(f"[renew/{module}] stdout:\n{stdout_tail}")
-                    HttpCollector._renew_failures[state_key] = 0
-                    HttpCollector._renew_backoff_until.pop(state_key, None)
-                    self._clear_interactive_state(module)
                     # Cookies são compartilhados, mas cada módulo mantém seu
                     # próprio requests.Session. Reconstrói ambos para não deixar
                     # o outro worker usando headers/cookies anteriores.
                     self._invalidate_session("monitoring")
                     self._invalidate_session("trace")
-                    return True
+                    if self._reload_and_probe(module, "sessão publicada pelo Playwright"):
+                        HttpCollector._renew_failures[state_key] = 0
+                        HttpCollector._renew_backoff_until.pop(state_key, None)
+                        self._clear_interactive_state(module)
+                        return True
+                    backoff_s = self._engage_backoff(module)
+                    logger.error(
+                        f"[renew/{module}] Playwright terminou, mas o probe do módulo "
+                        f"recusou a sessão. Próxima tentativa em {backoff_s}s."
+                    )
+                    return False
 
                 if result.returncode == EXIT_NEEDS_INTERACTIVE:
                     # CAPTCHA/SSO: renovação headless é impossível. Marca o módulo, emite
