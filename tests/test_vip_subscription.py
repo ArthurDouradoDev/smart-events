@@ -8,9 +8,13 @@ mensagens `RRC_MEAS_RPRT`, cujo RSRP/RSRQ é decodificado localmente.
 import copy
 import json
 import re
+import threading
 from pathlib import Path
 
+import requests
+
 import core.database as db
+from core import credentials
 from core.collector import HttpCollector
 from core.scheduler import Scheduler
 
@@ -25,19 +29,25 @@ WINDOW = ("2026-08-11 10:30:45", "2026-08-12 00:21:44")
 
 
 class _Response:
-    status_code = 200
     content = b"{}"
     headers = {}
     url = "https://oss.test/rest"
     text = "{}"
 
-    def __init__(self, payload):
+    def __init__(self, payload, status_code=200):
         self._payload = payload
+        self.status_code = status_code
 
     def json(self):
         return self._payload
 
     def raise_for_status(self):
+        if self.status_code >= 400:
+            response = requests.Response()
+            response.status_code = self.status_code
+            response.url = self.url
+            raise requests.exceptions.HTTPError(
+                f"{self.status_code} Server Error", response=response)
         return None
 
 
@@ -154,6 +164,94 @@ class _EmptyBootstrapTraceSession(_TraceSession):
         return super().get(url, params, **kwargs)
 
 
+class _AsyncTraceSession(_TraceSession):
+    """Contrato de Curitiba: janela síncrona em fetch-field e filtro assíncrono."""
+
+    def __init__(self, *args, completion=None, bootstrap_record_count=None, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.starts = []
+        self.polls = []
+        self.sync_window_attempts = 0
+        self.async_window_attempts = 0
+        self.bootstrap_record_count = bootstrap_record_count
+        self.completion = completion
+        self._poll_envelopes = None
+        self.filtered_id = None
+
+    def get(self, url, params=None, **kwargs):
+        if url.endswith("/query/result") and self.bootstrap_record_count is not None:
+            self.calls.append((url, dict(params or {})))
+            return _Response({
+                "recordCount": self.bootstrap_record_count,
+                "data": {"msgId": next(self.msg_ids), "tableData": []},
+            })
+        if url.endswith("/fetch-field-values"):
+            self.calls.append((url, dict(params or {})))
+            self.sync_window_attempts += 1
+            return _Response({"message": "unsupported"}, status_code=500)
+        if url.endswith("/fetch-field"):
+            self.calls.append((url, dict(params or {})))
+            self.async_window_attempts += 1
+            return _Response({
+                "startTime": WINDOW[0], "endTime": WINDOW[1],
+                "filterMap": {"Message Type": None}, "signalList": [],
+            })
+        return super().get(url, params=params, **kwargs)
+
+    def post(self, url, params=None, json=None, **kwargs):
+        if url.endswith("/filter-by-cols-start"):
+            self.starts.append(json)
+            self.filtered_id = next(self.msg_ids)
+            completion = self.completion
+            if completion is None:
+                completion = {
+                    "status": 2,
+                    "errorMsg": None,
+                    "progress": 100,
+                    "value": {
+                        "recordCount": len(self.rows),
+                        "data": {"msgId": self.filtered_id},
+                    },
+                }
+            self._poll_envelopes = [
+                {"status": 1, "errorMsg": None, "progress": 10, "value": None},
+                {"status": 1, "errorMsg": None, "progress": 65, "value": None},
+                {"status": 1, "errorMsg": None, "progress": 75, "value": None},
+                completion,
+            ]
+            return _Response({"accepted": True})
+        if url.endswith("/filter-by-cols-result"):
+            self.polls.append(json)
+            return _Response(self._poll_envelopes.pop(0))
+        return super().post(url, params=params, json=json, **kwargs)
+
+
+class _FilterFallbackTraceSession(_AsyncTraceSession):
+    """A janela anuncia síncrono, mas o endpoint de filtro exige o outro contrato."""
+
+    def get(self, url, params=None, **kwargs):
+        if url.endswith("/fetch-field-values"):
+            return _TraceSession.get(self, url, params=params, **kwargs)
+        return super().get(url, params=params, **kwargs)
+
+    def post(self, url, params=None, json=None, **kwargs):
+        if url.endswith("/filter-by-cols"):
+            self.posts.append(json)
+            return _Response({"message": "not found"}, status_code=404)
+        return super().post(url, params=params, json=json, **kwargs)
+
+
+class _NullBootstrapAsyncTraceSession(_AsyncTraceSession):
+    def get(self, url, params=None, **kwargs):
+        if url.endswith("/query/result"):
+            self.calls.append((url, dict(params or {})))
+            return _Response({
+                "recordCount": None,
+                "data": {"msgId": next(self.msg_ids), "tableData": []},
+            })
+        return super().get(url, params=params, **kwargs)
+
+
 def _collector(sample_event, monkeypatch, session=None):
     session = session or _TraceSession()
     monkeypatch.setattr(db, "get_event_vips", lambda *args: [
@@ -200,6 +298,171 @@ def test_o_filtro_de_tipo_e_resolvido_no_servidor(tmp_db, sample_event, monkeypa
     assert session.posts[0]["colFilterDto"]["colFltExpSeq"] == [
         {"fieldId": "Message Type", "value": "RRC_MEAS_RPRT", "operator": {"op": 0}}
     ]
+
+
+def test_sp_mantem_a_sequencia_sincrona_sem_endpoints_assincronos(
+        tmp_db, sample_event, monkeypatch):
+    db.save_event(sample_event)
+    collector, session = _collector(sample_event, monkeypatch)
+
+    result = collector.collect_vips()
+
+    assert result.state == "data"
+    urls = [url for url, _ in session.calls]
+    assert any(url.endswith("/fetch-field-values") for url in urls)
+    assert not any(url.endswith("/fetch-field") for url in urls)
+    assert len(session.posts) == 1
+    assert len(session.sorts) == 1
+    assert collector._trace_contract() == collector._FARS_SYNC
+
+
+def test_500_na_janela_detecta_assincrono_e_o_segundo_ciclo_usa_cache(
+        tmp_db, sample_event, monkeypatch):
+    db.save_event(sample_event)
+    session = _AsyncTraceSession()
+    collector, _ = _collector(sample_event, monkeypatch, session)
+    monkeypatch.setattr(type(collector), "_VIP_ASYNC_FILTER_POLL_INTERVAL", 0)
+
+    first = collector.collect_vips()
+    second = collector.collect_vips()
+
+    assert first.state == "data" and second.state == "data"
+    assert session.sync_window_attempts == 1
+    assert session.async_window_attempts == 2
+    assert len(session.starts) == 2
+    assert collector._trace_contract() == collector._FARS_ASYNC
+
+
+def test_cache_do_contrato_e_invalidado_por_nova_versao_da_sessao(
+        tmp_db, sample_event, monkeypatch):
+    db.save_event(sample_event)
+    collector, _ = _collector(sample_event, monkeypatch)
+    collector._session_built_roarand["trace"] = "versao-1"
+    collector._cache_trace_contract(collector._FARS_SYNC)
+
+    assert collector._trace_contract() == collector._FARS_SYNC
+    collector._session_built_roarand["trace"] = "versao-2"
+    assert collector._trace_contract() is None
+
+
+def test_polling_assincrono_percorre_progresso_e_encadeia_o_novo_msgid(
+        tmp_db, sample_event, monkeypatch):
+    db.save_event(sample_event)
+    session = _AsyncTraceSession()
+    collector, _ = _collector(sample_event, monkeypatch, session)
+    monkeypatch.setattr(type(collector), "_VIP_ASYNC_FILTER_POLL_INTERVAL", 0)
+
+    result = collector.collect_vips()
+
+    assert result.state == "data"
+    assert [poll["msgId"] for poll in session.polls] == [BOOTSTRAP_MSG_ID] * 4
+    assert session.sorts[0]["msgId"] == BOOTSTRAP_MSG_ID + 1
+    assert len(session.starts) == 1
+
+
+def test_polling_assincrono_aceita_value_inteiro_puro(
+        tmp_db, sample_event, monkeypatch):
+    db.save_event(sample_event)
+    completion = {"status": 2, "errorMsg": None, "progress": 100, "value": 900001}
+    session = _AsyncTraceSession(completion=completion)
+    collector, _ = _collector(sample_event, monkeypatch, session)
+    monkeypatch.setattr(type(collector), "_VIP_ASYNC_FILTER_POLL_INTERVAL", 0)
+
+    result = collector.collect_vips()
+
+    assert result.state == "data"
+    assert session.sorts[0]["msgId"] == 900001
+
+
+def test_conclusao_assincrona_sem_msgid_grava_diagnostico_e_nao_ordena(
+        tmp_db, sample_event, monkeypatch, tmp_path):
+    db.save_event(sample_event)
+    completion = {
+        "status": 2, "errorMsg": None, "progress": 100,
+        "value": {"resultado": "concluido"},
+    }
+    session = _AsyncTraceSession(completion=completion)
+    collector, _ = _collector(sample_event, monkeypatch, session)
+    diagnostics_dir = tmp_path / "runtime-data"
+    monkeypatch.setattr(credentials, "data_dir", lambda: diagnostics_dir)
+    monkeypatch.setattr(type(collector), "_VIP_ASYNC_FILTER_POLL_INTERVAL", 0)
+
+    result = collector.collect_vips()
+
+    assert result.state == "partial"
+    assert result.cursors == {}
+    assert session.sorts == []
+    dumps = list((diagnostics_dir / "diagnostics").glob("trace_*.json"))
+    assert len(dumps) == 1
+    assert json.loads(dumps[0].read_text(encoding="utf-8")) == completion
+
+
+def test_erro_timeout_e_cancelamento_assincronos_nao_criam_cursores(
+        tmp_db, sample_event, monkeypatch):
+    db.save_event(sample_event)
+
+    error_session = _AsyncTraceSession(completion={
+        "status": 2, "errorMsg": "falha no filtro", "progress": 100, "value": None,
+    })
+    error_collector, _ = _collector(sample_event, monkeypatch, error_session)
+    monkeypatch.setattr(type(error_collector), "_VIP_ASYNC_FILTER_POLL_INTERVAL", 0)
+    error_result = error_collector.collect_vips()
+    assert error_result.cursors == {} and error_session.sorts == []
+
+    timeout_session = _AsyncTraceSession()
+    timeout_collector, _ = _collector(sample_event, monkeypatch, timeout_session)
+    monkeypatch.setattr(type(timeout_collector), "_VIP_ASYNC_FILTER_TIMEOUT", 0)
+    timeout_result = timeout_collector.collect_vips()
+    assert timeout_result.cursors == {} and timeout_session.sorts == []
+
+    monkeypatch.setattr(type(timeout_collector), "_VIP_ASYNC_FILTER_TIMEOUT", 120)
+    cancel_event = threading.Event()
+    cancel_session = _AsyncTraceSession()
+    original_post = cancel_session.post
+
+    def cancel_during_poll(url, params=None, json=None, **kwargs):
+        response = original_post(url, params=params, json=json, **kwargs)
+        if url.endswith("/filter-by-cols-result"):
+            cancel_event.set()
+        return response
+
+    monkeypatch.setattr(cancel_session, "post", cancel_during_poll)
+    cancel_collector, _ = _collector(sample_event, monkeypatch, cancel_session)
+    cancel_collector.set_cancel_event(cancel_event)
+    cancel_result = cancel_collector.collect_vips()
+    assert cancel_result.state == "error"
+    assert cancel_result.cursors == {} and cancel_session.sorts == []
+
+
+def test_404_no_filtro_troca_contrato_uma_vez(
+        tmp_db, sample_event, monkeypatch):
+    db.save_event(sample_event)
+    session = _FilterFallbackTraceSession()
+    collector, _ = _collector(sample_event, monkeypatch, session)
+    monkeypatch.setattr(type(collector), "_VIP_ASYNC_FILTER_POLL_INTERVAL", 0)
+
+    result = collector.collect_vips()
+
+    assert result.state == "data"
+    assert len(session.posts) == 1
+    assert len(session.starts) == 1
+    assert collector._trace_contract() == collector._FARS_ASYNC
+
+
+def test_recordcount_e_serial_nulos_nao_viram_vazio_ou_cursor_falso(
+        tmp_db, sample_event, monkeypatch):
+    db.save_event(sample_event)
+    rows = [dict(ALL_ROWS[0], serialNo=None), ALL_ROWS[1]]
+    session = _NullBootstrapAsyncTraceSession(rows=rows)
+    collector, _ = _collector(sample_event, monkeypatch, session)
+    monkeypatch.setattr(type(collector), "_VIP_ASYNC_FILTER_POLL_INTERVAL", 0)
+
+    result = collector.collect_vips()
+
+    assert result.state == "data"
+    assert len(result.measurements) == 1
+    assert result.measurements[0]["serial_no"] == ALL_ROWS[1]["serialNo"]
+    assert result.cursors["2072:serial"]["cursor"] == ALL_ROWS[1]["serialNo"]
 
 
 def test_a_janela_da_task_e_lida_antes_de_filtrar(tmp_db, sample_event, monkeypatch):

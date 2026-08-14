@@ -173,6 +173,9 @@ class TestSchedulerState:
             def __init__(self, event):
                 self.event = event
                 self.calls = 0
+                self.cancel_event = None
+            def set_cancel_event(self, cancel_event):
+                self.cancel_event = cancel_event
             def start(self):
                 pass
             def stop(self):
@@ -210,5 +213,7 @@ class TestSchedulerState:
         assert old_context.stop_event.is_set()
         assert old_context.stop_event is not new_context.stop_event
         assert not new_context.stop_event.is_set()
+        assert old_context.collector.cancel_event is old_context.stop_event
+        assert new_context.collector.cancel_event is new_context.stop_event
         assert old_context.collector.calls == 1
         scheduler.stop()

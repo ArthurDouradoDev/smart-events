@@ -12,6 +12,7 @@ Para dev/testes: MockCollector gera dados sintéticos (use --mock na linha de co
 """
 
 import csv
+import hashlib
 import json
 import logging
 import os
@@ -668,6 +669,11 @@ class SessionExpiredError(Exception):
     pass
 
 
+class CollectionCancelledError(Exception):
+    """Interrompe uma coleta cuja geração do scheduler foi invalidada."""
+    pass
+
+
 class HttpCollector(BaseCollector):
     """
     FASE 2: Coleta via requisições HTTP ao iManager com renovação de sessão automática.
@@ -689,6 +695,10 @@ class HttpCollector(BaseCollector):
     # Compatibilidade com processos iniciados em versões anteriores. Novos fluxos
     # nunca preenchem este mapa: bloqueios headless são transitórios e usam backoff.
     _needs_interactive: dict = {}
+    # Contrato FARS detectado por host e versão autenticada da sessão. O valor
+    # da sessão é identificado por digest para nunca manter/logar o roarand.
+    _fars_contracts: dict = {}
+    _fars_contract_lock = threading.Lock()
     _VIP_MAX_WORKERS = 3
 
     # Diagnóstico HTTP opt-in: quando ligado (HttpCollector.http_debug=True ou env
@@ -710,6 +720,8 @@ class HttpCollector(BaseCollector):
         # quando o session.json foi renovado externamente (outra thread / reauth do
         # operador) e a sessão em cache ficou obsoleta.
         self._session_built_roarand: dict = {}
+        self._trace_contract_fallback_version = object()
+        self._cancel_event: Optional[threading.Event] = None
         self._renew_lock = threading.Lock()
         # A captura manual é consumida pela próxima resposta de cada tipo. A variável
         # de ambiente continua útil para reproduções locais sem passar pela interface.
@@ -753,6 +765,14 @@ class HttpCollector(BaseCollector):
 
     def _module_state_key(self, module: str) -> tuple[str, str]:
         return self._session_host, module
+
+    def set_cancel_event(self, cancel_event: Optional[threading.Event]) -> None:
+        """Vincula o coletor ao evento imutável de parada da geração atual."""
+        self._cancel_event = cancel_event
+
+    def _raise_if_collection_cancelled(self) -> None:
+        if self._cancel_event is not None and self._cancel_event.is_set():
+            raise CollectionCancelledError("Coleta cancelada por troca de evento/geração")
 
     @classmethod
     def interactive_modules_for(cls, base_url: str) -> set[str]:
@@ -1731,9 +1751,79 @@ class HttpCollector(BaseCollector):
     _VIP_MAX_PAGES_PER_CYCLE = 5
     # A alocação do msgId espelha a página que o navegador pede no mesmo passo.
     _VIP_BOOTSTRAP_PAGE_SIZE = 100
+    _VIP_ASYNC_FILTER_POLL_INTERVAL = 0.5
+    _VIP_ASYNC_FILTER_TIMEOUT = 120.0
+    _FARS_SYNC = "sincrono"
+    _FARS_ASYNC = "assincrono"
 
     def _trace_oss(self) -> str:
         return (self._region or self.base_url).upper()
+
+    def _trace_contract_key(self) -> tuple[str, object]:
+        roarand = self._session_built_roarand.get("trace")
+        if roarand:
+            version = hashlib.sha256(str(roarand).encode("utf-8")).hexdigest()[:16]
+        else:
+            # Testes/integrações podem injetar uma sessão sem session file. A
+            # sentinela ainda mantém o cache durante todos os ciclos da instância.
+            version = self._trace_contract_fallback_version
+        return self._session_host, version
+
+    def _trace_contract(self) -> Optional[str]:
+        with HttpCollector._fars_contract_lock:
+            return HttpCollector._fars_contracts.get(self._trace_contract_key())
+
+    def _cache_trace_contract(self, contract: str) -> None:
+        key = self._trace_contract_key()
+        with HttpCollector._fars_contract_lock:
+            previous = HttpCollector._fars_contracts.get(key)
+            # Mantém apenas a versão corrente de cada host para o cache não
+            # crescer a cada renovação de sessão.
+            for stale_key in [item for item in HttpCollector._fars_contracts
+                              if item[0] == self._session_host and item != key]:
+                HttpCollector._fars_contracts.pop(stale_key, None)
+            HttpCollector._fars_contracts[key] = contract
+        if previous != contract:
+            logger.info("[vip] contrato=%s host=%s", contract, self._session_host)
+
+    @staticmethod
+    def _unsupported_fars_endpoint(response) -> bool:
+        return response.status_code in (404, 405, 500)
+
+    def _request_trace_window(self, session, task_id: int, msg_id: int,
+                              contract: str):
+        endpoint = ("fetch-field-values" if contract == self._FARS_SYNC
+                    else "fetch-field")
+        response = session.get(
+            f"{self.base_url}/rest/oss/access/fars/v1/traceresult/query/{endpoint}",
+            params={"nocache": int(time.time() * 1000), "taskId": task_id, "msgId": msg_id},
+            timeout=60, allow_redirects=False,
+        )
+        if not self._check_session_valid(response, "trace"):
+            raise SessionExpiredError("Sessão Trace expirada ao ler a janela da task")
+        return response
+
+    def _detect_trace_window(self, session, task_id: int, msg_id: int) -> tuple[str, str]:
+        """Lê a janela e detecta o contrato FARS pela capacidade do host."""
+        cached = self._trace_contract()
+        candidates = ([cached, self._FARS_ASYNC if cached == self._FARS_SYNC else self._FARS_SYNC]
+                      if cached else [self._FARS_SYNC, self._FARS_ASYNC])
+        for index, contract in enumerate(candidates):
+            response = self._request_trace_window(session, task_id, msg_id, contract)
+            if (index == 0 and len(candidates) > 1
+                    and self._unsupported_fars_endpoint(response)):
+                continue
+            response.raise_for_status()
+            window = response.json() if response.content else {}
+            if not isinstance(window, dict):
+                raise ValueError(f"Task {task_id} retornou janela de tempo inválida")
+            start_time, end_time = window.get("startTime"), window.get("endTime")
+            if not start_time or not end_time:
+                raise ValueError(
+                    f"Task {task_id} não informou a janela de tempo (startTime/endTime)")
+            self._cache_trace_contract(contract)
+            return start_time, end_time
+        raise ValueError(f"Task {task_id} não possui contrato FARS de janela compatível")
 
     def _open_trace_query(self, session, task_id: int) -> tuple[int, Optional[str], Optional[str]]:
         """Abre a consulta FARS e devolve ``msgId`` e a janela da task do ciclo.
@@ -1780,25 +1870,13 @@ class HttpCollector(BaseCollector):
         # task ainda não tem nenhuma mensagem. O recordCount do bootstrap já é
         # conclusivo e permite encerrar o ciclo vazio sem transformar isso em
         # falha de contrato.
-        if "recordCount" in initial_payload:
+        if initial_payload.get("recordCount") is not None:
             try:
-                if int(initial_payload.get("recordCount") or 0) == 0:
+                if int(initial_payload["recordCount"]) == 0:
                     return msg_id, None, None
             except (TypeError, ValueError):
                 pass
-
-        fields = session.get(
-            f"{self.base_url}/rest/oss/access/fars/v1/traceresult/query/fetch-field-values",
-            params={"nocache": int(time.time() * 1000), "taskId": task_id, "msgId": msg_id},
-            timeout=60, allow_redirects=False,
-        )
-        if not self._check_session_valid(fields, "trace"):
-            raise SessionExpiredError("Sessão Trace expirada ao ler a janela da task")
-        fields.raise_for_status()
-        window = fields.json() if fields.content else {}
-        start_time, end_time = window.get("startTime"), window.get("endTime")
-        if not start_time or not end_time:
-            raise ValueError(f"Task {task_id} não informou a janela de tempo (startTime/endTime)")
+        start_time, end_time = self._detect_trace_window(session, task_id, msg_id)
         return msg_id, start_time, end_time
 
     @staticmethod
@@ -1848,15 +1926,135 @@ class HttpCollector(BaseCollector):
                 "templateName": [], "isSetBenchMarkTime": False, "benchMarkTimeRowNo": -1,
             },
         }
+        contract = self._trace_contract()
+        if contract not in {self._FARS_SYNC, self._FARS_ASYNC}:
+            raise ValueError("Contrato FARS não foi detectado antes do filtro")
+
+        response = self._start_trace_filter(session, contract, body)
+        if response.status_code == 404:
+            contract = self._FARS_ASYNC if contract == self._FARS_SYNC else self._FARS_SYNC
+            logger.warning(
+                "[vip] endpoint de filtro incompatível; alternando contrato para %s host=%s",
+                contract, self._session_host,
+            )
+            response = self._start_trace_filter(session, contract, body)
+        response.raise_for_status()
+        self._cache_trace_contract(contract)
+        if contract == self._FARS_SYNC:
+            return self._allocated_msg_id(response.json(), "filter-by-cols")
+        return self._poll_async_trace_filter(session, msg_id)
+
+    def _start_trace_filter(self, session, contract: str, body: dict):
+        endpoint = ("filter-by-cols" if contract == self._FARS_SYNC
+                    else "filter-by-cols-start")
         response = session.post(
-            f"{self.base_url}/rest/oss/access/fars/v1/traceresult/query/filter-by-cols",
+            f"{self.base_url}/rest/oss/access/fars/v1/traceresult/query/{endpoint}",
             params={"nocache": int(time.time() * 1000)}, json=body,
             timeout=120, allow_redirects=False,
         )
         if not self._check_session_valid(response, "trace"):
             raise SessionExpiredError("Sessão Trace expirada no filtro de mensagens")
-        response.raise_for_status()
-        return self._allocated_msg_id(response.json(), "filter-by-cols")
+        return response
+
+    @classmethod
+    def _find_async_msg_id(cls, payload) -> Optional[int]:
+        """Extrai ``msgId`` sem depender do envelope terminal exato da regional."""
+        def find_named(value):
+            if isinstance(value, dict):
+                candidate = value.get("msgId")
+                if isinstance(candidate, int) and not isinstance(candidate, bool):
+                    return candidate
+                for child in value.values():
+                    found = find_named(child)
+                    if found is not None:
+                        return found
+            elif isinstance(value, list):
+                for child in value:
+                    found = find_named(child)
+                    if found is not None:
+                        return found
+            return None
+
+        if not isinstance(payload, dict):
+            return None
+        value = payload.get("value")
+        if isinstance(value, int) and not isinstance(value, bool):
+            return value
+        for container in (value, payload.get("data"), payload):
+            found = find_named(container)
+            if found is not None:
+                return found
+        return None
+
+    @staticmethod
+    def _find_async_record_count(payload) -> int:
+        def find(value):
+            if isinstance(value, dict):
+                if "recordCount" in value and value["recordCount"] is not None:
+                    try:
+                        return int(value["recordCount"])
+                    except (TypeError, ValueError):
+                        return None
+                for child in value.values():
+                    found = find(child)
+                    if found is not None:
+                        return found
+            elif isinstance(value, list):
+                for child in value:
+                    found = find(child)
+                    if found is not None:
+                        return found
+            return None
+
+        return find(payload) or 0
+
+    def _poll_async_trace_filter(self, session, input_msg_id: int) -> tuple[int, int]:
+        deadline = time.monotonic() + self._VIP_ASYNC_FILTER_TIMEOUT
+        poll_url = (
+            f"{self.base_url}/rest/oss/access/fars/v1/traceresult/query/"
+            "filter-by-cols-result"
+        )
+        while True:
+            self._raise_if_collection_cancelled()
+            if time.monotonic() >= deadline:
+                raise requests.exceptions.Timeout("Timeout no polling de filter-by-cols-result")
+            response = session.post(
+                poll_url,
+                params={"nocache": int(time.time() * 1000)},
+                json={"msgId": input_msg_id},
+                timeout=min(30, max(1, deadline - time.monotonic())),
+                allow_redirects=False,
+            )
+            if not self._check_session_valid(response, "trace"):
+                raise SessionExpiredError("Sessão Trace expirada no polling do filtro")
+            response.raise_for_status()
+            envelope = response.json() if response.content else {}
+            if not isinstance(envelope, dict):
+                raise ValueError("filter-by-cols-result retornou envelope inválido")
+            if envelope.get("errorMsg") is not None:
+                raise ValueError(
+                    f"filter-by-cols-result falhou: {envelope.get('errorMsg')}")
+
+            in_progress = envelope.get("status") == 1 and envelope.get("value") is None
+            if not in_progress:
+                filtered_msg_id = self._find_async_msg_id(envelope)
+                if filtered_msg_id is None:
+                    dump = self._dump_raw(envelope, "trace", force=True)
+                    location = f"; diagnóstico={dump}" if dump else ""
+                    raise ValueError(
+                        "filter-by-cols-result concluiu sem msgId reconhecível" + location)
+                return filtered_msg_id, self._find_async_record_count(envelope)
+
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise requests.exceptions.Timeout("Timeout no polling de filter-by-cols-result")
+            wait_for = min(self._VIP_ASYNC_FILTER_POLL_INTERVAL, remaining)
+            if self._cancel_event is not None:
+                if self._cancel_event.wait(wait_for):
+                    raise CollectionCancelledError(
+                        "Coleta cancelada por troca de evento/geração")
+            else:
+                time.sleep(wait_for)
 
     def _sort_trace_by_time(self, session, task_id: int, msg_id: int) -> tuple[int, int]:
         """Ordena o conjunto filtrado por ``Time`` e devolve ``(msgId ordenado, total)``.
@@ -2059,6 +2257,8 @@ class HttpCollector(BaseCollector):
                             safe_serial = last_serial
                     except SessionExpiredError:
                         raise
+                    except CollectionCancelledError:
+                        raise
                     except (requests.exceptions.ConnectTimeout, requests.exceptions.ConnectionError,
                             requests.exceptions.Timeout) as error:
                         reason = f"Task {task_id} sem conexão: {error}"
@@ -2112,6 +2312,9 @@ class HttpCollector(BaseCollector):
                     logger.error("Não foi possível renovar a sessão de Trace.")
                     return CollectionResult.auth_required("Não foi possível renovar a sessão de Trace.")
                 renewed = True
+            except CollectionCancelledError as error:
+                logger.info("Coleta de VIP cancelada antes da persistência: %s", error)
+                return CollectionResult.error(str(error), code="cancelled")
             except (requests.exceptions.ConnectTimeout, requests.exceptions.ConnectionError, requests.exceptions.Timeout) as error:
                 logger.error(f"Erro de conexão no Trace: {error}")
                 return CollectionResult.error(f"Falha de conexão no Trace: {error}", code="network")

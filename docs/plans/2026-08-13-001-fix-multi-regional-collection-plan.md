@@ -32,7 +32,7 @@ casam exatamente com o inventário do evento.
 |---|---|
 | Estado atual, depois das Fases 1 e 2 | Alarmes funcionam; KPI e VIP de Curitiba ainda não |
 | **Fim da Fase 3** | Troca SP ↔ Curitiba isolada, sem workers e checkpoints cruzados; ainda não garante dados de Curitiba |
-| **Fim da Fase 4** | **KPIs de Curitiba devem aparecer** e continuar funcionando em SP |
+| **Fim da Fase 4** | **KPIs de Curitiba devem aparecer** e continuar funcionando em SP — CONCLUÍDA em 14/08 |
 | **Fim da Fase 5** | **KPIs + VIPs + alarmes devem funcionar em Curitiba e SP** — primeiro marco funcional completo |
 | **Fim da Fase 6** | Solução endurecida, dados contaminados tratados e rollout pronto para produção |
 
@@ -102,12 +102,15 @@ SP usa o contrato síncrono já implementado:
 Curitiba usa o contrato assíncrono:
 
 1. `GET query/result`;
-2. `GET query/fetch-field`;
-3. polling em `GET query/fetch-field-values-result`;
-4. `POST query/filter-by-cols-start`;
-5. polling em `POST query/filter-by-cols-result`;
-6. `POST query/sort`;
-7. `GET query/result-paging`.
+2. `GET query/fetch-field` — **síncrono**, já devolve `startTime`/`endTime`;
+3. `POST query/filter-by-cols-start`;
+4. polling em `POST query/filter-by-cols-result`;
+5. `POST query/sort`;
+6. `GET query/result-paging`.
+
+O navegador também faz polling em `GET query/fetch-field-values-result` entre 2 e 3, mas só para
+preencher os combos de filtro da tela (`filterMap`). O coletor filtra por um valor fixo e não lê
+esse campo — ver a Fase 5.
 
 O coletor chama `fetch-field-values`, que não é o contrato dessa regional, e recebe HTTP 500 em
 todos os ciclos. Ele nem chega à filtragem, paginação ou decodificação. Este é o bloqueio direto do
@@ -246,7 +249,20 @@ não promete KPI ou VIP de Curitiba.
 
 ---
 
-## Fase 4 — Sessão de Monitoring validada por host e retomada dos KPIs
+## Fase 4 — Sessão de Monitoring validada por host e retomada dos KPIs — CONCLUÍDA (14/08)
+
+### Resultado obtido
+
+A sessão por host resolveu os 401, mas **não** fez os KPIs aparecerem: o bloqueio seguinte estava no
+parser. O OSS de Curitiba identifica a célula em `objRes[].obj.objectNo`/`objectName`, enquanto SP
+usa `objNo`/`objName` — e Curitiba ainda devolve `objName: null` no mesmo dicionário. Lendo só a
+primeira grafia, todo objeto caía em `int(None)` e era contado como inválido antes de `received`:
+HTTP 200, 116 objetos por janela, zero medição, zero log.
+
+Isso é o cenário previsto no critério de saída abaixo ("se o JSON real revelar uma forma de
+`objName` diferente"). A correção foi `_obj_field`, que aceita as duas grafias, mais o log por ciclo
+e o dump automático que tornaram a causa visível. Replay do corpo real: 464 recebidos, 0 não
+mapeados, 5.124 linhas. Detalhes em ERRORS.md e MEMORY.md (14/08).
 
 ### Objetivo
 
@@ -306,53 +322,206 @@ captura — não reativar automaticamente toda a antiga Fase 3.
 Consumir a task 14837 no contrato assíncrono de Curitiba sem alterar o caminho síncrono que funciona
 em SP.
 
-### Passo 5A — probe interno, sem depender do DevTools
+### Estado de partida (14/08, depois da Fase 4)
 
-Criar um diagnóstico temporário/reutilizável que, usando a sessão Trace já salva pelo aplicativo:
+Todo ciclo de VIP em Curitiba morre no mesmo ponto, a cada 60 s:
 
-1. abra um `msgId` novo;
-2. tente o contrato síncrono;
-3. quando o endpoint indicar incompatibilidade, use `fetch-field` e faça polling em
-   `fetch-field-values-result`;
-4. grave apenas as respostas finais sanitizadas em `data/diagnostics/`;
-5. execute `filter-by-cols-start`, faça polling em `filter-by-cols-result` e grave o envelope final;
-6. nunca grave headers, cookies, `roarand`, IMSI ou conteúdo identificável desnecessário.
+```
+[vip/20260813_Teste] task 14837: recordCount=0 linhas_lidas=0 linhas_decodificadas=0
+motivo=HTTP 500 .../fars/v1/traceresult/query/fetch-field-values?taskId=14837&msgId=359008
+```
 
-O objetivo do probe é congelar o envelope exato que faltou no HAR. A captura deve ocorrer pelo
-cliente HTTP do aplicativo, que recebe o corpo diretamente, e não pelo cache do DevTools.
+O `msgId` incrementa a cada ciclo (359008, 360008, 361008…), ou seja: `pre-check` e `query/result`
+**já funcionam** em Curitiba. Só o passo seguinte não existe nessa regional.
 
-### Passo 5B — adaptador de contrato
+### O delta real são dois endpoints, não sete
 
-- modelar operações comuns: abrir consulta, obter janela, filtrar, ordenar e paginar;
-- preservar o adaptador síncrono para SP;
-- adicionar adaptador assíncrono:
-  - polling com intervalo curto, prazo total e cancelamento pela geração da Fase 3;
-  - interpretar estados `em progresso`, `concluído` e `erro` pelos envelopes reais do probe;
-  - extrair o novo `msgId` e `recordCount` somente na conclusão;
-  - não repetir `filter-by-cols-start` durante o mesmo ciclo;
-- selecionar o adaptador por capacidade/resposta do endpoint e manter a decisão em cache por host e
-  versão da sessão;
-- continuar ordenando por `Time` ascendente e paginando um único snapshot;
-- manter os cursores `row` e `serial` isolados por evento, host e task.
+Comparando `core/collector.py` (implementado, SP) com `har-oss-outros/har-vips-oss-tsl.har`
+(capturado, Curitiba — 83 entradas, task 14837):
+
+| Passo | Método SP (hoje) | Método Curitiba (HAR) | Muda? |
+|---|---|---|---|
+| pre-check | `GET traceresult/pre-check` (fora de `query/`) | idêntico, `{"checkState":true,"checkResult":[]}` | não |
+| abrir consulta | `GET query/result` com `msgId=1` → `data.msgId` | idêntico (alocou 325008) | não |
+| **janela da task** | `GET query/fetch-field-values` | **`GET query/fetch-field`** | **sim** |
+| **filtrar** | `POST query/filter-by-cols` | **`POST query/filter-by-cols-start` + polling `POST query/filter-by-cols-result`** | **sim** |
+| ordenar | `POST query/sort` → novo `msgId` | idêntico (328008 → 329008), **síncrono** | não |
+| paginar | `GET query/result-paging` | idêntico, **síncrono** | não |
+
+Não existe `sort-start`/`sort-result` nem `result-paging-start` no HAR: fora dos dois passos
+marcados, o contrato de Curitiba é o mesmo. `query/result/color` e `query/result/operate-columns`
+são da tela, o coletor não precisa deles.
+
+### Correção importante ao plano anterior: o polling da janela não é necessário
+
+A versão anterior desta fase mandava usar `fetch-field` **e** fazer polling em
+`fetch-field-values-result`. Isso está errado e custaria trabalho à toa. `GET query/fetch-field`
+responde **na hora**, com exatamente o que o coletor precisa:
+
+```json
+{
+  "startTime": "2026-08-13 09:37:02",
+  "endTime": "2026-08-13 18:15:04",
+  "filterMap": {"Trace Type": null, "Message Direction": null, "Call ID": null,
+                "Mode": null, "Cell ID": null, "Source": null, "Message Type": null},
+  "signalList": []
+}
+```
+
+`startTime`/`endTime` vêm no mesmo formato e nas mesmas chaves que o `fetch-field-values` de SP —
+`_open_trace_query` só usa esses dois campos. O que o navegador busca depois, com quatro polls em
+`fetch-field-values-result` (`{"process":10,"filterMap":{}}`), são os **valores dos combos de
+filtro** (`filterMap` preenchido). O aplicativo filtra por um valor fixo, `RRC_MEAS_RPRT`, e nunca
+leu `filterMap`. **Não implemente esse polling.**
+
+### O corpo do filtro é byte a byte o que o app já monta
+
+`POST query/filter-by-cols-start`, sem query string além de `nocache`:
+
+```json
+{
+  "colFilterDto": {
+    "colFltExpSeq": [{"fieldId": "Message Type", "value": "RRC_MEAS_RPRT", "operator": {"op": 0}}],
+    "signalList": [], "hasStartTime": false, "startTime": "2026-08-13 09:37:02",
+    "hasEndTime": false, "endTime": "2026-08-13 18:15:04", "isReverse": false
+  },
+  "pageDto": {
+    "sqlColumnName": "", "isAscend": "", "taskId": 14837, "msgId": 325008,
+    "comparisonMsgId": -1, "startRow": 0, "pageSize": 1000,
+    "templateName": [], "isSetBenchMarkTime": false, "benchMarkTimeRowNo": -1
+  }
+}
+```
+
+Isso é **idêntico** ao corpo que `_filter_meas_reports` já envia hoje ([`core/collector.py:1834`]).
+Só a URL muda. `pageDto.msgId` é o handle aberto em `query/result`; `startTime`/`endTime` vêm de
+`fetch-field` mesmo com `hasStartTime`/`hasEndTime` em `false` (ver ERRORS.md, 12/08 — vazio dá 500).
+
+### O polling do filtro, e a única coisa que o HAR não tem
+
+Poll: `POST query/filter-by-cols-result`, corpo `{"msgId": 325008}` — **o `msgId` de entrada, não um
+novo**. Envelopes capturados, em ordem, ~0,6 a 1,0 s de intervalo:
+
+```json
+{"status":1,"errorMsg":null,"progress":10,"value":null}
+{"status":1,"errorMsg":null,"progress":10,"value":null}
+{"status":1,"errorMsg":null,"progress":65,"value":null}
+{"status":1,"errorMsg":null,"progress":75,"value":null}
+```
+
+O quinto poll — o da conclusão — **está sem corpo no HAR** e não é recuperável (ver a seção sobre a
+limitação das capturas). É o único desconhecido desta fase. O que se sabe dele por inferência
+direta: a requisição seguinte do navegador foi `result-paging` com `msgId=328008`, então o envelope
+de conclusão carrega o novo handle, quase certamente em `value`. `status=1` é "em progresso";
+o código terminal não foi observado.
+
+**Não trave a fase esperando essa captura.** Implemente a leitura tolerante — ela cobre as formas
+plausíveis sem adivinhar nenhuma:
+
+1. conclusão = `value` deixou de ser `null` **ou** `status` mudou de `1`;
+2. erro = `errorMsg` não nulo (aborta o ciclo, sem cursor);
+3. do envelope de conclusão, extrair o `msgId` procurando recursivamente a primeira chave `msgId`
+   com valor inteiro em `value` → `data` → raiz; se `value` for um inteiro puro, ele é o `msgId`;
+4. se nada disso render um `msgId`, **falhar o ciclo com log explícito e gravar o envelope inteiro
+   em `data/diagnostics/`** — nunca seguir para o `sort` com o handle antigo, que devolveria o
+   conjunto não filtrado.
+
+O caso 4 é a rede de segurança: se a forma real for outra, o primeiro ciclo ao vivo entrega o
+envelope no diagnóstico e o ajuste vira uma linha. Isso substitui o antigo "Passo 5A" — o probe
+separado deixou de ser pré-requisito porque o dump automático da Fase 4 já grava corpo sanitizado
+(`_dump_raw`, `data/diagnostics/`).
+
+Parâmetros de polling, calibrados pela captura (filtro de 388.997 mensagens levou ~3,5 s):
+intervalo 0,5 s, prazo total 120 s, e checagem de cancelamento pela geração da Fase 3 a cada volta.
+Um `filter-by-cols-start` por ciclo — repetir re-executa o filtro contra dados vivos e mistura
+snapshots.
+
+### Armadilha confirmada: `null` onde SP manda número
+
+A resposta de página vazia em Curitiba é:
+
+```json
+{"recordCount":null,"data":{"lastSerialNo":null,"msgId":328008,"tableData":[],"serialNo":null}}
+```
+
+`recordCount` vem **`null`**, não `0`. `_allocated_msg_id` já absorve (`int(... or 0)`), mas dois
+pontos precisam de conferência antes de dar a fase por fechada:
+
+- `_open_trace_query` ([`core/collector.py:1783`]) encerra o ciclo como vazio quando
+  `recordCount == 0` no bootstrap. Se Curitiba mandar `null` ali, uma task com 388.997 mensagens
+  vira "ciclo vazio" em silêncio. Hoje isso não acontece — o ciclo chega ao passo da janela — mas
+  confirme no log do primeiro ciclo bom.
+- `serialNo`/`lastSerialNo` nulos não podem virar cursor. `_build_vip_measurements` já trata
+  (`int(item.get("serialNo") or -1)`), mas veja o item seguinte.
+
+### Verifique a grafia dos campos da linha antes de confiar no decoder
+
+Os corpos de `result-paging` com `tableData` **cheio** não sobreviveram no HAR. O contrato por linha
+que `_build_vip_measurements` consome é:
+
+| Campo | Onde | Uso |
+|---|---|---|
+| `serialNo` | raiz da linha | cursor e dedup (`task_id`, `serial_no`) |
+| `messageBody` | raiz da linha | `decode_meas_report` (RSRP/RSRQ) |
+| `msgType` ou `payload[].GULTrcMsgType` | raiz / lista | confirmar `RRC_MEAS_RPRT` |
+| `payload[].GLCellId` | lista `{name,value}` | célula servidora |
+| `payload[].Time` | lista `{name,value}` | timestamp |
+| `source` | raiz da linha | prefixo da célula servidora |
+
+**Este é exatamente o formato da falha que custou a Fase 4:** o Monitoring de Curitiba manda
+`objectNo`/`objectName` onde SP manda `objNo`/`objName`, e o parser rejeitou 100% dos objetos em
+silêncio. Antes de declarar a fase pronta, abra o primeiro `result-paging` não vazio gravado em
+`data/diagnostics/` e confira as seis chaves acima uma a uma. Se alguma divergir, resolva com um
+leitor que aceite as duas grafias (`_obj_field` em `core/collector.py` é o precedente), nunca
+trocando a grafia de SP.
+
+### Passo 5A — adaptador de contrato
+
+Pontos de alteração, todos em `HttpCollector`:
+
+- `_open_trace_query` ([`core/collector.py:1738`]): o passo da janela vira despacho pelo adaptador.
+- `_filter_meas_reports` ([`core/collector.py:1825`]): mesmo corpo, URL e conclusão pelo adaptador.
+- `_sort_trace_by_time`, `_fetch_trace_page`, `_build_vip_measurements`, `collect_vips`: **não
+  tocar** — o contrato desses passos é igual nas duas regionais.
+
+Seleção do adaptador **por capacidade, nunca por IP** (regra 5 deste plano):
+
+1. tentar `GET query/fetch-field-values`; HTTP 200 com `startTime`/`endTime` → host é síncrono;
+2. HTTP 500/404/405 → tentar `GET query/fetch-field`; HTTP 200 com `startTime`/`endTime` → host é
+   assíncrono;
+3. gravar a decisão em cache por `(host, versão da sessão)`, como `_needs_interactive` faz por
+   `(host, módulo)` desde a Fase 3, e logar `[vip] contrato=sincrono|assincrono host=…` na escolha
+   e a cada troca;
+4. o passo do filtro usa a decisão em cache; se mesmo assim a URL responder 404, cair para a outra
+   forma uma vez e regravar o cache.
+
+A ordem importa: tentar o síncrono primeiro garante que SP não muda de caminho.
 
 ### Testes obrigatórios
 
-- contrato síncrono de SP continua fazendo a mesma sequência atual;
-- contrato assíncrono percorre progresso até conclusão;
-- polling com erro, timeout ou cancelamento não grava cursor;
-- somente uma inicialização do filtro por ciclo;
-- task 14837 passa por filtro, sort, paginação e decoder;
-- nenhum valor é gravado a partir de resposta parcial;
-- fixtures dos dois contratos são sanitizadas.
+- SP: a sequência atual continua idêntica, chamando `fetch-field-values` e `filter-by-cols`;
+- detecção: 500 em `fetch-field-values` leva a `fetch-field` e marca o host como assíncrono;
+- detecção fica em cache — o segundo ciclo do mesmo host não repete a tentativa síncrona;
+- polling percorre `progress` 10 → 65 → 75 → conclusão e extrai o `msgId` novo;
+- `value` inteiro puro e `value` objeto com `msgId` são ambos aceitos (leitura tolerante);
+- envelope de conclusão sem `msgId` reconhecível → ciclo falha, grava diagnóstico e **não** segue
+  para o `sort`;
+- `errorMsg` preenchido, timeout do prazo total e cancelamento por troca de geração: nenhum grava
+  cursor `row` nem `serial`;
+- um único `filter-by-cols-start` por ciclo;
+- `recordCount: null` e `serialNo: null` não viram cursor nem contagem falsa;
+- fixtures dos dois contratos, sanitizadas, entrando pelo mesmo ponto que a resposta real entra
+  (fixture que já chega desembrulhada não testa o desembrulho — ver ERRORS.md, 14/08).
 
 ### Validação ao vivo
 
-1. SP: tasks 2072 e 2073 continuam coletando.
-2. Curitiba:
-   - task 14837 passa do passo de janela sem HTTP 500;
-   - `recordCount` filtrado aparece no diagnóstico;
+1. SP: tasks 2072 e 2073 continuam coletando, com a mesma sequência no log.
+2. Curitiba, task 14837:
+   - `[vip] contrato=assincrono` no log;
+   - passa da janela sem HTTP 500;
+   - `recordCount` filtrado > 0;
    - `linhas_lidas > 0` e `linhas_decodificadas > 0`;
-   - medições são inseridas e aparecem no painel VIP.
+   - medições no painel VIP e em `vip_measurements`.
 3. Trocar de evento durante um polling e confirmar que o ciclo cancelado não persiste nada.
 
 ### Critério de saída — SISTEMA FUNCIONAL COMPLETO
@@ -438,3 +607,8 @@ Fase 5A é a fonte preferencial e mais confiável.
   testes intermediários.
 - Não depender de HAR com corpos grandes para implementar o FARS assíncrono: capturar diretamente no
   cliente HTTP do aplicativo.
+- Não fazer polling em `fetch-field-values-result`: `fetch-field` já devolve a janela na hora, e
+  aquele polling só preenche combos da tela.
+- Não tratar o probe do antigo Passo 5A como pré-requisito: o dump automático da Fase 4 grava o
+  envelope do primeiro ciclo ao vivo, e a leitura tolerante do `filter-by-cols-result` permite
+  implementar antes de conhecer o corpo de conclusão.

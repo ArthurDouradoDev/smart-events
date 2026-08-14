@@ -130,6 +130,8 @@ class Scheduler:
                 self._collector = collector
                 self._stop_event = stop_event
                 self._recording = True
+                if hasattr(collector, "set_cancel_event"):
+                    collector.set_cancel_event(stop_event)
                 collector.start()
 
                 # Zera o estado ao iniciar para não exibir dados do evento anterior.

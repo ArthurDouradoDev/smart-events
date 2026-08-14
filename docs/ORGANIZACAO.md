@@ -48,6 +48,7 @@ SmartEvents/
 
 | Caminho | Conteúdo |
 |---|---|
+| `references/contratos-oss-por-regional.md` | Diferenças **medidas** entre os OSS de SP e OUTRAS (Curitiba): grafia `objNo`/`objectNo` no Monitoring, contrato FARS síncrono × assíncrono, campos `null`, e as regras que evitam repetir as falhas silenciosas de 13–14/08. **Ler antes de integrar qualquer endpoint num OSS novo.** |
 | `references/requests/` | Traces HTTP reais capturados do iManager (PM e FARS), inclusive `new-explain-info.txt`. **Valor alto** — base do `HttpCollector`; referenciados em comentários de `core/collector.py`. |
 | `references/npsmart/` | Cópias offline das páginas do NPSmart/OSS (`NPSmart Tim.html` + `_files/`, `earth_petal.html`, `offline_site/`) e `download_page_assets.py` (script que as gerou). **Os espelhos pesados (`offline_site/`, `NPSmart Tim_files/`) são gitignored.** |
 | `references/prototipo/` | `SmartEvents Dashboard _Standalone_.html` (protótipo visual que originou o frontend) + `prototype.md` (design brief). |
