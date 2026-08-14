@@ -6,8 +6,6 @@ MockCollector, CsvCollector e factory build_collector.
 Nenhum teste aqui requer VPN — ver test_http_vpn.py para integração real.
 """
 import json
-from datetime import datetime, timedelta
-
 import pytest
 import core.database as db
 from core.collector import (
@@ -58,13 +56,11 @@ def test_backoff_e_captcha_sao_isolados_por_host(sample_event, monkeypatch):
     curitiba_key = curitiba._module_state_key("monitoring")
     sp._engage_backoff("monitoring")
     HttpCollector._needs_interactive[sp_key] = "token-sp"
-    HttpCollector._interactive_cooldown_until[sp_key] = datetime.utcnow() + timedelta(minutes=5)
 
     assert sp_key in HttpCollector._renew_backoff_until
     assert curitiba_key not in HttpCollector._renew_backoff_until
     assert HttpCollector.interactive_modules_for(sp.base_url) == {"monitoring"}
     assert HttpCollector.interactive_modules_for(curitiba.base_url) == set()
-    assert HttpCollector._interactive_cooldown_until.get(curitiba_key) is None
     HttpCollector.reset_interactive_state()
 
 

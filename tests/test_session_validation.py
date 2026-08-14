@@ -5,7 +5,7 @@ import pytest
 
 from core import database as db
 from core.collector import HttpCollector
-from core.session_renew import EXIT_SUCCESS, _probe_authenticated
+from core.session_renew import EXIT_NEEDS_INTERACTIVE, _probe_authenticated
 
 
 class _CollectorResponse:
@@ -24,9 +24,11 @@ class _CollectorSession:
     def __init__(self, response):
         self.response = response
         self.urls = []
+        self.calls = []
 
-    def get(self, url, **_kwargs):
+    def get(self, url, **kwargs):
         self.urls.append(url)
+        self.calls.append((url, kwargs))
         return self.response
 
 
@@ -124,9 +126,38 @@ def test_probe_monitoring_http_200_json_valido_aceita_sessao_sem_playwright(
         renewed = collector._renew_session("monitoring")
 
     assert renewed is True
-    assert any("/pm/v1/monitor/task/view-tree" in url for url in session.urls)
+    assert session.calls[0][0].endswith("/pm/v1/monitor/task/view-tree")
+    assert "params" not in session.calls[0][1]
     assert "probe aceito" in caplog.text
     assert "Playwright usado" not in caplog.text
+
+
+def test_bloqueio_headless_e_transitorio_e_nunca_abre_login_manual(
+        sample_event, tmp_path, monkeypatch, caplog):
+    collector = _collector(sample_event, tmp_path, monkeypatch)
+    _write_session(collector._session_file)
+    collector._session_built_roarand["monitoring"] = "monitoring-new"
+    monkeypatch.setattr(db, "insert_alert", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(
+        "core.collector.subprocess.run",
+        lambda *_args, **_kwargs: SimpleNamespace(
+            returncode=EXIT_NEEDS_INTERACTIVE,
+            stdout="",
+            stderr="login ainda não concluiu",
+        ),
+    )
+    assert not hasattr(collector, "_spawn_interactive_reauth")
+    assert not hasattr(collector, "_raise_reauth_alert")
+
+    with caplog.at_level("INFO"):
+        renewed = collector._renew_session("monitoring")
+
+    state_key = collector._module_state_key("monitoring")
+    assert renewed is False
+    assert state_key not in HttpCollector._needs_interactive
+    assert state_key in HttpCollector._renew_backoff_until
+    assert "Nova tentativa automática" in caplog.text
+    assert "nenhuma ação manual" in caplog.text
 
 
 def test_renovacao_trace_nao_libera_monitoring_invalido(
@@ -144,33 +175,6 @@ def test_renovacao_trace_nao_libera_monitoring_invalido(
     assert any("/fars/v1/traceresult/pre-check" in url for url in session.urls)
 
 
-def test_reauth_interativa_trace_nao_limpa_estado_do_monitoring(
-        sample_event, tmp_path, monkeypatch):
-    collector = _collector(sample_event, tmp_path, monkeypatch)
-    monitoring_key = collector._module_state_key("monitoring")
-    trace_key = collector._module_state_key("trace")
-    HttpCollector._needs_interactive[monitoring_key] = "monitoring-invalid"
-    HttpCollector._needs_interactive[trace_key] = "trace-invalid"
-    commands = []
-    monkeypatch.setattr(HttpCollector, "_build_renew_cmd", lambda: ["renew"])
-    monkeypatch.setattr(
-        "core.collector.subprocess.run",
-        lambda command, **_kwargs: commands.append(command)
-        or SimpleNamespace(returncode=EXIT_SUCCESS, stdout="", stderr=""),
-    )
-
-    result = HttpCollector.run_interactive_reauth(
-        collector.base_url,
-        collector._session_file,
-        state_module="trace",
-    )
-
-    assert result["ok"] is True
-    assert commands[0][commands[0].index("--module") + 1] == "trace"
-    assert trace_key not in HttpCollector._needs_interactive
-    assert monitoring_key in HttpCollector._needs_interactive
-
-
 def test_playwright_probe_both_exige_contrato_valido_dos_dois_modulos():
     monitoring = _PlaywrightResponse("", 200, {"success": True, "data": []})
     trace = _PlaywrightResponse("", 200, {"checkState": False})
@@ -186,6 +190,7 @@ def test_playwright_probe_both_exige_contrato_valido_dos_dois_modulos():
 
     assert _probe_authenticated(page, "https://oss.example", "both", session_data) is True
     assert len(request.urls) == 2
+    assert request.urls[0] == "https://oss.example/rest/oss/access/pm/v1/monitor/task/view-tree"
 
 
 def test_playwright_probe_monitoring_nao_aceita_sucesso_do_trace():

@@ -82,6 +82,33 @@ class TestApiEvents:
         monkeypatch.setattr(database, "get_event", locked)
         assert api.get_sites(event["id"]) == first
 
+    def test_reauth_session_reagenda_headless_sem_abrir_processo_manual(
+            self, api_with_event, monkeypatch):
+        api, event = api_with_event
+        api_module._active_event = event
+        invalidated = []
+
+        class Collector:
+            def _invalidate_session(self, module):
+                invalidated.append(module)
+
+        monkeypatch.setattr(api_module.scheduler, "_collector", Collector())
+        monkeypatch.setattr(
+            api_module.credentials,
+            "resolve_base_url",
+            lambda _oss: "https://10.220.30.9:31943",
+        )
+        monkeypatch.setattr(
+            "api.api.subprocess.run",
+            lambda *_args, **_kwargs: pytest.fail("navegador/processo manual não pode abrir"),
+        )
+
+        result = api.reauth_session()
+
+        assert result["ok"] is True
+        assert result["automatic"] is True
+        assert invalidated == ["monitoring", "trace"]
+
 
 class TestApiVips:
     def test_create_vip(self, api):

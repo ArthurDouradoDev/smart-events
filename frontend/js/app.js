@@ -22,7 +22,6 @@ let _eventTimer = null;
 let _vpnTimer = null;
 let _syncTimer = null;
 let _lastSyncStatus = null;
-let _syncAuthPopupShown = false; // evita reabrir o popup a cada poll após o usuário fechá-lo
 let _historicalTimestamps = [];
 let _historicalIndex = -1;
 
@@ -837,37 +836,12 @@ function _setupSyncIndicator() {
     if (e.target === modal) modal.classList.add("hidden");
   });
 
-  // Delegação: o corpo do popup é re-renderizado a cada poll, então o botão
-  // "Reconectar" é tratado por delegação no container fixo.
   document.getElementById("sync-modal-body")?.addEventListener("click", (e) => {
-    const btn = e.target.closest(".sync-reauth");
-    if (btn) _handleSyncReauth(btn);
     if (e.target.closest(".sync-logs")) {
       modal.classList.add("hidden");
       document.getElementById("logs-btn")?.click();
     }
   });
-}
-
-async function _handleSyncReauth(btn) {
-  const original = btn.textContent;
-  btn.disabled = true;
-  btn.textContent = "Abrindo login…";
-  try {
-    const res = await API.reauthSession();
-    if (res && res.ok) {
-      alert("Sessão reautenticada com sucesso.\nA coleta será retomada no próximo ciclo.");
-      _pollSyncStatus();
-    } else {
-      alert(`Reautenticação não concluída.\n${res ? (res.error || "") : "Erro desconhecido."}`);
-    }
-  } catch (err) {
-    console.error("Erro na reautenticação:", err);
-    alert("Erro ao reautenticar sessão.");
-  } finally {
-    btn.disabled = false;
-    btn.textContent = original;
-  }
 }
 
 function _startSyncPolling() {
@@ -883,7 +857,6 @@ function _stopSyncPolling() {
   }
   document.getElementById("sync-indicator")?.classList.add("hidden");
   document.getElementById("sync-modal")?.classList.add("hidden");
-  _syncAuthPopupShown = false;
 }
 
 async function _pollSyncStatus() {
@@ -894,15 +867,6 @@ async function _pollSyncStatus() {
     _lastSyncStatus = st;
     _renderSyncIndicator(st);
     const modal = document.getElementById("sync-modal");
-
-    // Sessão inativa (requer reautenticação): abre o popup automaticamente uma vez.
-    const needsAuth = !!(st.session && st.session.needs_interactive);
-    if (needsAuth && !_syncAuthPopupShown) {
-      _syncAuthPopupShown = true;
-      modal?.classList.remove("hidden");
-    } else if (!needsAuth) {
-      _syncAuthPopupShown = false;
-    }
 
     if (modal && !modal.classList.contains("hidden")) _renderSyncModal(st);
   } catch (err) {
@@ -924,8 +888,8 @@ function _renderSyncIndicator(st) {
   el.classList.toggle("needs-auth", needsAuth);
 
   if (needsAuth) {
-    label.textContent = "Reautenticar";
-    el.title = "Reautenticação necessária — clique para detalhes";
+    label.textContent = "Reconectando";
+    el.title = "Renovação automática da sessão em andamento";
     return;
   }
   if (running) {
@@ -1018,12 +982,8 @@ function _syncSessionLine(sess) {
   if (!sess) return "";
   const needsAuth = !!sess.needs_interactive;
   const info = _stateInfo(needsAuth ? "auth_required" : "ok");
-  const label = needsAuth ? "Reautenticação necessária" : "Ativa";
-  let html = _syncRow("Sessão", `<span class="sync-dot ${info.cls}"></span>${label}`);
-  if (needsAuth) {
-    html += `<div class="sync-reauth-wrap"><button class="btn btn-primary sync-reauth">Reconectar sessão</button></div>`;
-  }
-  return html;
+  const label = needsAuth ? "Renovação automática pendente" : "Ativa";
+  return _syncRow("Sessão", `<span class="sync-dot ${info.cls}"></span>${label}`);
 }
 
 function _renderSyncModal(st) {

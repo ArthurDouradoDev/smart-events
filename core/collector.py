@@ -647,18 +647,9 @@ class HttpCollector(BaseCollector):
     # O estado persiste entre instâncias, mas sempre é isolado por (host, módulo).
     _renew_failures: dict = {}
     _renew_backoff_until: dict = {}
-    # Quando a renovação headless detecta CAPTCHA/SSO (exit 2), o módulo entra em
-    # "requer reautenticação interativa": paramos de tentar renovar sozinhos e
-    # mantemos um alerta acionável até o operador reautenticar (navegador visível).
-    # Valor = snapshot do roarand no momento em que foi marcado (para detectar a
-    # reauth do operador comparando com o roarand atual do session.json).
+    # Compatibilidade com processos iniciados em versões anteriores. Novos fluxos
+    # nunca preenchem este mapa: bloqueios headless são transitórios e usam backoff.
     _needs_interactive: dict = {}
-    # Single-flight também é por host: um CAPTCHA em SP não impede Curitiba de
-    # renovar sua própria sessão e seu próprio perfil de navegador.
-    _interactive_locks: dict = {}
-    _interactive_locks_guard = threading.Lock()
-    _interactive_cooldown_until: dict = {}
-
     _VIP_MAX_WORKERS = 3
 
     # Diagnóstico HTTP opt-in: quando ligado (HttpCollector.http_debug=True ou env
@@ -722,11 +713,6 @@ class HttpCollector(BaseCollector):
 
     def _module_state_key(self, module: str) -> tuple[str, str]:
         return self._session_host, module
-
-    @classmethod
-    def _interactive_lock_for(cls, host: str) -> threading.Lock:
-        with cls._interactive_locks_guard:
-            return cls._interactive_locks.setdefault(host, threading.Lock())
 
     @classmethod
     def interactive_modules_for(cls, base_url: str) -> set[str]:
@@ -1012,7 +998,6 @@ class HttpCollector(BaseCollector):
             if module == "monitoring":
                 response = session.get(
                     f"{self.base_url}/rest/oss/access/pm/v1/monitor/task/view-tree",
-                    params={"nocache": int(time.time() * 1000)},
                     timeout=30,
                     allow_redirects=False,
                 )
@@ -1081,117 +1066,15 @@ class HttpCollector(BaseCollector):
             cls._needs_interactive.clear()
             cls._renew_failures.clear()
             cls._renew_backoff_until.clear()
-            cls._interactive_cooldown_until.clear()
             return
         host = cls._normalize_session_host(base_url or "") if base_url else None
         keys = set(cls._needs_interactive) | set(cls._renew_failures) | set(cls._renew_backoff_until)
-        keys |= set(cls._interactive_cooldown_until)
         for key in keys:
             key_host, key_module = key
             if (host is None or key_host == host) and (module is None or key_module == module):
                 cls._needs_interactive.pop(key, None)
                 cls._renew_failures.pop(key, None)
                 cls._renew_backoff_until.pop(key, None)
-                cls._interactive_cooldown_until.pop(key, None)
-
-    @staticmethod
-    def _build_renew_cmd() -> list:
-        """Comando-base para rodar o renovador (subprocesso). No .exe usa `--get-session`;
-        em dev usa o Python do venv + scratch/get_session.py."""
-        root = Path(__file__).parent.parent
-        if getattr(sys, "frozen", False):
-            return [sys.executable, "--get-session"]
-        python_exe = root / ".venv" / "Scripts" / "python.exe"
-        if not python_exe.exists():
-            python_exe = Path("python")
-        return [str(python_exe), str(root / "scratch" / "get_session.py")]
-
-    @classmethod
-    def run_interactive_reauth(cls, base_url: str, session_file, region: str = "",
-                              respect_cooldown: bool = False, cliente: str = "",
-                              state_module: str = "both") -> dict:
-        """Abre o navegador VISÍVEL (single-flight) para o operador concluir o login +
-        CAPTCHA, captura a sessão e a grava. Retorna {'ok':bool,...}.
-
-        - single-flight: nunca abre duas janelas simultâneas (monitoring + trace).
-        - respect_cooldown=True (auto-open): pula se houve falha/cancelamento recente.
-        - cliente/region: escolhem as credenciais (Cliente → Regional) para o autofill do login.
-        """
-        from datetime import timedelta
-        base_url = (base_url or "").rstrip("/")
-        host = cls._normalize_session_host(base_url)
-        state_key = (host, state_module)
-        if respect_cooldown:
-            cd = cls._interactive_cooldown_until.get(state_key)
-            if cd and datetime.utcnow() < cd:
-                return {"ok": False, "error": "cooldown", "skipped": True}
-        interactive_lock = cls._interactive_lock_for(host)
-        if not interactive_lock.acquire(blocking=False):
-            return {"ok": False, "error": "Reautenticação já em andamento.", "in_progress": True}
-        try:
-            requested_module = state_module if state_module in ("monitoring", "trace") else "both"
-            cmd = cls._build_renew_cmd() + [
-                "--module", requested_module,   # sem --headless → navegador visível
-                "--base-url", base_url,
-                "--session-file", str(session_file),
-                "--region", region or "",
-                "--cliente", cliente or "",
-            ]
-            logger.info(f"[reauth] Abrindo navegador visível para reautenticação ({base_url})...")
-            result = subprocess.run(
-                cmd, capture_output=True, text=True, timeout=320,
-                cwd=str(Path(__file__).parent.parent),
-            )
-            if result.returncode == EXIT_SUCCESS:
-                reset_module = None if requested_module == "both" else requested_module
-                cls.reset_interactive_state(module=reset_module, base_url=base_url)
-                logger.info(
-                    "[reauth/%s] Reautenticação interativa concluída com sucesso. "
-                    "Coleta do módulo retomada.", requested_module,
-                )
-                return {"ok": True, "base_url": base_url}
-            tail = ((result.stdout or "")[-400:] + " " + (result.stderr or "")[-400:]).strip()
-            cls._interactive_cooldown_until[state_key] = datetime.utcnow() + timedelta(minutes=5)
-            logger.error(f"[reauth] Reautenticação não concluída (rc={result.returncode}): {tail}")
-            return {
-                "ok": False,
-                "error": "Reautenticação não concluída. Confira usuário/senha e o código (CAPTCHA).",
-                "detail": tail,
-            }
-        except subprocess.TimeoutExpired:
-            cls._interactive_cooldown_until[state_key] = datetime.utcnow() + timedelta(minutes=5)
-            return {"ok": False, "error": "Tempo limite de reautenticação excedido (5 min)."}
-        except Exception as e:
-            cls._interactive_cooldown_until[state_key] = datetime.utcnow() + timedelta(minutes=5)
-            logger.error(f"[reauth] erro ao executar reautenticação: {e}")
-            return {"ok": False, "error": str(e)}
-        finally:
-            interactive_lock.release()
-
-    def _spawn_interactive_reauth(self, module: str):
-        """Dispara a reauth interativa em uma thread separada (não bloqueia a coleta).
-        Abre o navegador automaticamente quando o CAPTCHA é detectado; o single-flight
-        e o cooldown garantem que não abra janelas em excesso."""
-        interactive_lock = HttpCollector._interactive_lock_for(self._session_host)
-        if interactive_lock.locked():
-            return
-        state_key = self._module_state_key(module)
-        cd = HttpCollector._interactive_cooldown_until.get(state_key)
-        if cd and datetime.utcnow() < cd:
-            return
-        base_url, session_file, region = self.base_url, self._session_file, self._region
-        cliente = self._cliente
-
-        def _worker():
-            res = HttpCollector.run_interactive_reauth(
-                base_url, session_file, region=region, respect_cooldown=True,
-                cliente=cliente, state_module=module)
-            if res.get("ok"):
-                # Descarta as sessões em cache desta instância para releitura imediata.
-                self._invalidate_session("monitoring")
-                self._invalidate_session("trace")
-
-        threading.Thread(target=_worker, name="interactive-reauth", daemon=True).start()
 
     def _engage_backoff(self, module: str) -> int:
         """Incrementa o contador de falhas e arma o backoff (60→300s). Retorna o backoff em s."""
@@ -1205,72 +1088,29 @@ class HttpCollector(BaseCollector):
         )
         return backoff_s
 
-    def _oss_region_label(self) -> str:
-        oss = self.event.get("oss", {}) if isinstance(self.event, dict) else {}
-        region = (oss.get("region") or "").upper()
-        if region:
-            return region
-        try:
-            import urllib.parse
-            return urllib.parse.urlparse(self.base_url).hostname or self.base_url
-        except Exception:
-            return self.base_url
-
-    def _raise_reauth_alert(self, module: str):
-        """Emite UM alerta persistente e acionável pedindo reautenticação manual.
-        O alerta é por-regional (login/sessão é compartilhado entre os módulos), então
-        trace e monitoring não geram alertas duplicados."""
-        region = self._oss_region_label()
-        msg = (f"Sessão do iManager ({region}) bloqueada por CAPTCHA/SSO — "
-               f"reautenticação manual necessária. Clique para reautenticar.")
-        try:
-            active = db.get_active_alerts(self.event_id)
-            if not any(a.get("message") == msg for a in active):
-                db.insert_alert({
-                    "event_id":  self.event_id,
-                    "level":     "GLOBAL",
-                    "severity":  "CRITICAL",
-                    "site_id":   "GLOBAL",
-                    "cell_id":   "",
-                    "message":   msg,
-                    "timestamp": datetime.utcnow().strftime('%Y-%m-%dT%H:%M:%SZ'),
-                })
-        except Exception as e:
-            logger.warning(f"Não foi possível inserir alerta de reauth: {e}")
 
     def _renew_session(self, module: str) -> bool:
         """
         Renova a sessão via Playwright (subprocesso headless). Retorna True somente
         quando a renovação foi EFETIVA (sessão autenticada gravada); False caso
-        contrário (backoff ativo, CAPTCHA/SSO exigindo reauth, ou falha).
+        contrário (backoff ativo, login ainda em progresso ou falha).
 
         - Backoff exponencial (60→300s) após falhas consecutivas, evitando loop.
-        - exit 2 (EXIT_NEEDS_INTERACTIVE): login bloqueado por CAPTCHA/SSO. Marca o módulo
-          como 'requer reauth interativa', emite UM alerta acionável e para de tentar
-          renovar sozinho até o operador reautenticar (api.reauth_session) — isto elimina
-          o loop infinito de renovações que nunca autenticavam.
-        - Detecção de reauth do operador / de renovação por outra thread: se o roarand do
-          session.json mudou, recarrega e executa o probe do módulo antes de aceitar.
+        - exit 2 (EXIT_NEEDS_INTERACTIVE): estado transitório do login. Não abre
+          navegador nem pede intervenção; agenda nova tentativa headless.
+        - Se outra thread renovar o session file, recarrega e executa o probe do
+          módulo antes de aceitar.
         """
         state_key = self._module_state_key(module)
-        # ── Já aguardando reauth interativa? Só sai disso quando o operador reautentica ──
+        # Versões anteriores pausavam indefinidamente e abriam um navegador quando
+        # o login headless encontrava um bloqueio transitório. Esse estado não deve
+        # sobreviver: a renovação é sempre automática e volta a tentar com backoff.
         if state_key in HttpCollector._needs_interactive:
-            roarand_marked = HttpCollector._needs_interactive.get(state_key) or ""
-            module_data = self._load_session_data().get(module, {}) or {}
-            roarand_now = module_data.get("roarand") or ""
-            if roarand_now and roarand_now != roarand_marked and module_data.get("cookies"):
-                if self._reload_and_probe(module, "reauth interativa detectada"):
-                    HttpCollector._renew_failures.pop(state_key, None)
-                    HttpCollector._renew_backoff_until.pop(state_key, None)
-                    self._clear_interactive_state(module)
-                    return True
-                # O arquivo mudou, mas a sessão deste módulo continua recusada.
-                # Mantém o estado interativo e solicita nova autenticação visível.
-            # Continua bloqueado: mantém o alerta acionável e reabre o navegador
-            # automaticamente (single-flight + cooldown), sem rodar Playwright headless.
-            self._raise_reauth_alert(module)
-            self._spawn_interactive_reauth(module)
-            return False
+            logger.info(
+                "[renew/%s] Estado manual legado descartado; retomando renovação automática.",
+                module,
+            )
+            self._clear_interactive_state(module)
 
         # ── Backoff: se falhou recentemente, pula esta tentativa ─────────
         now = datetime.utcnow()
@@ -1284,9 +1124,8 @@ class HttpCollector(BaseCollector):
             return False
 
         # ── Sessão em cache obsoleta? Se o session.json já tem um roarand diferente do
-        #    que a sessão em cache usou, alguém renovou (outra thread OU a reauth interativa
-        #    do operador): basta recarregar do arquivo, sem rodar Playwright (evita reabrir
-        #    o navegador logo após um login bem-sucedido). ──────────────────────────────
+        #    que a sessão em cache usou, outra thread publicou uma renovação:
+        #    recarregue do arquivo e valide antes de iniciar outro Playwright. ────────
         _mod_data = self._load_session_data().get(module, {}) or {}
         _file_roarand = _mod_data.get("roarand")
         if (_file_roarand and _file_roarand != self._session_built_roarand.get(module)
@@ -1385,18 +1224,17 @@ class HttpCollector(BaseCollector):
                     return False
 
                 if result.returncode == EXIT_NEEDS_INTERACTIVE:
-                    # CAPTCHA/SSO: renovação headless é impossível. Marca o módulo, emite
-                    # alerta acionável e ABRE o navegador visível automaticamente para o
-                    # operador logar (single-flight evita janela duplicada monitoring+trace).
-                    snapshot = (self._load_session_data().get(module, {}) or {}).get("roarand") or ""
-                    HttpCollector._needs_interactive[state_key] = snapshot
-                    logger.error(
-                        f"[renew/{module}] Login bloqueado por CAPTCHA/SSO — abrindo navegador "
-                        f"para reautenticação interativa. Coleta deste módulo pausada até logar.\n"
+                    # CAPTCHA/SSO e estados intermediários do login são transitórios.
+                    # Nunca transfira a responsabilidade ao operador: aguarde e tente
+                    # novamente de forma headless no próximo ciclo.
+                    self._clear_interactive_state(module)
+                    backoff_s = self._engage_backoff(module)
+                    logger.warning(
+                        f"[renew/{module}] Login headless ainda não concluiu "
+                        f"(estado transitório). Nova tentativa automática em {backoff_s}s; "
+                        f"nenhuma ação manual é necessária.\n"
                         f"  STDOUT: {stdout_tail or '(vazio)'}\n  STDERR: {stderr_tail or '(vazio)'}"
                     )
-                    self._raise_reauth_alert(module)
-                    self._spawn_interactive_reauth(module)
                     return False
 
                 # Falha genérica (EXIT_GENERIC_FAIL ou returncode inesperado)

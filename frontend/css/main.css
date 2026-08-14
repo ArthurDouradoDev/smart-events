@@ -330,8 +330,6 @@ input[type="range"] {
   text-align: right;
 }
 .sync-hint.err { color: var(--danger); }
-.sync-reauth-wrap { margin-top: 10px; }
-.sync-reauth { width: 100%; }
 .sync-logs { width: 100%; margin-top: 12px; font-size: 12px; }
 
 /* Icon buttons */
@@ -1033,16 +1031,6 @@ input[type="range"] {
   border: 1px solid var(--border);
 }
 .alert-ack:hover { color: var(--text-primary); background: var(--bg-hover); }
-.alert-reauth {
-  color: var(--bg-base);
-  background: var(--warning);
-  border-color: var(--warning);
-  font-weight: 600;
-  white-space: nowrap;
-}
-.alert-reauth:hover { color: var(--bg-base); background: #E0A93A; }
-.alert-reauth:disabled { opacity: 0.6; cursor: default; }
-
 /* ── Modal ───────────────────────────────────────────────────────── */
 .modal {
   position: fixed; inset: 0;

@@ -333,36 +333,32 @@ class Api:
             return {"ok": False, "error": str(e)}
 
     def reauth_session(self) -> dict:
-        """Reautenticação interativa do iManager: abre um navegador VISÍVEL para o
-        operador concluir o login (incluindo o CAPTCHA exibido em imagem), captura a
-        sessão e a grava. Necessária porque a renovação headless não resolve CAPTCHA.
+        """Compatibilidade: retoma imediatamente a renovação headless.
 
-        OSS-agnóstico: resolve base_url/session_file a partir do OSS do evento ativo
-        (mesma precedência de check_vpn/build_collector), valendo para SP, RJ e outras.
+        O endpoint antigo abria um navegador visível. Bloqueios de sessão são agora
+        tratados automaticamente com backoff, sem intervenção do operador.
         """
         global _active_event
         try:
             oss = (_active_event or {}).get("oss", {}) if _active_event else {}
             base_url = credentials.resolve_base_url(oss).rstrip("/")
 
-            # Resolve o session.json da regional (mesma regra do collector) e delega à
-            # rotina compartilhada (single-flight com o auto-open disparado pela coleta).
+            # Resolve o session.json da regional e limpa qualquer estado de espera
+            # legado para que o próximo ciclo tente novamente em modo headless.
             from core.collector import HttpCollector
             session_file = HttpCollector._resolve_session_file(base_url)
-            region = (oss.get("region") or "").upper()
-            cliente = (oss.get("cliente") or "").strip()
-            res = HttpCollector.run_interactive_reauth(
-                base_url, session_file, region=region, cliente=cliente)
-            if res.get("ok"):
-                # Força o collector ativo a reler o session.json recém-gravado.
-                try:
-                    coll = scheduler._collector
-                    if hasattr(coll, "_invalidate_session"):
-                        coll._invalidate_session("monitoring")
-                        coll._invalidate_session("trace")
-                except Exception as ex:
-                    logger.warning(f"reauth_session: falha ao invalidar sessões em cache: {ex}")
-            return res
+            HttpCollector.reset_interactive_state(base_url=base_url)
+            coll = scheduler._collector
+            if hasattr(coll, "_invalidate_session"):
+                coll._invalidate_session("monitoring")
+                coll._invalidate_session("trace")
+            logger.info("reauth_session: renovação headless liberada para nova tentativa.")
+            return {
+                "ok": True,
+                "automatic": True,
+                "base_url": base_url,
+                "session_file": str(session_file),
+            }
         except Exception as e:
             logger.error(f"reauth_session error: {e}")
             return {"ok": False, "error": str(e)}

@@ -150,10 +150,10 @@ def _probe_authenticated(page, base_url: str, module: str, session_data: dict) -
         headers = {"roarand": roarand}
         nocache = int(time.time() * 1000)
         if requested == "monitoring":
-            probe_url = (
-                f"{base_url}/rest/oss/access/pm/v1/monitor/task/view-tree"
-                f"?nocache={nocache}"
-            )
+            # Contrato observado nas duas regionais: ``view-tree`` não recebe
+            # query string. Curitiba responde HTTP 400 quando ``nocache`` é
+            # anexado, o que antes era confundido com CAPTCHA/login incompleto.
+            probe_url = f"{base_url}/rest/oss/access/pm/v1/monitor/task/view-tree"
         else:
             task_id = module_data.get("task_id") or 1
             probe_url = (
@@ -394,9 +394,9 @@ def run(headless: bool = True, module: str = "both",
         elif headless:
             page.wait_for_timeout(7000)
             if _still_on_login(page):
-                logger.error(
-                    "Login bloqueado (CAPTCHA/credencial) e não resolvível em modo headless "
-                    "— requer reautenticação interativa (navegador visível)."
+                logger.warning(
+                    "Login headless ainda não concluiu. O estado é transitório e "
+                    "será tentado novamente automaticamente."
                 )
                 try:
                     context.close()
@@ -553,10 +553,13 @@ def run(headless: bool = True, module: str = "both",
         # Sem isto, uma sessão presa no SSO/CAPTCHA seria gravada como "sucesso" e
         # o coletor entraria em loop infinito de renovação (bug original).
         if not _probe_authenticated(page, base_url, module, session_data):
-            logger.error(
-                "Sessão capturada NÃO está autenticada (sonda REST devolveu SSO/HTML). "
-                "Provável CAPTCHA/login incompleto — requer reautenticação interativa."
-            )
+            if headless:
+                logger.warning(
+                    "Sessão capturada ainda não passou no probe; a renovação "
+                    "automática tentará novamente após o backoff."
+                )
+            else:
+                logger.error("Sessão capturada não passou no probe autenticado.")
             try:
                 context.close()
             except Exception:
