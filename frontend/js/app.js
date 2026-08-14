@@ -966,9 +966,13 @@ function _syncCoverageLine(kpi) {
   const discarded = Number(coverage.unmapped_objects || 0);
   const received = Number(kpi?.received || 0);
   const mapped = Number(coverage.mapped_objects ?? Math.max(0, received - discarded));
+  // `received` é derivado de calculado+inválido quando o coletor não o informa: sem
+  // mostrar os inválidos, um ciclo que rejeitou tudo aparecia como "recebidos N · mapeados 0".
+  const invalid = Number(kpi?.invalid || 0);
   let html = _syncRow(
     "Cobertura",
-    `<span>recebidos ${received} · mapeados ${mapped} · descartados ${discarded}</span>`
+    `<span>recebidos ${received} · mapeados ${mapped} · descartados ${discarded}` +
+    `${invalid ? ` · inválidos ${invalid}` : ""}</span>`
   );
   if (discarded > 0) {
     const ossNames = (coverage.unmapped_cells || []).slice(0, 5).map(_esc).join(", ") || "não informado";

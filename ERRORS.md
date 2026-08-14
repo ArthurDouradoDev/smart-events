@@ -184,3 +184,54 @@ WARNING por ciclo com os nomes vindos do OSS e exemplos das células do evento l
   por ninguém — diagnóstico que não chega ao operador não existe.
 - **Nunca avance cursor sobre dado descartado** (pendente de correção): checkpoint é promessa
   de que o dado foi persistido, e aqui ele estava sendo dado como cumprido sobre o lixo.
+
+---
+
+## 2026-08-13 — Fase 4 aplicada, KPI continua vazio e o log não diz por quê
+
+**Sintoma:** depois da troca para Teste Curitiba (21:44), o log tem ciclo de VIP e de alarmes a
+cada intervalo, e **nenhuma linha de Monitoring** por 35 minutos. `kpi_measurements` do evento
+continua em 0 e nenhum checkpoint novo foi gravado.
+
+**Causa raiz do "não sei":** `_collect_kpis_v2` não emitia nenhum log por ciclo. O único log do
+caminho era `_log_unmapped`, que só dispara com `unmapped > 0`. Um ciclo que responde HTTP 200 sem
+objetos, um ciclo sem task PM configurada e uma thread travada produzem exatamente a mesma
+evidência: silêncio. O critério de saída da Fase 4 ("HTTP 200 no log; recebidos > 0, mapeados > 0")
+exigia esse log e ele nunca existiu.
+
+**Causa raiz do "zero KPI" (confirmada pelo dump):** com o log e o dump no ar, o ciclo apareceu como
+`HTTP=200 recebidos=0 nao_mapeados=0 invalidos=464 linhas=0`. No corpo real, o OSS de Curitiba
+identifica a célula assim:
+
+```json
+"obj": {"objectNo": "91162", "objectName": "...Cell Name=4G-CTFZ01-18-I...", "objName": null}
+```
+
+`_parse_monitoring_response` lia `objNo`/`objName`. Em Curitiba a primeira grafia não existe e a
+segunda vem **explicitamente `null`** no mesmo dicionário: todo objeto caía em `int(None)` →
+`TypeError` → `invalid += 1`, e `received` (incrementado só depois da conversão) ficava em zero.
+116 objetos por janela × N janelas acumuladas viravam 232, 464, 696 "inválidos" por ciclo.
+
+**Por que a suíte não pegou:** `test_os_116_objetos_reais_da_task_2225_mapeiam_116_de_116` lê
+`obj["objectNo"]` do HAR **na própria linha do teste** e chama `_resolve_monitoring_cell` direto.
+Ele provou o resolvedor com argumentos já corretos; ninguém exercitava o parser com a grafia real.
+
+**Correção:** `_obj_field` aceita as duas grafias no parser; log por ciclo de Monitoring
+(tasks/modo, HTTP, recebidos, mapeados, não mapeados, inválidos, linhas, cursores); dump automático
+do corpo em `data/diagnostics/` nos ciclos sem medição (limitado a `MONITORING_AUTO_DUMPS` por
+processo); `objNoExecTimes` omitido na descoberta, igual ao navegador (alinhamento de contrato — não
+foi comprovado como bloqueio). Replay do dump real: 464 recebidos, 0 não mapeados, 5.124 linhas.
+
+**Regras:**
+- **Todo coletor loga um resumo por ciclo, mesmo no caminho feliz.** VIP e alarmes já faziam; KPI
+  não fazia, e por isso foi o único que ficou impossível de diagnosticar em campo.
+- **Contrato se copia do tráfego real, campo a campo.** Chave ausente ≠ chave com lista vazia; o
+  fato de um OSS aceitar as duas formas não prova que o outro aceite.
+- **Fase que só pode ser validada por log precisa entregar o log junto.** Marcar a fase como
+  concluída sem a instrumentação do próprio critério de saída empurra o custo para o teste ao vivo.
+- **Teste que desembrulha o dado na própria linha não testa o desembrulho.** Se o teste faz
+  `obj["objectNo"]` para chamar a função, ele nunca vai reprovar quem lê `obj["objNo"]`. Fixture
+  tem que entrar pelo mesmo ponto que a resposta do OSS entra.
+- **`received` só conta depois da conversão.** Um contador de "recebidos" posterior ao parse do
+  identificador mostra 0 justamente quando o corpo veio cheio; `invalid` era o único número que
+  crescia e não estava no painel.

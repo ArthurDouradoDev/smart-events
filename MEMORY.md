@@ -257,3 +257,33 @@ descarta tudo; `region` do evento com fonte única de verdade e sem fallback sil
 troca de projeto encerrando o anterior de verdade (`stop()` com `join(timeout=5)` + `_stop_event.clear()`
 pode vazar thread de coleta); estado de renovação de sessão (`_needs_interactive`, backoff,
 `browser_profile`) chaveado por regional; `task_id` de VIP validado contra o OSS conectado.
+
+---
+
+## 2026-08-14 — Contrato de Monitoring difere por regional na identificação do objeto
+
+**Fato permanente (medido no corpo real, não presumido):** o resultado de
+`POST /rest/oss/access/pm/v1/monitor/task/result` identifica a célula com grafias diferentes
+conforme o OSS:
+
+| Campo | SP (`10.220.50.9`) | Curitiba/OUTRAS (`10.220.30.9`) |
+|---|---|---|
+| número do objeto | `objRes[].obj.objNo` | `objRes[].obj.objectNo` (string) |
+| nome do objeto | `objRes[].obj.objName` | `objRes[].obj.objectName` — e `objName` vem `null` |
+
+O eco de cursores no nível da task (`data[].objNoExecTimes[].objNo`) usa `objNo` **nos dois**.
+`counterRes` é lista de dicts nos dois. `_obj_field` em `core/collector.py` lê as duas grafias;
+não substituir por uma só sem capturar os dois OSS de novo.
+
+**Descoberta:** o navegador abre a task com `[{"taskId": N, "preExecTime": 0}]`, sem a chave
+`objNoExecTimes`. O app faz o mesmo desde 14/08.
+
+**Forma do corpo (Curitiba, task 2225):** `data[0].results[]` traz uma janela por `execTime`
+(period=5), cada uma com os 116 `objRes`. O OSS acumula até ~6 janelas, então uma consulta de
+descoberta devolve 464–696 objetos — repetição esperada, absorvida pela chave única de
+`kpi_measurements`. As métricas `ran_rtt` e `terrestrial_rtt` não têm contador nessa task e
+sempre geram `invalid_formula`; o ciclo fica `partial` por isso mesmo com dados bons.
+
+**Estado das fases:** Fase 4 fechada em 14/08 — replay do dump real dá 464 recebidos, 0 não
+mapeados, 5.124 linhas. Fase 5 (contrato FARS assíncrono para VIP) segue pendente: em Curitiba
+`query/fetch-field-values` responde HTTP 500 em todo ciclo.

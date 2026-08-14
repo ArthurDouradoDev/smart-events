@@ -138,6 +138,33 @@ def test_os_116_objetos_reais_da_task_2225_mapeiam_116_de_116(tmp_db, monkeypatc
     assert len({item["cell_id"] for item in mapped if item}) == 116
 
 
+def test_parser_aceita_a_grafia_objectno_do_oss_de_curitiba(tmp_db, monkeypatch):
+    """O resultado da PM em Curitiba identifica a célula em ``objectNo``/``objectName``
+    e ainda devolve ``objName: null`` no mesmo dicionário. Lendo só ``objNo``, todos os
+    objetos caíam em ``int(None)`` e eram contados como inválidos antes de ``received``:
+    HTTP 200, 116 objetos por janela e zero medição."""
+    monkeypatch.setattr(db, "get_event_vips", lambda *_: [])
+    collector = HttpCollector(_event_com_celula("4G-CTFZ01-18-I"), "https://oss.example")
+    response = {"data": [{"taskId": 100, "execTime": 1_700_000_000_000, "results": [{
+        "execTime": 1_700_000_000_000, "period": 5, "objRes": [{
+            "obj": {
+                "objectNo": "91162",
+                "objectName": "SR-CTFZ01-eNodeB Function Name=4G-CTFZ01, "
+                              "Local Cell ID=129, Cell Name=4G-CTFZ01-18-I",
+                "objName": None,
+            },
+            "counterRes": [{"name": key, "value": value, "reliable": 1}
+                           for key, value in _COUNTERS_4G.items()],
+        }],
+    }]}]}
+
+    parsed = collector._parse_monitoring_response(response, {"100": "4G"})
+
+    assert parsed["received"] == 1
+    assert parsed["unmapped"] == 0
+    assert any(row["cell_id"] == "4G-CTFZ01-18-I" for row in parsed["rows"])
+
+
 def test_12_objetos_indisponiveis_nao_bloqueiam_as_outras_104_celulas(
         tmp_db, monkeypatch):
     monkeypatch.setattr(db, "get_event_vips", lambda *_: [])
@@ -243,7 +270,9 @@ def test_descoberta_ignora_cursor_geral_antigo(tmp_db, monkeypatch):
     payload = collector._monitoring_payload(
         [{"task_id": 100, "technology": "4G"}], "OUTRAS")
 
-    assert payload == [{"taskId": 100, "preExecTime": 0, "objNoExecTimes": []}]
+    # Contrato de descoberta capturado do navegador no OSS de Curitiba:
+    # a chave objNoExecTimes não é enviada enquanto não há objetos conhecidos.
+    assert payload == [{"taskId": 100, "preExecTime": 0}]
 
 
 def test_resposta_vazia_na_descoberta_nao_confirma_cursor(tmp_db, monkeypatch):

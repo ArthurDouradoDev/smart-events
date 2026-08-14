@@ -66,6 +66,9 @@ _REGIONAL_BASE_URLS: dict[str, str] = {
 }
 _DEFAULT_BASE_URL = "https://10.220.50.9:31943"  # fallback = SP
 
+# Quantos corpos de Monitoring sem medição são gravados automaticamente por processo.
+MONITORING_AUTO_DUMPS = 3
+
 
 # ── Coleta de alarmes (iMaster FM website) ───────────────────────────
 # Lógica portada de imaster_alarms.py (validada AO VIVO na VPN em 30/06): o cmd 1102
@@ -369,18 +372,23 @@ class BaseCollector(ABC):
             objects = self._request_objects_for_task(task)
             fallback = checkpoints.get("")
             discovering = not objects
-            payload.append({
+            item = {
                 "taskId": task["task_id"],
                 "preExecTime": 0 if discovering else (
                     int(fallback) if fallback and str(fallback).isdigit() else 0),
-                "objNoExecTimes": [
+            }
+            # Na descoberta o navegador envia apenas ``[{"taskId": N, "preExecTime": 0}]``;
+            # a chave ``objNoExecTimes`` só aparece quando há objetos. Enviar uma lista
+            # vazia não é o mesmo contrato e não pode ser assumido equivalente.
+            if not discovering:
+                item["objNoExecTimes"] = [
                     {
                         "objNo": obj_no,
                         "preExecTime": int(checkpoints.get(str(obj_no), fallback or 0)),
                     }
                     for obj_no in objects
-                ],
-            })
+                ]
+            payload.append(item)
         return payload
 
     def _log_unmapped(self, parsed: dict) -> None:
@@ -398,16 +406,43 @@ class BaseCollector(ABC):
             f"exemplos de células cadastradas no evento: {esperados}"
         )
 
+    def _log_monitoring_cycle(self, response, payload: list[dict], discovery_tasks: set,
+                              parsed: dict, response_payload) -> None:
+        """Registra o resultado de cada ciclo de PM, como já era feito em VIP e alarmes.
+
+        Sem esta linha, um ciclo que responde 200 sem objetos é indistinguível de um
+        worker parado: ambos não escrevem nada no log, no banco e nos checkpoints.
+        Quando o ciclo não produz medição, o corpo é gravado em ``data/diagnostics``
+        (limitado por processo) para que a causa possa ser lida sem novo build.
+        """
+        tasks_desc = ", ".join(
+            f"{item['taskId']}"
+            f"{'/descoberta' if str(item['taskId']) in discovery_tasks else '/' + str(len(item.get('objNoExecTimes') or [])) + 'obj'}"
+            for item in payload
+        )
+        logger.info(
+            "[monitoring] tasks=%s HTTP=%s recebidos=%s mapeados=%s nao_mapeados=%s "
+            "invalidos=%s linhas=%s cursores=%s",
+            tasks_desc or "-", response.status_code, parsed["received"],
+            parsed["received"] - parsed["unmapped"], parsed["unmapped"],
+            parsed["invalid"], len(parsed["rows"]), len(parsed["cursors"]),
+        )
+        if parsed["rows"] or self._auto_dumps_monitoring >= MONITORING_AUTO_DUMPS:
+            return
+        if self._dump_raw(response_payload, "monitoring", force=True):
+            self._auto_dumps_monitoring += 1
+
     def _collect_kpis_v2(self) -> CollectionResult:
         session_data = self._load_session_data()
         tasks = self._configured_pm_tasks(session_data)
         if not tasks:
+            logger.warning("[monitoring] nenhuma task PM configurada para as tecnologias do evento.")
             return CollectionResult.partial(cause="Nenhuma task PM foi configurada para as tecnologias do evento.",
                                             coverage={"cells_mapped": 0, "cells_expected": len(self.cell_ids)})
         oss = (self._region or self.base_url).upper()
         payload = self._monitoring_payload(tasks, oss)
         discovery_tasks = {
-            str(item["taskId"]) for item in payload if not item["objNoExecTimes"]
+            str(item["taskId"]) for item in payload if not item.get("objNoExecTimes")
         }
         url = f"{self.base_url}/rest/oss/access/pm/v1/monitor/task/result"
         renewed = False
@@ -429,6 +464,10 @@ class BaseCollector(ABC):
                 if parsed["received"] == 0:
                     for task_id in discovery_tasks:
                         parsed["cursors"].pop(f"{task_id}:", None)
+                # Depois do descarte de descoberta: o número de cursores logado é o
+                # que será realmente confirmado no banco.
+                self._log_monitoring_cycle(response, payload, discovery_tasks, parsed,
+                                           response_payload)
                 for task in tasks:
                     self._discovered_pm_tasks.add(str(task["task_id"]))
                 coverage = {
@@ -676,6 +715,7 @@ class HttpCollector(BaseCollector):
         # de ambiente continua útil para reproduções locais sem passar pela interface.
         self._raw_capture_kinds: set[str] = set()
         self._last_raw_dumps: dict[str, Path] = {}
+        self._auto_dumps_monitoring = 0
         self._oss_tz_offset_min = event_config.get("oss", {}).get("timezone_offset_min", -180)
         # Cliente (TIM, Vivo, …) e regional do OSS (SP, RJ, …) — escolhem as credenciais
         # (Cliente → Regional) na renovação de sessão.
@@ -779,16 +819,17 @@ class HttpCollector(BaseCollector):
             return [HttpCollector._safe_raw_payload(item) for item in value]
         return value
 
-    def _dump_raw(self, payload, kind: str) -> Optional[Path]:
+    def _dump_raw(self, payload, kind: str, force: bool = False) -> Optional[Path]:
         """Persiste somente o corpo de uma resposta para diagnóstico opt-in.
 
         Cookies e headers nunca chegam a este método. Ainda assim, removemos os
         nomes de sessão de corpos inesperados antes de serializar para evitar que
         uma alteração de contrato transforme o diagnóstico em vazamento.
+        ``force`` é usado pelo próprio coletor quando um ciclo termina sem medição.
         """
         env_enabled = os.environ.get("SMARTEVENTS_CAPTURE_RAW") == "1"
         manually_armed = kind in self._raw_capture_kinds
-        if not (env_enabled or manually_armed):
+        if not (env_enabled or manually_armed or force):
             return None
         try:
             import urllib.parse
@@ -1444,6 +1485,22 @@ class HttpCollector(BaseCollector):
                          "scope": "SITE", "technology": technology})
         return rows
 
+    @staticmethod
+    def _obj_field(item: dict, obj: dict, *names):
+        """Lê um atributo do objeto aceitando as duas grafias do iManager.
+
+        O OSS de SP identifica a célula em ``objRes[].obj.objNo``/``objName``; o de
+        Curitiba usa ``objectNo``/``objectName`` e ainda devolve ``objName: null`` no
+        mesmo dicionário — ler só a primeira grafia derrubava 100% dos objetos em
+        ``int(None)``, contados como inválidos antes mesmo de ``received``.
+        """
+        for source in (item, obj):
+            for name in names:
+                value = source.get(name)
+                if value not in (None, ""):
+                    return value
+        return None
+
     def _parse_monitoring_response(self, response_json: dict, task_technologies: dict[str, str]) -> dict:
         from core.collection_result import CollectionDiagnostic
 
@@ -1472,7 +1529,7 @@ class HttpCollector(BaseCollector):
                 items = result.get("objRes", []) if "objRes" in result else [result]
                 for item in items:
                     obj = item.get("obj") or {}
-                    obj_no = item.get("objNo") or obj.get("objNo")
+                    obj_no = self._obj_field(item, obj, "objNo", "objectNo")
                     try:
                         obj_no = int(obj_no)
                     except (TypeError, ValueError):
@@ -1480,7 +1537,7 @@ class HttpCollector(BaseCollector):
                         diagnostics.append(CollectionDiagnostic("parsing", "Objeto Monitoring sem objNo válido", "missing_obj_no"))
                         continue
                     received += 1
-                    obj_name = item.get("objName") or obj.get("objName") or ""
+                    obj_name = self._obj_field(item, obj, "objName", "objectName") or ""
                     info = self._resolve_monitoring_cell(obj_no, obj_name, technology)
                     if not info:
                         unmapped += 1
