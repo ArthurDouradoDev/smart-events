@@ -20,6 +20,7 @@ const SYNC_POLL_INTERVAL_MS = 5_000; // 5s: poll leve do status de coleta (indic
 let _pollTimer = null;
 let _eventTimer = null;
 let _vpnTimer = null;
+let _vpnCheckInFlight = null;
 let _syncTimer = null;
 let _lastSyncStatus = null;
 let _historicalTimestamps = [];
@@ -96,6 +97,8 @@ function _enterStandbyMode() {
   document.getElementById("event-timer").classList.add("hidden");
   document.getElementById("rec-indicator").classList.add("hidden");
   _stopSyncPolling();
+  _hideVpnModal();
+  document.getElementById("vpn-status-icon")?.classList.add("hidden");
 }
 
 // Ativa o evento; ao receber needs_credentials, abre o modal sob demanda e re-tenta.
@@ -160,6 +163,8 @@ async function _enterActiveMode(event) {
   // Inicia polling periódico
   _startPolling();
   _startSyncPolling();
+  // The first reliable probe needs an active event/OSS target on both sides.
+  void _checkVpn();
 }
 
 async function _enterHistoricalMode(event) {
@@ -586,23 +591,54 @@ function _hideVpnModal() {
   State.vpnPopupOpen = false;
 }
 
-async function _checkVpn() {
-  try {
-    const res = await API.checkVpn();
-    const connected = res && res.ok ? res.connected : false;
-    State.set("vpnConnected", connected);
-    _updateVpnIcon(connected);
-    if (connected) {
-      _hideVpnModal();
-    } else {
-      // Reabre o popup automaticamente (ex.: novo ciclo de 15 min desconectado).
-      _showVpnModal(res && res.target);
-    }
-    return connected;
-  } catch (err) {
-    console.error("Erro ao verificar VPN:", err);
-    return false;
+function _delay(ms) {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+async function _probeVpn() {
+  const res = await API.checkVpn();
+  if (!res?.ok || res.connected == null) return { determined: false, res };
+  return { determined: true, connected: Boolean(res.connected), res };
+}
+
+async function _checkVpn({ manual = false } = {}) {
+  if (State.mode !== "active" || !State.eventId) {
+    _hideVpnModal();
+    document.getElementById("vpn-status-icon")?.classList.add("hidden");
+    return null;
   }
+  if (_vpnCheckInFlight) return _vpnCheckInFlight;
+
+  _vpnCheckInFlight = (async () => {
+    try {
+      let probe = await _probeVpn();
+      if (!probe.determined) return null;
+
+      // A route may still be settling when the desktop app opens. Confirm an
+      // automatic failure before declaring the VPN disconnected.
+      if (!probe.connected && !manual) {
+        await _delay(1500);
+        probe = await _probeVpn();
+        if (!probe.determined) return null;
+      }
+
+      const { connected, res } = probe;
+      State.set("vpnConnected", connected);
+      _updateVpnIcon(connected);
+      if (connected) {
+        _hideVpnModal();
+      } else {
+        _showVpnModal(res && res.target);
+      }
+      return connected;
+    } catch (err) {
+      console.error("Erro ao verificar VPN:", err);
+      return null;
+    } finally {
+      _vpnCheckInFlight = null;
+    }
+  })();
+  return _vpnCheckInFlight;
 }
 
 function _setupVpnMonitor() {
@@ -618,16 +654,15 @@ function _setupVpnMonitor() {
     const original = btnRecheck.textContent;
     btnRecheck.disabled = true;
     btnRecheck.textContent = "Verificando…";
-    await _checkVpn();
+    await _checkVpn({ manual: true });
     btnRecheck.disabled = false;
     btnRecheck.textContent = original;
   });
 
   // Clicar no ícone do header revalida a conexão (reabrindo o popup se desconectado).
-  icon.addEventListener("click", () => _checkVpn());
+  icon.addEventListener("click", () => _checkVpn({ manual: true }));
 
-  // Primeira verificação imediata + ciclo periódico (todos os modos).
-  _checkVpn();
+  // Ciclo periódico; o primeiro probe ocorre em _enterActiveMode.
   if (_vpnTimer) clearInterval(_vpnTimer);
   _vpnTimer = setInterval(_checkVpn, VPN_CHECK_INTERVAL_MS);
 }
@@ -751,13 +786,12 @@ async function _populateEventDropdown() {
   // Sincroniza em segundo plano a partir do servidor central e atualiza o dropdown se novos eventos forem obtidos
   try {
     const syncRes = await API.syncEvents();
-    const syncedCount = syncRes?.stats?.events?.sincronizados ?? 0;
-    if (syncRes && syncRes.ok && syncedCount > 0) {
+    if (syncRes && syncRes.ok) {
       events = await API.getEvents();
-      const container = document.querySelector(".event-dropdown-container");
-      if (container && container.classList.contains("open")) {
-        _renderDropdownItems(events);
-      }
+      // The trigger awaits this function before adding `.open`, therefore
+      // checking that class here skipped the freshly synced state precisely on
+      // the first opening. Always replace the cached rendering after sync.
+      _renderDropdownItems(events);
     }
   } catch (syncErr) {
     console.warn("Falha na sincronização em segundo plano do dropdown:", syncErr);

@@ -290,6 +290,52 @@ mapeados, 5.124 linhas. Fase 5 (contrato FARS assíncrono para VIP) segue penden
 
 ---
 
+## 2026-08-14 — O 5G do Monitoring é NR Cell + NR DU Cell; "SA/NSA" não existe como task
+
+**Fonte:** `har-5g-oss/` (4 HARs, os dois OSS, NR Cell e NR DU Cell). Fecha a "Captura B" que
+`pendencia-har.md` listava como a última lacuna funcional. Plano derivado:
+`docs/plans/2026-08-14-001-feat-5g-nrcell-nrducell-monitoring-plan.md`.
+
+- **Não existe task "SA" nem "NSA"** — 98 tasks em OUTRAS, 106 em SP, nenhuma. A divisão é por
+  **tipo de objeto**: `TesteSantoAmaro NRCELL (749)` / `NRDUCELL (748)` em SP;
+  `TESTE FERRAMENTA - 5G CELL (2241)` / `5G DUCELL (2242)` em OUTRAS. `GET monitor/task/view-tree`
+  enumera todas com id, nome e status.
+- **Os dois conjuntos de contadores são disjuntos** (interseção vazia) e **o catálogo 5G atual já
+  está correto**: NR Cell (20 contadores) fecha `accessibility`, `drop_rate`, `availability`,
+  `user_count` — 4/4 sem ausência; NR DU Cell (12) fecha `utilization_dl/ul`, `throughput_ul`,
+  `interference_ul` e os quatro `traffic_volume_*` — 8/9. Nenhum contador da task fica sem uso.
+- **Único bloqueio: `N.ThpVol.DL.LastSlot` não está configurado na task DU Cell**, então
+  `throughput_dl` 5G não calcula. Encaminhamento é **pedir o contador no iManager**, não alterar a
+  fórmula para caber na task.
+- **`N.ThpVol.DL == N.NSA.ThpVol.DL` em 5/5 objetos, DL e UL.** Todo o tráfego é NSA e o volume SA é
+  zero — `traffic_volume_dl_sa = N.ThpVol.DL − N.NSA.ThpVol.DL` está **certo** e mede isso. A
+  distinção SA↔NSA é de **contador dentro da task DU Cell**, nunca de task. Não trocar a subtração
+  por leitura direta de `N.NSA.ThpVol.*`: daria o mesmo número hoje e apagaria a capacidade de ver
+  tráfego SA quando existir.
+- **`objNo` é namespace da task, não do OSS.** Mesma célula tem objNo diferente em cada task
+  (`5G-SPSMG7-35-MB` = 17714 na 749, 17717 na 748) e **63 dos 105 objNo da 2241 reaparecem na 2242**
+  em OUTRAS (em SP são disjuntos). Com `_obj_to_cell` chaveado só por `obj_no`, a segunda task herda
+  o mapeamento da primeira pelo early-return e grava medição na célula errada, em silêncio. A chave
+  correta é **`(task_id, obj_no)`** — não `(technology, obj_no)`.
+- **Unidades medidas:** `N.ThpVol.DL`/`.UL` e `N.NSA.ThpVol.*` em `kbit`; `N.Cell.Avail.Dur` em `s`;
+  `N.UL.NI.Avg` em `dBm`. Os contadores de tempo (`N.ThpTime.*`) vêm **sem unidade** — é o que ainda
+  segura `production_ready` de `throughput_ul`.
+- **O regex `Cell Name\s*=\s*([^,]+)` já serve aos dois tipos**: em `NR DU Cell Name=…` ele casa o
+  sufixo e devolve o nome certo. E **o nome da célula é o mesmo nas duas tasks** — uma entrada de
+  inventário serve às duas, a resolução dinâmica por nome funciona, `obj_no` manual continua
+  desnecessário.
+- **Inventário:** `testesantoamaro` já tem as 5 células 5G e elas casam 5/5 com o OSS — SP é
+  validável hoje só adicionando as tasks 748/749. `teste-curitiba` tem **0** células 5G em 6.242
+  contra 105 objetos na task 2241 — OUTRAS exige recadastro do inventário antes de qualquer teste.
+- **Sem custo de migração:** `kpi_measurements` tem 100% `4G` nos dois bancos de produção
+  (99.060 Curitiba / 137.387 Santo Amaro) e nenhuma linha `5G`.
+- **Pendente de medição:** o corpo da task 2242 (NR DU Cell de OUTRAS) não foi capturado — as 3
+  respostas vieram com 200 e ~284 KB, mas sem `content.text`. A NR Cell é idêntica entre os OSS, o
+  que torna razoável esperar o mesmo da DU Cell; razoável não é medido. Recapturar com corpo antes
+  de fechar OUTRAS.
+
+---
+
 ## 2026-08-14 — Fases 5 e 6: contrato FARS regional e saneamento seguro
 
 O FARS deve ser selecionado por capacidade do host e versão autenticada da sessão:

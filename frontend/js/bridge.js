@@ -68,9 +68,39 @@ document.addEventListener("DOMContentLoaded", () => {
 const _mockCollectionScenario = new URLSearchParams(window.location.search).get("collectionScenario") || "data";
 
 // Cenários reproduzíveis do histórico de VIP: use `?vipSeriesScenario=empty`
-// (default, empty, error, error_once ou delay) ao abrir o frontend sem pywebview.
+// (default, dense, empty, error, error_once ou delay) ao abrir o frontend sem pywebview.
 const _vipSeriesScenario = new URLSearchParams(window.location.search).get("vipSeriesScenario") || "default";
+const _vpnScenario = new URLSearchParams(window.location.search).get("vpnScenario") || "connected";
+const _eventDropdownScenario = new URLSearchParams(window.location.search).get("eventDropdownScenario") || "default";
 const _vipErrorOnceSeen = new Set(); // nomes de VIP já vistos pelo cenário error_once
+let _vpnProbeCount = 0;
+let _eventActivated = false;
+let _eventSyncAfterActivation = false;
+
+function _mockEvents() {
+  const common = {
+    start_time: new Date(Date.now() - 5 * 3600 * 1000).toISOString(),
+    end_time: new Date(Date.now() + 5 * 3600 * 1000).toISOString(),
+    polygon: [], vips: [], thresholds: {},
+  };
+  if (_eventDropdownScenario === "stale_active") {
+    return [
+      { ...common, id: "demo-event", name: "Evento Demo", status: "ACTIVE" },
+      {
+        ...common,
+        id: "teste-curitiba",
+        name: "Teste Curitiba",
+        status: _eventActivated && !_eventSyncAfterActivation ? "ENDED" : "ACTIVE",
+      },
+    ];
+  }
+  return [{
+    ...common,
+    id: "demo-event-ended",
+    name: "Evento Demo (Histórico)",
+    status: "ENDED",
+  }];
+}
 
 // Sequência determinística (sem Math.random) que atravessa dois sites,
 // contém célula não mapeada, timestamp duplicado e métrica nula — para
@@ -143,18 +173,7 @@ const _mock = {
       thresholds: { rsrp_warning:-100, rsrp_critical:-110, utilization_warning:80, utilization_critical:95 },
     }
   }),
-  get_events: () => ([
-    {
-      id: "demo-event-ended",
-      name: "Evento Demo (Histórico)",
-      status: "ENDED",
-      start_time: new Date(Date.now() - 5 * 3600 * 1000).toISOString(),
-      end_time: new Date(Date.now() - 1 * 3600 * 1000).toISOString(),
-      polygon: [[-23.703,-46.701],[-23.697,-46.691],[-23.691,-46.696],[-23.694,-46.705],[-23.703,-46.701]],
-      vips: [{name:"Carlos Menezes"},{name:"Ana Rodrigues"},{name:"Roberto Lima"},{name:"Fernanda Costa"},{name:"Patricia Souza"}],
-      thresholds: { rsrp_warning:-100, rsrp_critical:-110, utilization_warning:80, utilization_critical:95 },
-    }
-  ]),
+  get_events: () => _mockEvents(),
   get_sites: (event_id, timestamp=null, metric=null) => {
     const MOCK_SITES = [
       { id:"ERB-07", name:"ERB-07 Interlagos",   lat:-23.7012, lng:-46.6975, status:"critical", utilization:91, is_event_site:true,
@@ -172,12 +191,11 @@ const _mock = {
       metric_is_share: ["user_count","traffic_volume_dl","traffic_volume_ul"].includes(metric),
     }));
   },
-  get_kpi_catalog: () => ({ ok: true, metrics: [
+  get_kpi_catalog: (_eventId=null) => ({ ok: true, technologies: ["4G"], metrics: [
     {id:"accessibility", technology:"4G", name:"Acessibilidade de Dados", unit:"%", site_aggregation:"recalculate"},
     {id:"availability", technology:"4G", name:"Availability", unit:"%", site_aggregation:"recalculate"},
     {id:"drop_rate", technology:"4G", name:"Drop Dados", unit:"%", site_aggregation:"recalculate"},
     {id:"utilization_dl", technology:"4G", name:"DL PRB Utility", unit:"%", site_aggregation:"recalculate"},
-    {id:"utilization_dl", technology:"5G", name:"DL PRB Utility", unit:"%", site_aggregation:"recalculate"},
     {id:"throughput_dl", technology:"4G", name:"Throughput DL", unit:"Mbit/s", site_aggregation:"sum"},
   ]}),
   get_site_cells: async (event_id, site_id) => {
@@ -192,7 +210,7 @@ const _mock = {
     { id:"ana-rodrigues",  name:"Ana Rodrigues",  role:"Diretora",       notes:null,                   in_event:true,  serving_cell:"ERB-07", serving_site: "ERB-07", serving_site_name: "ERB-07 Interlagos", last_timestamp: new Date().toISOString(), rsrp:-97, rsrq:-12, status:"warning", rsrp_min:-110, rsrp_max:-40 },
     { id:"roberto-lima",   name:"Roberto Lima",   role:"Piloto",         notes:"Convidado especial",   in_event:true,  serving_cell:"ERB-03", serving_site: "ERB-03", serving_site_name: "ERB-03 Av. Interlagos", last_timestamp: new Date().toISOString(), rsrp:-83, rsrq:-6,  status:"ok",      rsrp_min:-110, rsrp_max:-40 },
     { id:"fernanda-costa", name:"Fernanda Costa", role:null,             notes:null,                   in_event:true,  serving_cell:"ERB-11", serving_site: "ERB-11", serving_site_name: "ERB-11 Autódromo Sul", last_timestamp: new Date().toISOString(), rsrp:-88, rsrq:-9,  status:"ok",      rsrp_min:-110, rsrp_max:-40 },
-    { id:"patricia-souza", name:"Patricia Souza", role:"Conv. Especial", notes:null,                   in_event:false, serving_cell:"ERB-19", serving_site: null, serving_site_name: null, last_timestamp: new Date(Date.now() - 15 * 60000).toISOString(), rsrp:null,rsrq:null,status:"unknown", rsrp_min:-110, rsrp_max:-40 },
+    { id:"patricia-souza", name:"Patricia Souza", role:"Conv. Especial", notes:null,                   in_event:false, serving_cell:"SR-SPCNJ9_13", serving_site: null, serving_site_name: "SR-SPCNJ9", last_timestamp: new Date(Date.now() - 15 * 60000).toISOString(), rsrp:null,rsrq:null,status:"unknown", rsrp_min:-110, rsrp_max:-40 },
   ]),
   get_kpi_series: (event_id, site_id, metric, minutes, cell_id=null) => {
     const n = Math.floor(minutes) || 60;
@@ -284,7 +302,10 @@ const _mock = {
   refresh_alarms: (event_id) => ({ ok: true, count: 4 }),
   get_app_status: () => ({ recording:true, db_size_mb:4.2, now:new Date().toISOString() }),
   get_collection_status: () => _mockCollectionStatus(),
-  activate_event: (id, mock) => _mock.get_active_event(),
+  activate_event: (id, mock) => {
+    _eventActivated = true;
+    return _mock.get_active_event();
+  },
   acknowledge_alert: (id) => ({ ok:true }),
   acknowledge_all_alerts: (eventId) => ({ ok:true }),
   delete_all_alerts: (eventId) => ({ ok:true }),
@@ -300,7 +321,10 @@ const _mock = {
     }
     return timestamps;
   },
-  sync_events: () => ({ ok: true, stats: { vips: { sincronizados: 0, erros: 0 }, events: { sincronizados: 1, erros: 0 } } }),
+  sync_events: () => {
+    if (_eventActivated) _eventSyncAfterActivation = true;
+    return { ok: true, stats: { vips: { sincronizados: 0, erros: 0 }, events: { sincronizados: 1, erros: 0 } } };
+  },
   get_settings: () => ({ ok: true, settings: { server_url: "http://localhost:8000" } }),
   save_settings: (settings) => ({ ok: true, stats: { sincronizados: 1, erros: 0 } }),
   get_server_url: () => ({ ok: true, url: "http://localhost:8000" }),
@@ -336,6 +360,24 @@ const _mock = {
       return { ok: false, error: "Falha simulada (única) ao consultar o histórico do VIP." };
     }
     const series = _mockVipSeriesRows();
+    if (_vipSeriesScenario === "dense") {
+      const now = Date.now();
+      const startOfDay = new Date();
+      startOfDay.setHours(0, 0, 0, 0);
+      const span = Math.max(1, now - startOfDay.getTime());
+      return {
+        ok: true,
+        series: Array.from({ length: 2400 }, (_, i) => ({
+          timestamp: new Date(startOfDay.getTime() + span * i / 2399).toISOString(),
+          rsrp: -98 + Math.sin(i / 17) * 18 + (i % 131 === 0 ? -16 : 0),
+          rsrq: -11 + Math.cos(i / 23) * 5 + (i % 173 === 0 ? -3 : 0),
+          serving_cell: "ERB-07-A1",
+          serving_site: "ERB-07",
+          serving_site_name: "ERB-07 Interlagos",
+          in_event: 1,
+        })),
+      };
+    }
     if (_vipSeriesScenario === "delay") {
       return new Promise(resolve => setTimeout(() => resolve({ ok: true, series }), 1500));
     }
@@ -343,7 +385,12 @@ const _mock = {
   },
   clear_event_history: (eventId) => ({ ok: true }),
   refresh_vips: (eventId) => ({ ok: true, count: 5 }),
-  check_vpn: () => ({ ok: true, connected: true, target: "10.220.50.9" }),
+  check_vpn: () => ({
+    ok: true,
+    connected: _vpnScenario !== "disconnected"
+      && !(_vpnScenario === "transient" && _vpnProbeCount++ === 0),
+    target: "10.220.50.9",
+  }),
   reauth_session: () => ({ ok: true, base_url: "https://10.220.30.9:31943" }),
   get_clientes: () => ({
     ok: true,
@@ -415,7 +462,7 @@ const API = {
   getSites:         (eventId, timestamp=null, metric=null) => API.call("get_sites", eventId, timestamp, metric),
   getSiteCells:     (eventId, siteId)        => API.call("get_site_cells", eventId, siteId),
   getKpiSeries:     (eventId, siteId, m, w, cellId=null) => API.call("get_kpi_series", eventId, siteId, m, w, cellId),
-  getKpiCatalog:    ()                       => API.call("get_kpi_catalog"),
+  getKpiCatalog:    (eventId=null)           => API.call("get_kpi_catalog", eventId),
   getVips:          (eventId, timestamp=null) => API.call("get_vips", eventId, timestamp),
   refreshVips:      (eventId)                 => API.call("refresh_vips", eventId),
   getAlarms:        (eventId, timestamp=null) => API.call("get_alarms", eventId, timestamp),

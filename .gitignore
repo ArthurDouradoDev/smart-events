@@ -40,10 +40,11 @@ dist/
 build/
 
 # --- Testes / artefatos temporários locais ---
-.pytest-work/
+.pytest*/
 .pytest-cache/
 .pytest_cache/
 .phase3-pytest-*/
+.phase*/
 .tmp/
 
 # --- PyInstaller metadata ---

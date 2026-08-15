@@ -8,6 +8,7 @@ import API   from "./bridge.js";
 let _chart = null;
 let _popupChart = null;
 let _searchQuery = "";
+let _catalogRequestId = 0;
 
 const METRIC_LABELS = {
   utilization_dl:    "Utilização DL (%)",
@@ -45,12 +46,27 @@ function hexToRgba(hex, alpha) {
   return `rgba(${r}, ${g}, ${b}, ${alpha})`;
 }
 
+function _formatNumber(value) {
+  const numeric = Number(value);
+  return Number.isFinite(numeric) ? numeric.toFixed(2) : "—";
+}
+
 // ── Inicialização ─────────────────────────────────────────────────
 
 export function initKpi() {
   _initChart();
   _initPopupChart();
   _loadKpiCatalog();
+
+  // O bootstrap monta a tela antes de restaurar o evento. Recarregamos o
+  // catálogo quando o contexto real chega (e também ao alternar eventos), para
+  // que o dropdown reflita somente as tasks PM daquele evento.
+  State.on("change:activeEvent", event => {
+    if (event?.id) _loadKpiCatalog(event.id);
+  });
+  State.on("change:historicalEvent", event => {
+    if (event?.id) _loadKpiCatalog(event.id);
+  });
 
   const popupModal = document.getElementById("chart-popup-modal");
   const popupCloseBtn = document.getElementById("popup-chart-close");
@@ -143,27 +159,46 @@ export function initKpi() {
   });
 }
 
-async function _loadKpiCatalog() {
-  const response = await API.getKpiCatalog();
+async function _loadKpiCatalog(eventId = State.eventId) {
+  const requestId = ++_catalogRequestId;
+  const response = await API.getKpiCatalog(eventId || null);
+  // Uma resposta do bootstrap (catálogo global) pode chegar depois da resposta
+  // filtrada do evento. Somente a chamada mais recente pode atualizar o seletor.
+  if (requestId !== _catalogRequestId) return;
   if (!response?.ok || !Array.isArray(response.metrics)) return;
   KPI_CATALOG = response.metrics;
   const selector = document.getElementById("metric-selector");
   if (!selector) return;
   const current = State.selectedMetric || selector.value;
+  const availableTechnologies = [...new Set(
+    response.metrics.map(item => item.technology).filter(Boolean)
+  )];
+  const singleTechnology = availableTechnologies.length === 1;
   const groups = new Map([["common", { label: "Métricas comuns", entries: [] }],
-                          ["4G", { label: "Adicionais 4G", entries: [] }],
-                          ["5G", { label: "5G SA / NSA", entries: [] }]]);
+                          ["4G", { label: singleTechnology ? "KPIs 4G" : "Adicionais 4G", entries: [] }],
+                          ["5G", { label: singleTechnology ? "KPIs 5G" : "Adicionais 5G", entries: [] }]]);
   // O identificador canônico pode existir em ambas tecnologias. Uma opção comum
   // continua sendo uma métrica só; o backend decide as séries disponíveis.
   const seen = new Set();
   response.metrics.forEach(meta => {
     if (seen.has(meta.id)) return;
     seen.add(meta.id);
-    const common = response.metrics.some(other => other.id === meta.id && other.technology !== meta.technology);
+    const common = !singleTechnology && response.metrics.some(
+      other => other.id === meta.id && other.technology !== meta.technology
+    );
     groups.get(common ? "common" : meta.technology)?.entries.push(meta);
     METRIC_LABELS[meta.id] = `${meta.name} (${meta.unit})`;
   });
   selector.innerHTML = "";
+  if (!response.metrics.length) {
+    const option = document.createElement("option");
+    option.value = "";
+    option.textContent = "Nenhum KPI disponível para o Monitoring configurado";
+    option.disabled = true;
+    option.selected = true;
+    selector.appendChild(option);
+    return;
+  }
   groups.forEach(group => {
     if (!group.entries.length) return;
     const optgroup = document.createElement("optgroup");
@@ -237,15 +272,15 @@ function _renderSiteList(sites) {
 
     if (site.metric_value != null) {
       if (site.metric_is_share) {
-        displayVal = `${site.metric_value}%`;
+        displayVal = `${_formatNumber(site.metric_value)}%`;
         displayClass = "";  // sem colorização para métricas de volume
       } else {
         const suffix = _getMetricSuffix(metric);
-        displayVal = `${site.metric_value}${suffix}`;
+        displayVal = `${_formatNumber(site.metric_value)}${suffix}`;
         displayClass = site.status;
       }
     } else if (site.utilization != null) {
-      displayVal = `${site.utilization}%`;
+      displayVal = `${_formatNumber(site.utilization)}%`;
     }
 
     const hasVip = (State.vips || []).some(v => v.in_event && v.serving_site === site.id);
@@ -382,7 +417,7 @@ function _initPopupChart() {
         },
         y: {
           grid:   { color: "#21262D" },
-          ticks:  { maxTicksLimit: 5 },
+          ticks:  { maxTicksLimit: 5, callback: value => _formatNumber(value) },
         },
       },
       plugins: {
@@ -413,6 +448,7 @@ function _initPopupChart() {
                 ? d.toLocaleString("pt-BR", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" })
                 : d.toLocaleTimeString("pt-BR");
             },
+            label: item => `${item.dataset.label || "Valor"}: ${_formatNumber(item.parsed.y)}`,
           },
         },
         annotation: { annotations: {} },
@@ -464,7 +500,7 @@ function _initChart() {
         },
         y: {
           grid:   { color: "#21262D" },
-          ticks:  { maxTicksLimit: 5 },
+          ticks:  { maxTicksLimit: 5, callback: value => _formatNumber(value) },
         },
       },
       plugins: {
@@ -495,6 +531,7 @@ function _initChart() {
                 ? d.toLocaleString("pt-BR", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" })
                 : d.toLocaleTimeString("pt-BR");
             },
+            label: item => `${item.dataset.label || "Valor"}: ${_formatNumber(item.parsed.y)}`,
           },
         },
         annotation: { annotations: {} },

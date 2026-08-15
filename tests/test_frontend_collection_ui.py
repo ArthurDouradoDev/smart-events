@@ -58,3 +58,30 @@ def test_collection_modal_renders_all_operational_states(scenario, label, css):
         if "Executable doesn't exist" in str(exc):
             pytest.skip("Chromium do Playwright não está instalado neste ambiente")
         raise
+
+
+def test_kpi_dropdown_expoe_somente_a_tecnologia_do_monitoring():
+    sync_api = pytest.importorskip("playwright.sync_api")
+    try:
+        with _frontend_server() as url, sync_api.sync_playwright() as playwright:
+            browser = playwright.chromium.launch(headless=True)
+            page = browser.new_page()
+            page.goto(f"{url}/index.html", wait_until="domcontentloaded")
+            page.locator("#metric-selector option").first.wait_for(timeout=5000)
+
+            technologies = page.locator("#metric-selector option").evaluate_all(
+                "options => options.map(option => option.textContent)"
+            )
+            groups = page.locator("#metric-selector optgroup").evaluate_all(
+                "items => items.map(item => item.label)"
+            )
+
+            assert groups == ["KPIs 4G"]
+            assert technologies
+            assert all("· 4G ·" in label for label in technologies)
+            assert all("5G" not in label for label in technologies)
+            browser.close()
+    except Exception as exc:
+        if "Executable doesn't exist" in str(exc):
+            pytest.skip("Chromium do Playwright não está instalado neste ambiente")
+        raise

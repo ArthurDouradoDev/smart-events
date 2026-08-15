@@ -64,6 +64,40 @@ O OSS acumula até ~6 janelas, então uma consulta de descoberta devolve 464–6
 As métricas `ran_rtt` e `terrestrial_rtt` não têm contador na task 2225 e geram `invalid_formula`
 em todo ciclo — o ciclo fica `partial` mesmo com dados bons. Não é defeito.
 
+### 5G: são duas tasks, por tipo de objeto (medido em 14/08)
+
+| | SP | OUTRAS |
+|---|---|---|
+| LTE | 747 | 2225 |
+| **NR Cell** | **749** `TesteSantoAmaro NRCELL` | **2241** `TESTE FERRAMENTA - 5G CELL` |
+| **NR DU Cell** | **748** `TesteSantoAmaro NRDUCELL` | **2242** `TESTE FERRAMENTA 5G DUCELL` |
+
+Não existe task "SA" nem "NSA" em nenhum dos dois OSS. SA e NSA se distinguem por **contador dentro
+da task NR DU Cell** (`N.ThpVol.*` total × `N.NSA.ThpVol.*`), nunca por task. Medido: os dois são
+iguais em 5/5 objetos — todo o tráfego é NSA e o volume SA é zero, que é o que a subtração reporta.
+
+`GET /rest/oss/access/pm/v1/monitor/task/view-tree` enumera todas as tasks (`taskId`, `taskName`,
+`status`). É como se descobre o id sem pedir para alguém abrir a tela.
+
+**Igual nos dois OSS:** os 20 contadores da NR Cell, nome por nome. Os conjuntos da NR Cell e da
+NR DU Cell são **disjuntos**, e o regex `Cell Name\s*=\s*([^,]+)` já serve aos dois tipos — em
+`NR DU Cell Name=…` ele casa o sufixo. **O nome da célula é o mesmo nas duas tasks**; só o `objNo`
+muda.
+
+**Diferente entre os OSS — dois achados novos:**
+
+1. **`objNo` colide entre tasks em OUTRAS, não em SP.** 63 dos 105 `objNo` da task 2241 reaparecem
+   na 2242. Em SP os conjuntos são disjuntos (749: 17714-17716; 748: 17717-17719). Um cache de
+   objeto chaveado só por `objNo` faz a segunda task herdar a célula da primeira e gravar medição
+   na célula errada, em silêncio. **A chave é `(task_id, objNo)`** — `objNo` é namespace da task.
+2. **`POST monitor/task/<id>/start` devolve `objectList` com formas diferentes:** OUTRAS usa
+   `{fdn, objInstanceInfos}`, SP usa `{parentObj, childObjs, origObjCount…}`. **Não construir
+   descoberta sobre `/start`** — `task/result` com `preExecTime: 0` é igual nos dois.
+
+Contador exigido por fórmula e ausente das duas tasks: **`N.ThpVol.DL.LastSlot`** (só
+`throughput_dl` depende dele). Unidades medidas: `N.ThpVol.*`/`N.NSA.ThpVol.*` em `kbit`,
+`N.Cell.Avail.Dur` em `s`, `N.UL.NI.Avg` em `dBm`; os `N.ThpTime.*` vêm **sem unidade**.
+
 ---
 
 ## 2. FARS / Trace — contrato síncrono e assíncrono
@@ -198,6 +232,10 @@ Ao integrar qualquer endpoint novo, ou a mesma rota num OSS novo:
 ## Fontes
 
 - `har-oss-outros/har-monitoring-oss-tsl.har` — abertura e resultado da PM 2225.
+- `har-5g-oss/har-monitoring-oss-tsp-5g-cell.har` / `-ducell.har` — tasks 749 e 748 (SP).
+- `har-5g-oss/har-monitoring-oss-tsl-5g-cell.har` — task 2241 (OUTRAS). O `-ducell.har`
+  correspondente traz as requisições da task 2242, mas **sem corpo de resposta** (200, ~284 KB,
+  `content.text` ausente): os contadores da NR DU Cell em OUTRAS seguem não medidos.
 - `har-oss-outros/har-vips-oss-tsl.har` — 83 entradas do fluxo de Trace da task 14837.
 - `data/diagnostics/monitoring_10.220.30.9_*.json` — corpos reais de PM em OUTRAS.
 - `data/logs/smart_events.log` — ciclos ao vivo das duas regionais.

@@ -163,6 +163,104 @@ def test_vip_modal_hover_line_tracks_active_point_and_clears_on_mouseout():
     _run(lambda: _frontend_server(), run)
 
 
+def test_vip_modal_dense_series_preserves_extremes_with_bounded_rendering():
+    def run(url, playwright):
+        with _vip_modal_page(playwright, url, query="vipSeriesScenario=dense") as page:
+            page.locator(".vip-card").first.click()
+            page.locator("#vip-modal-chart-wrapper").wait_for(state="visible", timeout=5000)
+
+            rendered = page.evaluate(
+                """() => Object.values(Chart.instances)
+                    .find(c => c.canvas.id === "vip-modal-chart")
+                    .data.labels.length"""
+            )
+            assert rendered <= 480
+            extrema = page.evaluate(
+                """() => {
+                    const chart = Object.values(Chart.instances)
+                        .find(c => c.canvas.id === "vip-modal-chart");
+                    const expectedRsrp = Math.min(...Array.from(
+                        {length: 2400}, (_, i) => -98 + Math.sin(i / 17) * 18
+                            + (i % 131 === 0 ? -16 : 0)
+                    ));
+                    const expectedRsrq = Math.min(...Array.from(
+                        {length: 2400}, (_, i) => -11 + Math.cos(i / 23) * 5
+                            + (i % 173 === 0 ? -3 : 0)
+                    ));
+                    return {
+                        rsrp: Math.min(...chart.data.datasets[0].data),
+                        rsrq: Math.min(...chart.data.datasets[1].data),
+                        expectedRsrp,
+                        expectedRsrq,
+                    };
+                }"""
+            )
+            assert extrema["rsrp"] == pytest.approx(extrema["expectedRsrp"])
+            assert extrema["rsrq"] == pytest.approx(extrema["expectedRsrq"])
+            note = page.locator("#vip-modal-sampling-note")
+            assert note.is_visible()
+            assert "2400 pontos" in note.inner_text()
+            assert "extremos preservados" in note.inner_text()
+
+    _run(lambda: _frontend_server(), run)
+
+
+def test_transient_vpn_failure_on_boot_does_not_open_false_alert():
+    def run(url, playwright):
+        with _vip_modal_page(playwright, url, query="vpnScenario=transient") as page:
+            page.locator("#vpn-status-icon.vpn-connected").wait_for(
+                state="visible", timeout=5000
+            )
+            assert page.locator("#vpn-modal").is_hidden()
+
+    _run(lambda: _frontend_server(), run)
+
+
+def test_site_metric_values_use_exactly_two_decimal_places():
+    def run(url, playwright):
+        with _vip_modal_page(playwright, url) as page:
+            values = page.locator("#site-list .site-util").all_inner_texts()
+            assert values
+            assert all(
+                value.replace(" ", "").strip().removesuffix("%").replace("-", "", 1)
+                .replace(".", "", 1).isdigit()
+                and len(value.replace(" ", "").strip().removesuffix("%").split(".")[-1]) == 2
+                for value in values
+            )
+
+    _run(lambda: _frontend_server(), run)
+
+
+def test_first_dropdown_open_uses_freshly_synced_active_status():
+    def run(url, playwright):
+        with _vip_modal_page(
+            playwright, url, query="eventDropdownScenario=stale_active"
+        ) as page:
+            page.locator("#event-dropdown-btn").click()
+            menu = page.locator("#event-dropdown-menu")
+            menu.wait_for(state="visible", timeout=5000)
+            curitiba = menu.locator(".event-dropdown-item").filter(
+                has_text="Teste Curitiba"
+            )
+            assert curitiba.get_by_text("Ativo", exact=True).count() == 1
+            assert curitiba.get_by_text("Histórico", exact=True).count() == 0
+
+    _run(lambda: _frontend_server(), run)
+
+
+def test_external_vip_cell_displays_inferred_site_without_marking_it_in_event():
+    def run(url, playwright):
+        with _vip_modal_page(playwright, url) as page:
+            card = page.locator(".vip-card").filter(has_text="Patricia Souza")
+            assert card.evaluate("el => el.classList.contains('out-of-event')")
+            card.click()
+            page.locator("#vip-detail-modal").wait_for(state="visible", timeout=5000)
+            assert page.locator("#vip-modal-site").inner_text() == "SR-SPCNJ9"
+            assert page.locator("#vip-modal-cell").inner_text() == "SR-SPCNJ9_13"
+
+    _run(lambda: _frontend_server(), run)
+
+
 def test_vip_modal_time_windows_switch_without_leaking_state():
     def run(url, playwright):
         with _vip_modal_page(playwright, url) as page:

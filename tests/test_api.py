@@ -4,6 +4,8 @@ Testes para api/api.py.
 Usa o banco temporário via fixture tmp_db e monkeypatcha o scheduler
 para não subir threads reais.
 """
+from types import SimpleNamespace
+
 import pytest
 import core.database as database
 from api.api import Api
@@ -47,7 +49,7 @@ class TestApiEvents:
         result = api.activate_event(ev["id"], mock=True)
         assert result.get("ok") is True
 
-    def test_activate_event_encerra_ativo_anterior(self, api, sample_event):
+    def test_activate_event_preserva_outros_eventos_ativos(self, api, sample_event):
         first = {**sample_event, "id": "event-a", "name": "Evento A"}
         second = {**sample_event, "id": "event-b", "name": "Evento B"}
         database.save_event(first)
@@ -57,9 +59,11 @@ class TestApiEvents:
         result = api.activate_event(second["id"], mock=True)
 
         assert result["ok"] is True
-        assert database.get_event(first["id"])["status"] == "ENDED"
+        assert database.get_event(first["id"])["status"] == "ACTIVE"
         assert database.get_event(second["id"])["status"] == "ACTIVE"
-        assert [row["id"] for row in database.get_events(status="ACTIVE")] == [second["id"]]
+        assert {row["id"] for row in database.get_events(status="ACTIVE")} == {
+            first["id"], second["id"]
+        }
 
     def test_end_event(self, api_with_event):
         api, ev = api_with_event
@@ -108,6 +112,42 @@ class TestApiEvents:
         assert result["ok"] is True
         assert result["automatic"] is True
         assert invalidated == ["monitoring", "trace"]
+
+
+class TestApiVpn:
+    def test_without_active_event_is_indeterminate(self, api):
+        result = api.check_vpn()
+
+        assert result == {
+            "ok": True,
+            "connected": None,
+            "target": None,
+            "reason": "no_active_event",
+        }
+
+    def test_uses_ping_exit_code(self, api_with_event, monkeypatch):
+        api, event = api_with_event
+        api_module._active_event = event
+        monkeypatch.setattr(
+            api_module.credentials,
+            "resolve_base_url",
+            lambda _oss: "https://10.220.30.9:31943",
+        )
+        monkeypatch.setattr(
+            api_module.subprocess,
+            "run",
+            lambda *_args, **_kwargs: SimpleNamespace(
+                returncode=0, stdout=b"", stderr=b""
+            ),
+        )
+
+        result = api.check_vpn()
+
+        assert result == {
+            "ok": True,
+            "connected": True,
+            "target": "10.220.30.9",
+        }
 
 
 class TestApiVips:
@@ -165,6 +205,50 @@ class TestApiSettings:
         assert result.get("ok") is True
 
 
+class TestApiKpiCatalog:
+    def test_evento_legado_com_uma_task_expoe_somente_kpis_4g(
+            self, api, sample_event):
+        event = {
+            **sample_event,
+            "id": "legacy-4g",
+            "integration": {"pm_task_id": 2225},
+        }
+        database.save_event(event)
+
+        result = api.get_kpi_catalog(event["id"])
+
+        assert result["ok"] is True
+        assert result["technologies"] == ["4G"]
+        assert result["metrics"]
+        assert {item["technology"] for item in result["metrics"]} == {"4G"}
+
+    def test_pm_tasks_filtra_catalogo_pelas_tecnologias_configuradas(
+            self, api, sample_event):
+        event = {
+            **sample_event,
+            "id": "only-5g",
+            "integration": {
+                "pm_tasks": [{"task_id": 2241, "tech": "NRCELL"}],
+            },
+        }
+        database.save_event(event)
+
+        result = api.get_kpi_catalog(event["id"])
+
+        assert result["technologies"] == ["5G"]
+        assert result["metrics"]
+        assert {item["technology"] for item in result["metrics"]} == {"5G"}
+
+    def test_evento_sem_task_nao_anuncia_kpi_indisponivel(
+            self, api, sample_event):
+        event = {**sample_event, "id": "without-monitoring", "integration": {}}
+        database.save_event(event)
+
+        result = api.get_kpi_catalog(event["id"])
+
+        assert result == {"ok": True, "metrics": [], "technologies": []}
+
+
 class TestApiCollectionStatus:
     def test_get_collection_status_structure(self, api):
         status = api.get_collection_status()
@@ -206,6 +290,7 @@ class TestApiVipSeries:
             {"timestamp": "2026-08-12T10:01:00Z", "serving_cell": "CELL2", "rsrp": -95, "rsrq": -12},
             {"timestamp": "2026-08-12T10:02:00Z", "serving_cell": "UNKNOWN", "rsrp": -100, "rsrq": -15},
             {"timestamp": "2026-08-12T10:02:00Z", "serving_cell": "256", "rsrp": -85, "rsrq": -8},  # same timestamp, different cell
+            {"timestamp": "2026-08-12T10:03:00Z", "serving_cell": "SR-SPCNJ9_13", "rsrp": -98, "rsrq": -15},
         ]
         monkeypatch.setattr(database, "get_vip_series", lambda *a, **k: rows)
         return rows
@@ -227,7 +312,7 @@ class TestApiVipSeries:
         res = api.get_vip_series("evt1", "VIP_TEST", 60)
         assert res["ok"] is True
         series = res["series"]
-        assert len(series) == 4
+        assert len(series) == 5
 
         # Covers AE2: Dois sites
         assert series[0]["serving_cell"] == "CELL1"
@@ -248,6 +333,10 @@ class TestApiVipSeries:
         assert series[3]["timestamp"] == "2026-08-12T10:02:00Z"
         assert series[3]["serving_cell"] == "256"
         assert series[3]["serving_site"] == "1"
+
+        # Site fora do evento: identifica o nome-base sem alterar in_event.
+        assert series[4]["serving_site"] is None
+        assert series[4]["serving_site_name"] == "SR-SPCNJ9"
 
     def test_vip_series_different_event_maps(self, api, mock_db_series):
         # Covers AE5: Eventos diferentes

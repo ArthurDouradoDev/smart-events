@@ -49,6 +49,12 @@ let _requestGen = 0;         // token de geração: invalida respostas tardias
 let _lastFocusedEl = null;   // elemento a receber foco de volta ao fechar
 
 const _WINDOWS = ["today", "3d", "7d", "all"];
+const VIP_MAX_RENDER_POINTS = 480;
+
+function _formatNumber(value) {
+  const numeric = Number(value);
+  return Number.isFinite(numeric) ? numeric.toFixed(2) : "—";
+}
 
 export function initVip() {
   State.on("change:vips", render);
@@ -173,7 +179,7 @@ function _signalBar(label, value, min, max, status, unit) {
       <div class="signal-track">
         <div class="signal-fill ${fillClass}" style="width:${pct.toFixed(1)}%"></div>
       </div>
-      <span class="signal-value">${value.toFixed(0)}</span>
+      <span class="signal-value">${_formatNumber(value)}</span>
     </div>`;
 }
 
@@ -304,11 +310,12 @@ async function _openModal(vip, triggerEl) {
   }
 
   cellEl.textContent = vip.serving_cell || "—";
-  rsrpEl.textContent = vip.rsrp != null ? `${vip.rsrp.toFixed(0)} dBm` : "—";
-  rsrqEl.textContent = vip.rsrq != null ? `${vip.rsrq.toFixed(1)} dB`  : "—";
+  rsrpEl.textContent = vip.rsrp != null ? `${_formatNumber(vip.rsrp)} dBm` : "—";
+  rsrqEl.textContent = vip.rsrq != null ? `${_formatNumber(vip.rsrq)} dB`  : "—";
 
   if (siteEl) {
-    const siteDisplay = vip.serving_site_name || vip.serving_site || vip.serving_cell || "—";
+    const siteDisplay = vip.serving_site_name || vip.serving_site
+      || (vip.serving_cell ? "Site não identificado" : "—");
     siteEl.textContent = siteDisplay;
     siteEl.title = siteDisplay !== "—" ? siteDisplay : "";
   }
@@ -379,6 +386,9 @@ function _showState(state) {
   noDataEl?.classList.toggle("hidden", state !== "empty");
   errorEl?.classList.toggle("hidden", state !== "error");
   tooltipEl?.classList.add("hidden");
+  if (state !== "chart") {
+    document.getElementById("vip-modal-sampling-note")?.classList.add("hidden");
+  }
 }
 
 // Callback "external" do Chart.js: renderiza o tooltip como HTML real (em
@@ -400,8 +410,8 @@ function _renderTooltip(context, series) {
     day: "2-digit", month: "2-digit",
     hour: "2-digit", minute: "2-digit", second: "2-digit",
   });
-  const rsrpTxt = r.rsrp != null ? `${r.rsrp.toFixed(1)} dBm` : "—";
-  const rsrqTxt = r.rsrq != null ? `${r.rsrq.toFixed(1)} dB`  : "—";
+  const rsrpTxt = r.rsrp != null ? `${_formatNumber(r.rsrp)} dBm` : "—";
+  const rsrqTxt = r.rsrq != null ? `${_formatNumber(r.rsrq)} dB`  : "—";
   const cellTxt = r.serving_cell || "—";
   // Site do próprio registro apontado (nunca o site atual do VIP): cada
   // instante carrega sua própria associação, resolvida pela API no
@@ -452,6 +462,37 @@ function _dayDividers(series) {
   return dividers;
 }
 
+// Reduce only the canvas representation. Each time bucket retains the extrema
+// of both metrics plus the first/last samples, so diagnostic spikes survive.
+function _downsampleSeries(series, maxPoints = VIP_MAX_RENDER_POINTS) {
+  if (series.length <= maxPoints) return series;
+
+  const selected = new Set([0, series.length - 1]);
+  const bucketCount = Math.max(1, Math.floor((maxPoints - 2) / 4));
+  const bucketSize = (series.length - 2) / bucketCount;
+
+  for (let bucket = 0; bucket < bucketCount; bucket++) {
+    const start = Math.floor(1 + bucket * bucketSize);
+    const end = Math.min(series.length - 1, Math.floor(1 + (bucket + 1) * bucketSize));
+    for (const metric of ["rsrp", "rsrq"]) {
+      let minIndex = -1;
+      let maxIndex = -1;
+      for (let i = start; i < end; i++) {
+        const rawValue = series[i]?.[metric];
+        if (rawValue == null) continue;
+        const value = Number(rawValue);
+        if (!Number.isFinite(value)) continue;
+        if (minIndex < 0 || value < Number(series[minIndex][metric])) minIndex = i;
+        if (maxIndex < 0 || value > Number(series[maxIndex][metric])) maxIndex = i;
+      }
+      if (minIndex >= 0) selected.add(minIndex);
+      if (maxIndex >= 0) selected.add(maxIndex);
+    }
+  }
+
+  return [...selected].sort((a, b) => a - b).map(index => series[index]);
+}
+
 function _renderChart(series) {
   const vip = _currentVip;
   if (!vip) return;
@@ -468,6 +509,17 @@ function _renderChart(series) {
   }
 
   _showState("chart");
+
+  const originalPointCount = series.length;
+  series = _downsampleSeries(series);
+  const samplingNote = document.getElementById("vip-modal-sampling-note");
+  if (samplingNote) {
+    const sampled = series.length < originalPointCount;
+    samplingNote.textContent = sampled
+      ? `${series.length} de ${originalPointCount} pontos · extremos preservados`
+      : "";
+    samplingNote.classList.toggle("hidden", !sampled);
+  }
 
   const color = STATUS_COLORS[vip.status] || STATUS_COLORS.unknown;
 
@@ -562,14 +614,14 @@ function _renderChart(series) {
         yRsrp: {
           type:     "linear",
           position: "left",
-          ticks: { color: "#8B949E", font: { size: 9 }, callback: v => `${v}` },
+          ticks: { color: "#8B949E", font: { size: 9 }, callback: v => _formatNumber(v) },
           grid:  { color: "#21262D" },
           title: { display: true, text: "RSRP (dBm)", color: "#8B949E", font: { size: 9 } },
         },
         yRsrq: {
           type:     "linear",
           position: "right",
-          ticks: { color: "#58A6FF", font: { size: 9 }, callback: v => `${v}` },
+          ticks: { color: "#58A6FF", font: { size: 9 }, callback: v => _formatNumber(v) },
           grid:  { drawOnChartArea: false },   // sem grade duplicada
           title: { display: true, text: "RSRQ (dB)", color: "#58A6FF", font: { size: 9 } },
         },

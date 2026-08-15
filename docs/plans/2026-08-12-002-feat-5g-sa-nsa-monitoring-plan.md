@@ -2,7 +2,19 @@
 title: "Monitoring simultâneo 4G / 5G SA / 5G NSA - Plan"
 type: feat
 date: 2026-08-12
+status: superseded
+superseded_by: docs/plans/2026-08-14-001-feat-5g-nrcell-nrducell-monitoring-plan.md
 ---
+
+> **SUPERADO em 14/08/2026** por
+> `docs/plans/2026-08-14-001-feat-5g-nrcell-nrducell-monitoring-plan.md`.
+>
+> A captura dos quatro HARs de `har-5g-oss/` mostrou que **não existem tasks "SA" e "NSA"** em
+> nenhum dos dois OSS. A divisão real é por tipo de objeto — **NR Cell** e **NR DU Cell** — e os
+> dois conjuntos de contadores são disjuntos e já corretamente cobertos pelo catálogo atual.
+> Mantido como histórico: o diagnóstico do `ValueError` de duas tasks 5G e a hipótese de colisão de
+> `objNo` estavam certos (a colisão foi confirmada: 63 objNo compartilhados entre as tasks 2241 e
+> 2242 em OUTRAS). Erradas eram a divisão SA/NSA do catálogo e a remoção da subtração de volume SA.
 
 # Monitoring simultâneo 4G / 5G SA / 5G NSA - Plan
 

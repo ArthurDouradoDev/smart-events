@@ -1485,6 +1485,22 @@ input[type="range"] {
   flex-shrink: 0;
   margin-bottom: 8px;
 }
+.vip-sampling-note {
+  margin-right: auto;
+  align-self: center;
+  color: var(--text-secondary);
+  font-size: 10px;
+  font-family: var(--font-mono);
+}
+
+@media (max-width: 640px) {
+  .vip-modal-toolbar:has(.vip-sampling-note:not(.hidden)) {
+    flex-wrap: wrap;
+  }
+  .vip-sampling-note:not(.hidden) {
+    flex-basis: 100%;
+  }
+}
 
 .vip-modal-chart-region {
   position: relative;

@@ -112,7 +112,11 @@ class Api:
                 # Workers que excederem o join podem terminar a requisição, mas seu
                 # contexto já não terá autorização para persistir ou atualizar status.
                 scheduler.stop()
-                db.activate_event_exclusively(event_id)
+                # Several events may be operational at the same time (for
+                # example, Santo Amaro and Curitiba). The scheduler remains
+                # exclusive through scheduler.stop()/start(), but selecting
+                # one event locally must not mark the others as historical.
+                db.update_event_status(event_id, "ACTIVE")
                 config["status"] = "ACTIVE"
                 _active_event = config
 
@@ -319,6 +323,16 @@ class Api:
         """
         try:
             global _active_event
+            if not _active_event:
+                # During bootstrap the UI can be ready before the active event is
+                # restored. Missing context is not a disconnected VPN.
+                return {
+                    "ok": True,
+                    "connected": None,
+                    "target": None,
+                    "reason": "no_active_event",
+                }
+
             oss = (_active_event or {}).get("oss", {}) if _active_event else {}
 
             base_url = credentials.resolve_base_url(oss)
@@ -328,13 +342,13 @@ class Api:
 
             flags = subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0
             result = subprocess.run(
-                ["ping", "-n", "2", target],
+                ["ping", "-n", "2", "-w", "2500", target],
                 capture_output=True,
                 timeout=15,
                 creationflags=flags,
             )
-            output = (result.stdout or b"") + (result.stderr or b"")
-            connected = b"TTL=" in output.upper()
+            # Exit status is independent from the Windows display language.
+            connected = result.returncode == 0
             return {"ok": True, "connected": connected, "target": target}
         except Exception as e:
             logger.error(f"check_vpn error: {e}")
@@ -480,9 +494,50 @@ class Api:
 
     # ── KPI / gráfico ────────────────────────────────────────────────
 
-    def get_kpi_catalog(self) -> dict:
-        """Metadados únicos usados por seletor, gráfico, lista e tooltip."""
-        return {"ok": True, "metrics": catalog_for_api()}
+    @staticmethod
+    def _configured_kpi_technologies(config: dict) -> list[str]:
+        """Famílias realmente consultadas pelas tasks PM do evento.
+
+        O evento legado com ``pm_task_id`` é 4G por contrato. Quando ``pm_tasks``
+        existir, a tecnologia declarada na task é a fonte de verdade; nomes de
+        células não são usados para inferência (Curitiba não carrega 4G no nome).
+        """
+        integration = (config or {}).get("integration", {}) or {}
+        configured = integration.get("pm_tasks") or []
+        if isinstance(configured, dict):
+            configured = [{"tech": tech, "task_id": task_id}
+                          for tech, task_id in configured.items()]
+        technologies = []
+        for item in configured:
+            if not isinstance(item, dict) or item.get("task_id") in (None, ""):
+                continue
+            tech = str(item.get("tech") or "").upper().replace("-", "_").replace(" ", "_")
+            family = "4G" if tech in {"4G", "LTE"} else (
+                "5G" if tech in {"5G", "NR", "NRCELL", "NR_CELL",
+                                  "5G_NRCELL", "NRDUCELL", "NR_DU_CELL",
+                                  "5G_NRDUCELL"} else None)
+            if family and family not in technologies:
+                technologies.append(family)
+        if not technologies and integration.get("pm_task_id") not in (None, ""):
+            technologies.append("4G")
+        return technologies
+
+    def get_kpi_catalog(self, event_id: str = None) -> dict:
+        """Metadados do seletor limitados às tasks PM do evento solicitado."""
+        global _active_event
+        config = None
+        if event_id:
+            config = db.get_event(event_id)
+        elif _active_event:
+            config = _active_event
+        catalog = catalog_for_api()
+        if config is None:
+            # O bootstrap pede o catálogo antes de restaurar o evento. A segunda
+            # chamada, disparada por change:activeEvent, aplicará o filtro real.
+            return {"ok": True, "metrics": catalog, "technologies": []}
+        technologies = self._configured_kpi_technologies(config)
+        metrics = [item for item in catalog if item.get("technology") in technologies]
+        return {"ok": True, "metrics": metrics, "technologies": technologies}
 
     def get_kpi_series(self, event_id: str, site_id: str, metric: str,
                        minutes: int = 60, cell_id: str = "__all__", technology: str = None) -> dict:
@@ -751,7 +806,11 @@ class Api:
                 # não depende do valor gravado, por isso é correto ao trocar de evento.
                 serving_site = resolve_site_id(serving)
                 in_event = bool(serving_site)
-                serving_site_name = site_id_to_name.get(serving_site) if serving_site else None
+                serving_site_name = (
+                    site_id_to_name.get(serving_site)
+                    if serving_site
+                    else self._infer_site_label_from_cell(serving)
+                )
 
                 out.append({
                     "id":                vip["id"],
@@ -804,7 +863,11 @@ class Api:
                 cell = row.get("serving_cell")
                 site_id = resolve_site_id(cell)
                 row["serving_site"] = site_id
-                row["serving_site_name"] = site_id_to_name.get(site_id) if site_id else None
+                row["serving_site_name"] = (
+                    site_id_to_name.get(site_id)
+                    if site_id
+                    else self._infer_site_label_from_cell(cell)
+                )
 
             return {"ok": True, "series": rows}
         except Exception as e:
@@ -863,8 +926,15 @@ class Api:
                 s_id = site["id"]
                 s_id_upper = s_id.upper()
                 s_name_upper = site.get("name", "").upper()
-                if (cell_id_upper.startswith(s_id_upper) or s_id_upper in cell_id_upper or
-                        s_name_upper in cell_id_upper or cell_id_upper in s_name_upper):
+                id_matches = (
+                    cell_id_upper.startswith(s_id_upper)
+                    or (len(s_id_upper) >= 4 and s_id_upper in cell_id_upper)
+                )
+                name_matches = len(s_name_upper) >= 4 and (
+                    s_name_upper in cell_id_upper
+                    or (len(cell_id_upper) >= 4 and cell_id_upper in s_name_upper)
+                )
+                if id_matches or name_matches:
                     return s_id
 
             # 3. Decodificação de ID global de célula (4G ECI // 256 ou 5G NCI // 4096)
@@ -886,6 +956,24 @@ class Api:
 
             return None
         return resolve_site_id
+
+    @staticmethod
+    def _infer_site_label_from_cell(cell_id):
+        """Extract an external site label from standard ``SITE_SECTOR`` IDs.
+
+        The inferred label is presentation context only. It is deliberately not
+        returned by ``_create_cell_resolver`` because an inferred external site
+        must not make a VIP count as being inside the current event.
+        """
+        if not cell_id:
+            return None
+        value = str(cell_id).strip()
+        if "_" not in value:
+            return None
+        site_label, sector = value.rsplit("_", 1)
+        if site_label and sector.isdigit():
+            return site_label
+        return None
 
     @staticmethod
     def _resolve_site_for_source(sites: list, source) -> tuple:

@@ -419,7 +419,10 @@ function _polar(cx, cy, r, deg) {
 }
 
 function _buildPopup(site) {
-  const util = site.utilization != null ? `${site.utilization}%` : "—";
+  const utilization = Number(site.utilization);
+  const util = site.utilization != null && Number.isFinite(utilization)
+    ? `${utilization.toFixed(2)}%`
+    : "—";
   const vipsAtSite = (State.vips || []).filter(v => v.in_event && v.serving_site === site.id);
   let vipListHtml = "";
   if (vipsAtSite.length > 0) {
