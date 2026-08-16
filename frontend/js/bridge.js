@@ -72,6 +72,7 @@ const _mockCollectionScenario = new URLSearchParams(window.location.search).get(
 const _vipSeriesScenario = new URLSearchParams(window.location.search).get("vipSeriesScenario") || "default";
 const _vpnScenario = new URLSearchParams(window.location.search).get("vpnScenario") || "connected";
 const _eventDropdownScenario = new URLSearchParams(window.location.search).get("eventDropdownScenario") || "default";
+const _kpiTechnologyScenario = new URLSearchParams(window.location.search).get("kpiTechnology") || "4G";
 const _vipErrorOnceSeen = new Set(); // nomes de VIP já vistos pelo cenário error_once
 let _vpnProbeCount = 0;
 let _eventActivated = false;
@@ -100,6 +101,24 @@ function _mockEvents() {
     name: "Evento Demo (Histórico)",
     status: "ENDED",
   }];
+}
+
+function _mockKpiCatalog() {
+  if (_kpiTechnologyScenario === "5G_NRDUCELL") {
+    return { ok: true, technologies: ["5G_NRDUCELL"], metrics: [
+      {id:"utilization_dl", technology:"5G_NRDUCELL", name:"DL PRB Utility", unit:"%", site_aggregation:"recalculate"},
+      {id:"utilization_ul", technology:"5G_NRDUCELL", name:"UL PRB Utility", unit:"%", site_aggregation:"recalculate"},
+      {id:"throughput_ul", technology:"5G_NRDUCELL", name:"Throughput UL", unit:"unidade OSS pendente", site_aggregation:"sum"},
+      {id:"interference_ul", technology:"5G_NRDUCELL", name:"UL Interference Médio", unit:"dBm", site_aggregation:"mean"},
+    ]};
+  }
+  return { ok: true, technologies: ["4G"], metrics: [
+    {id:"accessibility", technology:"4G", name:"Acessibilidade de Dados", unit:"%", site_aggregation:"recalculate"},
+    {id:"availability", technology:"4G", name:"Availability", unit:"%", site_aggregation:"recalculate"},
+    {id:"drop_rate", technology:"4G", name:"Drop Dados", unit:"%", site_aggregation:"recalculate"},
+    {id:"utilization_dl", technology:"4G", name:"DL PRB Utility", unit:"%", site_aggregation:"recalculate"},
+    {id:"throughput_dl", technology:"4G", name:"Throughput DL", unit:"Mbit/s", site_aggregation:"sum"},
+  ]};
 }
 
 // Sequência determinística (sem Math.random) que atravessa dois sites,
@@ -191,13 +210,7 @@ const _mock = {
       metric_is_share: ["user_count","traffic_volume_dl","traffic_volume_ul"].includes(metric),
     }));
   },
-  get_kpi_catalog: (_eventId=null) => ({ ok: true, technologies: ["4G"], metrics: [
-    {id:"accessibility", technology:"4G", name:"Acessibilidade de Dados", unit:"%", site_aggregation:"recalculate"},
-    {id:"availability", technology:"4G", name:"Availability", unit:"%", site_aggregation:"recalculate"},
-    {id:"drop_rate", technology:"4G", name:"Drop Dados", unit:"%", site_aggregation:"recalculate"},
-    {id:"utilization_dl", technology:"4G", name:"DL PRB Utility", unit:"%", site_aggregation:"recalculate"},
-    {id:"throughput_dl", technology:"4G", name:"Throughput DL", unit:"Mbit/s", site_aggregation:"sum"},
-  ]}),
+  get_kpi_catalog: (_eventId=null) => _mockKpiCatalog(),
   get_site_cells: async (event_id, site_id) => {
     return [
       { id: `${site_id}-A`, label: `${site_id}-A`, tech: "LTE", freq: "1800" },

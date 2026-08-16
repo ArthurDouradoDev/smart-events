@@ -86,6 +86,30 @@ class TestApiEvents:
         monkeypatch.setattr(database, "get_event", locked)
         assert api.get_sites(event["id"]) == first
 
+    def test_evento_com_um_monitoring_5g_esconde_sites_4g_e_preserva_desconhecidos(
+            self, api, sample_event):
+        event = {
+            **sample_event,
+            "id": "sites-only-nrducell",
+            "integration": {"pm_tasks": [{"task_id": 748, "tech": "NRDUCELL"}]},
+            "sites": [
+                {"id": "LTE", "name": "LTE", "lat": 0, "lng": 0,
+                 "cells": [{"id": "4G-SITE-18-A"}]},
+                {"id": "NR", "name": "NR", "lat": 0, "lng": 0,
+                 "cells": [{"id": "4G-MIXED-18-A"}, {"id": "5G-MIXED-35-A"}]},
+                {"id": "UNKNOWN", "name": "UNKNOWN", "lat": 0, "lng": 0,
+                 "cells": [{"id": "18NLCTAL01GI"}]},
+            ],
+        }
+        database.save_event(event)
+
+        sites = api.get_sites(event["id"])
+
+        assert {site["id"] for site in sites} == {"NR", "UNKNOWN"}
+        assert [cell["id"] for cell in api.get_site_cells(event["id"], "NR")] == [
+            "5G-MIXED-35-A"
+        ]
+
     def test_reauth_session_reagenda_headless_sem_abrir_processo_manual(
             self, api_with_event, monkeypatch):
         api, event = api_with_event
@@ -235,9 +259,33 @@ class TestApiKpiCatalog:
 
         result = api.get_kpi_catalog(event["id"])
 
-        assert result["technologies"] == ["5G"]
+        assert result["technologies"] == ["5G_NRCELL"]
         assert result["metrics"]
-        assert {item["technology"] for item in result["metrics"]} == {"5G"}
+        assert {item["technology"] for item in result["metrics"]} == {"5G_NRCELL"}
+        assert {item["id"] for item in result["metrics"]} == {
+            "accessibility", "drop_rate", "availability", "user_count",
+        }
+
+    def test_nrducell_expoe_somente_kpis_da_task_748(
+            self, api, sample_event):
+        event = {
+            **sample_event,
+            "id": "catalogo-nrducell",
+            "integration": {
+                "pm_tasks": [{"task_id": 748, "tech": "NRDUCELL"}],
+            },
+        }
+        database.save_event(event)
+
+        result = api.get_kpi_catalog(event["id"])
+
+        assert result["technologies"] == ["5G_NRDUCELL"]
+        assert {item["technology"] for item in result["metrics"]} == {"5G_NRDUCELL"}
+        assert {item["id"] for item in result["metrics"]} == {
+            "utilization_dl", "utilization_ul", "throughput_ul",
+            "traffic_volume_dl_sa", "traffic_volume_dl_nsa",
+            "traffic_volume_ul_sa", "traffic_volume_ul_nsa", "interference_ul",
+        }
 
     def test_evento_sem_task_nao_anuncia_kpi_indisponivel(
             self, api, sample_event):

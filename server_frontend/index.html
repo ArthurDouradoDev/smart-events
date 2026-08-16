@@ -761,9 +761,22 @@
               </svg>
               Integração iManager
             </div>
-            <div class="form-group">
-              <label for="pm-task-id">ID do Monitoring (PM Task ID):</label>
-              <input type="number" id="pm-task-id" placeholder="Ex: 374 (opcional)" min="1">
+            <div class="form-group-grid">
+              <div class="form-group">
+                <label for="pm-task-4g">PM Task 4G / LTE:</label>
+                <input type="number" id="pm-task-4g" placeholder="Ex: Teste Santo Amaro (747)" min="1">
+              </div>
+              <div class="form-group">
+                <label for="pm-task-nrcell">PM Task 5G (NR Cell):</label>
+                <input type="number" id="pm-task-nrcell" placeholder="Ex: ... NRCELL (749)" min="1">
+              </div>
+              <div class="form-group">
+                <label for="pm-task-nrducell">PM Task 5G (NR DU Cell):</label>
+                <input type="number" id="pm-task-nrducell" placeholder="Ex: ... NRDUCELL (748)" min="1">
+              </div>
+            </div>
+            <div style="font-size:12px; color:var(--text-secondary);">
+              Preencha somente os Monitorings usados pelo evento. NR Cell e NR DU Cell possuem conjuntos de KPIs diferentes.
             </div>
           </div>
 
@@ -1542,6 +1555,27 @@
       }
     }
 
+    function normalizePmTaskTech(value) {
+      const tech = String(value || '').trim().toUpperCase().replace(/[\s-]+/g, '_');
+      if (tech === '4G' || tech === 'LTE') return '4G';
+      if (['NRCELL', 'NR_CELL', '5G_NRCELL', '5G_NR_CELL'].includes(tech)) return '5G_NRCELL';
+      if (['NRDUCELL', 'NR_DU_CELL', 'DUCELL', 'DU_CELL', '5G_NRDUCELL', '5G_NR_DU_CELL'].includes(tech)) return '5G_NRDUCELL';
+      return null;
+    }
+
+    function configuredPmTasks(integration) {
+      const configured = Array.isArray(integration && integration.pm_tasks)
+        ? integration.pm_tasks
+        : [];
+      const tasks = configured
+        .map(item => ({ tech: normalizePmTaskTech(item && item.tech), task_id: Number(item && item.task_id) }))
+        .filter(item => item.tech && Number.isInteger(item.task_id) && item.task_id > 0);
+      if (!tasks.length && integration && Number(integration.pm_task_id) > 0) {
+        tasks.push({ tech: '4G', task_id: Number(integration.pm_task_id) });
+      }
+      return tasks;
+    }
+
     function renderEvents(events) {
       if (!events || events.length === 0) {
         eventsList.innerHTML = '<div class="empty-state">Nenhum evento cadastrado no servidor.</div>';
@@ -1553,7 +1587,9 @@
         const start  = event.start_time ? new Date(event.start_time).toLocaleString('pt-BR') : 'Sem data';
         const end    = event.end_time   ? new Date(event.end_time).toLocaleString('pt-BR')   : 'Sem data';
         const sitesCount = event.sites ? event.sites.length : 0;
-        const pmTask = event.integration && event.integration.pm_task_id ? event.integration.pm_task_id : '—';
+        const taskLabels = { '4G': '4G', '5G_NRCELL': 'NR Cell', '5G_NRDUCELL': 'NR DU Cell' };
+        const pmTasks = configuredPmTasks(event.integration)
+          .map(item => `${taskLabels[item.tech]} #${item.task_id}`).join(' · ') || '—';
         let badgeClass = 'badge-scheduled', statusLabel = 'Agendado';
         if (status === 'ACTIVE')  { badgeClass = 'badge-active';  statusLabel = 'Ativo'; }
         if (status === 'ENDED' || status === 'ARCHIVED') { badgeClass = 'badge-ended'; statusLabel = 'Encerrado'; }
@@ -1584,7 +1620,7 @@
               <div class="detail-item"><strong>Início:</strong> ${start}</div>
               <div class="detail-item"><strong>Fim:</strong> ${end}</div>
               <div class="detail-item"><strong>Sites:</strong> ${sitesCount}</div>
-              <div class="detail-item"><strong>PM Task:</strong> ${pmTask}</div>
+              <div class="detail-item"><strong>PM Tasks:</strong> ${pmTasks}</div>
             </div>
           </div>`;
       }).join('');
@@ -1617,7 +1653,12 @@
         formattedPolygon.push([...formattedPolygon[0]]);
       }
 
-      const pmTaskRaw = document.getElementById('pm-task-id').value;
+      const pmTasks = [
+        ['4G', document.getElementById('pm-task-4g').value],
+        ['NRCELL', document.getElementById('pm-task-nrcell').value],
+        ['NRDUCELL', document.getElementById('pm-task-nrducell').value],
+      ].map(([tech, raw]) => ({ tech, task_id: Number(raw) }))
+       .filter(item => Number.isInteger(item.task_id) && item.task_id > 0);
       const payload = {
         id, name,
         status:    statusSelect.value,
@@ -1640,9 +1681,7 @@
           import_folder: document.getElementById('oss-folder').value.trim(),
           base_url:      document.getElementById('oss-url').value.trim()
         },
-        integration: {
-          pm_task_id: pmTaskRaw ? parseInt(pmTaskRaw, 10) : null
-        }
+        integration: { pm_tasks: pmTasks }
       };
 
       btnSubmit.disabled = true;
@@ -1727,8 +1766,15 @@
         document.getElementById('oss-url').value    = '';
       }
 
-      document.getElementById('pm-task-id').value =
-        event.integration && event.integration.pm_task_id ? event.integration.pm_task_id : '';
+      const pmTaskInputs = {
+        '4G': 'pm-task-4g',
+        '5G_NRCELL': 'pm-task-nrcell',
+        '5G_NRDUCELL': 'pm-task-nrducell',
+      };
+      Object.values(pmTaskInputs).forEach(inputId => { document.getElementById(inputId).value = ''; });
+      configuredPmTasks(event.integration).forEach(item => {
+        document.getElementById(pmTaskInputs[item.tech]).value = item.task_id;
+      });
 
       if (event.thresholds) {
         document.getElementById('rsrp-warn').value  = event.thresholds.rsrp_warning          ?? -100;
@@ -1780,7 +1826,9 @@
       _refreshRegionOptions('oss-cliente', 'oss-region');
       document.getElementById('oss-folder').value = '';
       document.getElementById('oss-url').value    = '';
-      document.getElementById('pm-task-id').value = '';
+      document.getElementById('pm-task-4g').value      = '';
+      document.getElementById('pm-task-nrcell').value  = '';
+      document.getElementById('pm-task-nrducell').value = '';
 
       document.getElementById('rsrp-warn').value  = '-100';
       document.getElementById('rsrp-crit').value  = '-110';

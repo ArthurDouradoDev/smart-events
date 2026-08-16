@@ -2,7 +2,9 @@
 pywebview>=5.3.0
 requests>=2.32.3
 urllib3>=2.2.2
-playwright>=1.48.0
+# O driver e o Chromium usam revisões acopladas. Manter a versão exata evita
+# que um ``pip install`` atualize só o pacote Python e invalide o navegador local.
+playwright==1.61.0
 
 # Servidor central e importação de planilhas
 fastapi>=0.115.0

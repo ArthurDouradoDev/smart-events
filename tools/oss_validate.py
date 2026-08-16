@@ -192,17 +192,19 @@ def _do_login(rep: Report, base_url: str, region: str, session_file: Path) -> bo
 
 def _validate_kpi(rep: Report, collector: HttpCollector):
     try:
-        rows = collector.collect_kpis()
+        result = collector.collect_kpis()
     except Exception as e:
         rep.add(Report.FAIL, "Coleta KPI", f"exceção: {type(e).__name__}: {e}")
         return
+    rows = result.measurements
     if rows:
         cells = len({r.get("cell_id") for r in rows})
         rep.add(Report.PASS, "Coleta KPI",
                 f"{len(rows)} medições em {cells} célula(s).")
     else:
         rep.add(Report.FAIL, "Coleta KPI",
-                "0 medições. Veja o diagnóstico [http/monitoring] acima "
+                f"estado={result.state}; 0 medições. "
+                f"{result.cause or 'Veja o diagnóstico [http/monitoring] acima'} "
                 "(status/URL/corpo) — 404 indica rota/task id inválidos ou sessão bloqueada.")
 
 
@@ -224,8 +226,8 @@ def _validate_vip(rep: Report, collector: HttpCollector):
         details = getattr(collector, "_last_vip_subscription", [])
         trace = "; ".join(
             f"task {d['task_id']} ({d['vip']}) msgId={d['msg_id']} "
-            f"serial={d['serial_initial']}→{d['serial_final']} "
-            f"linhas={d['row_initial']}→{d['row_final']}/{d['record_count']} "
+            f"serial={d['serial_initial']}->{d['serial_final']} "
+            f"linhas={d['row_initial']}->{d['row_final']}/{d['record_count']} "
             f"RRC={d['rrc_measurements']} decodificadas={d['decoded']} "
             f"indecifráveis={d['undecoded']}{' BACKLOG' if d['backlog'] else ''}"
             for d in details

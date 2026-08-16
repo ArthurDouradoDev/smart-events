@@ -40,7 +40,7 @@ class TestHttpSessionSP:
     def test_session_valid_sp(self, http_col_sp):
         """Verifica que a sessão SP está ativa (cookie válido, sem redirect SSO)."""
         import requests
-        session = http_col_sp._build_session("OSS")
+        session = http_col_sp._build_session("monitoring")
         resp = session.get(
             f"{_DEFAULT_BASE_URL}/rest/plat/smapp/v1/businesstype/NetworkElement",
             verify=False, timeout=15
@@ -59,7 +59,7 @@ class TestHttpSessionRJ:
     def test_session_valid_rj(self, http_col_rj):
         """Verifica que a sessão RJ está ativa."""
         import requests
-        session = http_col_rj._build_session("OSS")
+        session = http_col_rj._build_session("monitoring")
         resp = session.get(
             f"{_REGIONAL_BASE_URLS['RJ']}/rest/plat/smapp/v1/businesstype/NetworkElement",
             verify=False, timeout=15
@@ -72,24 +72,25 @@ class TestHttpSessionRJ:
 class TestHttpCollectKpis:
     def test_collect_kpis_returns_list(self, http_col_sp, event_in_db):
         """Coleta KPI real do OSS SP — deve retornar lista (pode ser vazia se sem dados)."""
-        kpis = http_col_sp.collect_kpis()
-        assert isinstance(kpis, list)
+        result = http_col_sp.collect_kpis()
+        assert result.state in {"data", "empty", "partial"}
+        assert isinstance(result.measurements, list)
 
     def test_collect_kpis_structure(self, http_col_sp, event_in_db):
-        kpis = http_col_sp.collect_kpis()
+        kpis = http_col_sp.collect_kpis().measurements
         if kpis:
             first = kpis[0]
-            assert hasattr(first, "event_id")
-            assert hasattr(first, "metric")
-            assert hasattr(first, "value")
-            assert first.value is not None
+            assert first.get("event_id")
+            assert first.get("metric")
+            assert first.get("value") is not None
 
 
 class TestHttpCollectVips:
     def test_collect_vips_returns_list(self, http_col_sp, event_in_db):
         """Coleta VIP real — OK retornar lista vazia se nenhum VIP configurado no evento."""
-        vips = http_col_sp.collect_vips()
-        assert isinstance(vips, list)
+        result = http_col_sp.collect_vips()
+        assert result.state in {"data", "empty", "partial"}
+        assert isinstance(result.measurements, list)
 
 
 class TestHttpCollectAlarms:
@@ -98,8 +99,9 @@ class TestHttpCollectAlarms:
 
         Deve retornar uma lista com ≥1 alarme e conter APENAS os tipos filtrados
         (VSWR + Cell Unavailable, o default de oss.alarm_filter)."""
-        alarms = http_col_sp.collect_alarms()
-        assert isinstance(alarms, list)
+        result = http_col_sp.collect_alarms()
+        assert result.state in {"data", "empty", "partial"}
+        alarms = result.measurements
         assert len(alarms) >= 1, "nenhum alarme retornado — filtro/sessão?"
         allowed = {"RF Unit VSWR Threshold Crossed", "Cell Unavailable"}
         names = {a.get("alarm_name") for a in alarms}
@@ -111,7 +113,7 @@ class TestHttpCollectAlarms:
 class TestHttpCsrfHeaders:
     def test_roarand_header_matches_cookie(self, http_col_sp):
         """Anti-CSRF: header roarand deve ecoar o cookie roarand (double-submit)."""
-        session = http_col_sp._build_session("OSS")
+        session = http_col_sp._build_session("monitoring")
         cookie_val = session.cookies.get("roarand")
         header_val = session.headers.get("roarand")
         if cookie_val:
@@ -120,5 +122,5 @@ class TestHttpCsrfHeaders:
             )
 
     def test_origin_referer_set(self, http_col_sp):
-        session = http_col_sp._build_session("OSS")
+        session = http_col_sp._build_session("monitoring")
         assert "Origin" in session.headers or "Referer" in session.headers

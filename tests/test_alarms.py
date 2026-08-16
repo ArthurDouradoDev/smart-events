@@ -122,7 +122,7 @@ class TestMockCollectAlarms:
     def test_returns_flattened_rows(self, sample_event, monkeypatch):
         monkeypatch.setattr(db, "get_event_vips", lambda *a, **k: [])
         c = MockCollector(sample_event)
-        rows = c.collect_alarms()
+        rows = c.collect_alarms().measurements
         assert len(rows) > 0
         first = rows[0]
         assert isinstance(first, dict)
@@ -133,7 +133,7 @@ class TestMockCollectAlarms:
     def test_unique_csn(self, sample_event, monkeypatch):
         monkeypatch.setattr(db, "get_event_vips", lambda *a, **k: [])
         c = MockCollector(sample_event)
-        rows = c.collect_alarms()
+        rows = c.collect_alarms().measurements
         csns = [r["csn"] for r in rows]
         assert len(csns) == len(set(csns))
 

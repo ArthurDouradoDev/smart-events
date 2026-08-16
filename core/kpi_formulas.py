@@ -24,6 +24,7 @@ class KpiDefinition:
     site_aggregation: str
     calculator: Callable[[dict[str, float], float | None], float]
     production_ready: bool = True
+    monitoring_available: bool = True
 
 
 def _need(c: dict[str, float], *names: str) -> tuple[float, ...]:
@@ -144,19 +145,19 @@ CATALOG: tuple[KpiDefinition, ...] = (
     KpiDefinition("terrestrial_rtt", "4G", "Terrestrial RTT", "ms", ("L.PDCP.TCP.Time.TerrestrialRtt.ConnSetup", "L.PDCP.TCP.TerrestrialRtt.ConnSetup"), "mean", _ratio_formula("L.PDCP.TCP.Time.TerrestrialRtt.ConnSetup", "L.PDCP.TCP.TerrestrialRtt.ConnSetup", 1)),
     KpiDefinition("traffic_volume_dl", "4G", "Volume de Tráfego DL (legado)", "contador OSS", ("L.Thrp.bits.DL",), "sum", _single("L.Thrp.bits.DL")),
     KpiDefinition("traffic_volume_ul", "4G", "Volume de Tráfego UL (legado)", "contador OSS", ("L.Thrp.bits.UL",), "sum", _single("L.Thrp.bits.UL")),
-    KpiDefinition("accessibility", "5G", "Acessibilidade considerando RRC Inactive", "%", ("N.RRC.SetupReq.Succ", "N.RRC.ResumeReq.Succ", "N.RRC.SetupReq.Att", "N.RRC.ResumeReq.Att", "N.NGSig.ConnEst.Succ", "N.NGSig.ConnEst.Att", "N.QosFlow.Est.Succ", "N.QosFlow.Est.Att.EPSFB", "N.QosFlow.Est.Att.EmcFB", "N.QosFlow.FailEst.Conflict", "N.QosFlow.Resume.Succ", "N.QosFlow.Est.Att", "N.QosFlow.FailEst.AMF.SyntaxError", "N.QosFlow.Resume.Att"), "recalculate", _n_access),
-    KpiDefinition("drop_rate", "5G", "Drop considerando RRC Inactive", "%", ("N.QosFlow.AbnormRel", "N.QosFlow.NormRel", "N.QosFlow.RrcInactiveToIdle.Rel", "N.QosFlow.RrcConnToInactive.Suspend"), "recalculate", _n_drop),
-    KpiDefinition("utilization_dl", "5G", "DL PRB Utility", "%", ("N.PRB.DL.Used.Avg", "N.PRB.DL.Avail.Avg"), "recalculate", _ratio_formula("N.PRB.DL.Used.Avg", "N.PRB.DL.Avail.Avg")),
-    KpiDefinition("utilization_ul", "5G", "UL PRB Utility", "%", ("N.PRB.UL.Used.Avg", "N.PRB.UL.Avail.Avg"), "recalculate", _ratio_formula("N.PRB.UL.Used.Avg", "N.PRB.UL.Avail.Avg")),
-    KpiDefinition("throughput_dl", "5G", "Throughput DL", "unidade OSS pendente", ("N.ThpVol.DL", "N.ThpVol.DL.LastSlot", "N.ThpTime.DL.RmvLastSlot"), "sum", _n_thp_dl, False),
-    KpiDefinition("throughput_ul", "5G", "Throughput UL", "unidade OSS pendente", ("N.ThpVol.UL", "N.ThpVol.UE.UL.SmallPkt", "N.ThpTime.UE.UL.RmvSmallPkt"), "sum", _n_thp_ul, False),
-    KpiDefinition("traffic_volume_dl_sa", "5G", "Downlink Traffic Volume 5G SA", "unidade OSS pendente", ("N.ThpVol.DL", "N.NSA.ThpVol.DL"), "sum", _n_volume_dl_sa, False),
-    KpiDefinition("traffic_volume_dl_nsa", "5G", "Downlink Traffic Volume 5G NSA", "unidade OSS pendente", ("N.NSA.ThpVol.DL",), "sum", _single("N.NSA.ThpVol.DL"), False),
-    KpiDefinition("traffic_volume_ul_sa", "5G", "Uplink Traffic Volume 5G SA", "unidade OSS pendente", ("N.ThpVol.UL", "N.NSA.ThpVol.UL"), "sum", _n_volume_ul_sa, False),
-    KpiDefinition("traffic_volume_ul_nsa", "5G", "Uplink Traffic Volume 5G NSA", "unidade OSS pendente", ("N.NSA.ThpVol.UL",), "sum", _single("N.NSA.ThpVol.UL"), False),
-    KpiDefinition("user_count", "5G", "User Médio", "usuários", ("N.User.RRCConn.Avg",), "sum", _single("N.User.RRCConn.Avg")),
-    KpiDefinition("availability", "5G", "Availability", "%", ("N.Cell.Avail.Dur",), "recalculate", _n_availability),
-    KpiDefinition("interference_ul", "5G", "UL Interference Médio", "dBm", ("N.UL.NI.Avg",), "mean", _single("N.UL.NI.Avg")),
+    KpiDefinition("accessibility", "5G_NRCELL", "Acessibilidade considerando RRC Inactive", "%", ("N.RRC.SetupReq.Succ", "N.RRC.ResumeReq.Succ", "N.RRC.SetupReq.Att", "N.RRC.ResumeReq.Att", "N.NGSig.ConnEst.Succ", "N.NGSig.ConnEst.Att", "N.QosFlow.Est.Succ", "N.QosFlow.Est.Att.EPSFB", "N.QosFlow.Est.Att.EmcFB", "N.QosFlow.FailEst.Conflict", "N.QosFlow.Resume.Succ", "N.QosFlow.Est.Att", "N.QosFlow.FailEst.AMF.SyntaxError", "N.QosFlow.Resume.Att"), "recalculate", _n_access),
+    KpiDefinition("drop_rate", "5G_NRCELL", "Drop considerando RRC Inactive", "%", ("N.QosFlow.AbnormRel", "N.QosFlow.NormRel", "N.QosFlow.RrcInactiveToIdle.Rel", "N.QosFlow.RrcConnToInactive.Suspend"), "recalculate", _n_drop),
+    KpiDefinition("utilization_dl", "5G_NRDUCELL", "DL PRB Utility", "%", ("N.PRB.DL.Used.Avg", "N.PRB.DL.Avail.Avg"), "recalculate", _ratio_formula("N.PRB.DL.Used.Avg", "N.PRB.DL.Avail.Avg")),
+    KpiDefinition("utilization_ul", "5G_NRDUCELL", "UL PRB Utility", "%", ("N.PRB.UL.Used.Avg", "N.PRB.UL.Avail.Avg"), "recalculate", _ratio_formula("N.PRB.UL.Used.Avg", "N.PRB.UL.Avail.Avg")),
+    KpiDefinition("throughput_dl", "5G_NRDUCELL", "Throughput DL", "unidade OSS pendente", ("N.ThpVol.DL", "N.ThpVol.DL.LastSlot", "N.ThpTime.DL.RmvLastSlot"), "sum", _n_thp_dl, False, False),
+    KpiDefinition("throughput_ul", "5G_NRDUCELL", "Throughput UL", "unidade OSS pendente", ("N.ThpVol.UL", "N.ThpVol.UE.UL.SmallPkt", "N.ThpTime.UE.UL.RmvSmallPkt"), "sum", _n_thp_ul, False),
+    KpiDefinition("traffic_volume_dl_sa", "5G_NRDUCELL", "Downlink Traffic Volume 5G SA", "kbit", ("N.ThpVol.DL", "N.NSA.ThpVol.DL"), "sum", _n_volume_dl_sa),
+    KpiDefinition("traffic_volume_dl_nsa", "5G_NRDUCELL", "Downlink Traffic Volume 5G NSA", "kbit", ("N.NSA.ThpVol.DL",), "sum", _single("N.NSA.ThpVol.DL")),
+    KpiDefinition("traffic_volume_ul_sa", "5G_NRDUCELL", "Uplink Traffic Volume 5G SA", "kbit", ("N.ThpVol.UL", "N.NSA.ThpVol.UL"), "sum", _n_volume_ul_sa),
+    KpiDefinition("traffic_volume_ul_nsa", "5G_NRDUCELL", "Uplink Traffic Volume 5G NSA", "kbit", ("N.NSA.ThpVol.UL",), "sum", _single("N.NSA.ThpVol.UL")),
+    KpiDefinition("user_count", "5G_NRCELL", "User Médio", "usuários", ("N.User.RRCConn.Avg",), "sum", _single("N.User.RRCConn.Avg")),
+    KpiDefinition("availability", "5G_NRCELL", "Availability", "%", ("N.Cell.Avail.Dur",), "recalculate", _n_availability),
+    KpiDefinition("interference_ul", "5G_NRDUCELL", "UL Interference Médio", "dBm", ("N.UL.NI.Avg",), "mean", _single("N.UL.NI.Avg")),
 )
 
 
@@ -172,6 +173,8 @@ def catalog_for_api() -> list[dict]:
     seen = set()
     rows = []
     for item in CATALOG:
+        if not item.monitoring_available:
+            continue
         key = (item.id, item.technology)
         if key in seen:
             continue

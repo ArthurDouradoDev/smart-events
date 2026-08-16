@@ -6,6 +6,7 @@ Todos os métodos retornam dicts/lists serializáveis para JSON.
 import json
 import logging
 import os
+import re
 import subprocess
 import threading
 from datetime import datetime
@@ -387,6 +388,39 @@ class Api:
 
     # ── Dados do mapa / sites ────────────────────────────────────────
 
+    @staticmethod
+    def _technology_family(technology: str | None) -> str | None:
+        if technology == "4G":
+            return "4G"
+        if technology in {"5G_NRCELL", "5G_NRDUCELL"}:
+            return "5G"
+        return None
+
+    @staticmethod
+    def _cell_technology_family(cell) -> str | None:
+        cell_id = cell if isinstance(cell, str) else cell.get("id", "")
+        declared = "" if isinstance(cell, str) else cell.get("tech", "")
+        text = f"{declared or ''} {cell_id or ''}".upper()
+        has_4g = bool(re.search(r"(^|[^A-Z0-9])(?:4G|LTE)([^A-Z0-9]|$)", text))
+        has_5g = bool(re.search(r"(^|[^A-Z0-9])(?:5G|NR|NCI)([^A-Z0-9]|$)", text))
+        if has_4g == has_5g:
+            return None
+        return "4G" if has_4g else "5G"
+
+    @classmethod
+    def _filter_cells_for_family(cls, cells: list, family: str | None) -> list:
+        if not family:
+            return list(cells or [])
+        return [cell for cell in (cells or [])
+                if cls._cell_technology_family(cell) in (family, None)]
+
+    def _single_configured_family(self, config: dict) -> str | None:
+        families = {
+            family for technology in self._configured_kpi_technologies(config)
+            if (family := self._technology_family(technology))
+        }
+        return next(iter(families)) if len(families) == 1 else None
+
     def get_sites(self, event_id: str, timestamp: Optional[str] = None,
                   metric: str = "utilization_dl") -> list:
         """Retorna sites com status atual para renderização no mapa."""
@@ -415,11 +449,16 @@ class Api:
                 metric_by_site[row["site_id"]] = row["value"]
 
             sites_out = []
+            configured_family = self._single_configured_family(config)
             thresholds = config.get("thresholds", {})
             warn = thresholds.get("utilization_warning", 80)
             crit = thresholds.get("utilization_critical", 95)
 
             for site in config.get("sites", []):
+                visible_cells = self._filter_cells_for_family(
+                    site.get("cells", []), configured_family)
+                if configured_family and not visible_cells:
+                    continue
                 util = util_by_site.get(site["id"])
                 status = "unknown"
                 if util is not None:
@@ -435,7 +474,7 @@ class Api:
                     "name":            site["name"],
                     "lat":             site["lat"],
                     "lng":             site["lng"],
-                    "cells":           site.get("cells", []),
+                    "cells":           visible_cells,
                     "status":          status,
                     "utilization":     round(util, 1) if util is not None else None,
                     "metric_value":    metric_by_site.get(site["id"]),
@@ -472,9 +511,11 @@ class Api:
             config = db.get_event(event_id) or _active_event
             if not config:
                 return []
+            configured_family = self._single_configured_family(config)
             for site in config.get("sites", []):
                 if site["id"] == site_id:
-                    cells = site.get("cells", [])
+                    cells = self._filter_cells_for_family(
+                        site.get("cells", []), configured_family)
                     out = []
                     for c in cells:
                         if isinstance(c, str):
@@ -496,7 +537,7 @@ class Api:
 
     @staticmethod
     def _configured_kpi_technologies(config: dict) -> list[str]:
-        """Famílias realmente consultadas pelas tasks PM do evento.
+        """Tipos de objeto realmente consultados pelas tasks PM do evento.
 
         O evento legado com ``pm_task_id`` é 4G por contrato. Quando ``pm_tasks``
         existir, a tecnologia declarada na task é a fonte de verdade; nomes de
@@ -512,12 +553,12 @@ class Api:
             if not isinstance(item, dict) or item.get("task_id") in (None, ""):
                 continue
             tech = str(item.get("tech") or "").upper().replace("-", "_").replace(" ", "_")
-            family = "4G" if tech in {"4G", "LTE"} else (
-                "5G" if tech in {"5G", "NR", "NRCELL", "NR_CELL",
-                                  "5G_NRCELL", "NRDUCELL", "NR_DU_CELL",
-                                  "5G_NRDUCELL"} else None)
-            if family and family not in technologies:
-                technologies.append(family)
+            technology = "4G" if tech in {"4G", "LTE"} else (
+                "5G_NRCELL" if tech in {"NRCELL", "NR_CELL", "5G_NRCELL", "5G_NR_CELL"} else (
+                    "5G_NRDUCELL" if tech in {"NRDUCELL", "NR_DU_CELL", "DUCELL", "DU_CELL",
+                                                 "5G_NRDUCELL", "5G_NR_DU_CELL"} else None))
+            if technology and technology not in technologies:
+                technologies.append(technology)
         if not technologies and integration.get("pm_task_id") not in (None, ""):
             technologies.append("4G")
         return technologies

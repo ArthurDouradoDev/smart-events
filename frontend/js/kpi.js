@@ -21,6 +21,16 @@ const METRIC_LABELS = {
 };
 let KPI_CATALOG = [];
 
+const TECH_FAMILY = {
+  "4G": "4G",
+  "5G_NRCELL": "5G",
+  "5G_NRDUCELL": "5G",
+};
+
+function _technologyFamily(technology) {
+  return TECH_FAMILY[technology] || technology;
+}
+
 const STATUS_COLORS = {
   healthy:  "#3FB950",
   warning:  "#D29922",
@@ -170,23 +180,24 @@ async function _loadKpiCatalog(eventId = State.eventId) {
   const selector = document.getElementById("metric-selector");
   if (!selector) return;
   const current = State.selectedMetric || selector.value;
-  const availableTechnologies = [...new Set(
-    response.metrics.map(item => item.technology).filter(Boolean)
+  const availableFamilies = [...new Set(
+    response.metrics.map(item => _technologyFamily(item.technology)).filter(Boolean)
   )];
-  const singleTechnology = availableTechnologies.length === 1;
+  const singleFamily = availableFamilies.length === 1;
   const groups = new Map([["common", { label: "Métricas comuns", entries: [] }],
-                          ["4G", { label: singleTechnology ? "KPIs 4G" : "Adicionais 4G", entries: [] }],
-                          ["5G", { label: singleTechnology ? "KPIs 5G" : "Adicionais 5G", entries: [] }]]);
+                          ["4G", { label: singleFamily ? "KPIs 4G" : "Adicionais 4G", entries: [] }],
+                          ["5G", { label: singleFamily ? "KPIs 5G" : "Adicionais 5G", entries: [] }]]);
   // O identificador canônico pode existir em ambas tecnologias. Uma opção comum
   // continua sendo uma métrica só; o backend decide as séries disponíveis.
   const seen = new Set();
   response.metrics.forEach(meta => {
     if (seen.has(meta.id)) return;
     seen.add(meta.id);
-    const common = !singleTechnology && response.metrics.some(
-      other => other.id === meta.id && other.technology !== meta.technology
+    const family = _technologyFamily(meta.technology);
+    const common = !singleFamily && response.metrics.some(
+      other => other.id === meta.id && _technologyFamily(other.technology) !== family
     );
-    groups.get(common ? "common" : meta.technology)?.entries.push(meta);
+    groups.get(common ? "common" : family)?.entries.push(meta);
     METRIC_LABELS[meta.id] = `${meta.name} (${meta.unit})`;
   });
   selector.innerHTML = "";
@@ -218,7 +229,8 @@ async function _loadKpiCatalog(eventId = State.eventId) {
 }
 
 function commonMetricTechnologies(metricId) {
-  return [...new Set(KPI_CATALOG.filter(item => item.id === metricId).map(item => item.technology))].join("/");
+  return [...new Set(KPI_CATALOG.filter(item => item.id === metricId)
+    .map(item => _technologyFamily(item.technology)))].join("/");
 }
 
 // ── Lista de sites ────────────────────────────────────────────────

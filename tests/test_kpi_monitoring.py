@@ -3,6 +3,8 @@ import re
 from functools import lru_cache
 from pathlib import Path
 
+import pytest
+
 from core.collector import HttpCollector
 from core import database as db
 
@@ -10,7 +12,7 @@ from core import database as db
 def _event():
     return {
         "id": "monitoring-phase2", "oss": {"region": "SP"},
-        "integration": {"pm_tasks": [{"task_id": 10, "tech": "4G"}, {"task_id": 20, "tech": "5G"}]},
+        "integration": {"pm_tasks": [{"task_id": 10, "tech": "4G"}, {"task_id": 20, "tech": "NRCELL"}]},
         "sites": [{"id": "SITE", "name": "SITE", "cells": [
             {"id": "4G-CELL", "tech": "4G", "obj_no": 1},
             {"id": "5G-CELL", "tech": "5G", "obj_no": 2},
@@ -129,7 +131,7 @@ def test_os_116_objetos_reais_da_task_2225_mapeiam_116_de_116(tmp_db, monkeypatc
     objects = _curitiba_task_objects()
 
     mapped = [
-        collector._resolve_monitoring_cell(int(obj["objectNo"]), obj["objName"], "4G")
+        collector._resolve_monitoring_cell(2225, int(obj["objectNo"]), obj["objName"], "4G")
         for obj in objects
     ]
 
@@ -208,7 +210,8 @@ def test_celula_de_outra_tecnologia_nao_e_sequestrada_pela_task(tmp_db, monkeypa
     pode adotar uma célula declaradamente 4G que tenha o mesmo nome."""
     monkeypatch.setattr(db, "get_event_vips", lambda *_: [])
     collector = HttpCollector(_event_com_celula("4G-CELL"), "https://oss.example")
-    parsed = collector._parse_monitoring_response(_resposta(1, "4G-CELL"), {"100": "5G"})
+    parsed = collector._parse_monitoring_response(
+        _resposta(1, "4G-CELL"), {"100": "5G_NRCELL"})
     assert parsed["unmapped"] == 1
     assert not [row for row in parsed["rows"] if row["scope"] == "CELL"]
 
@@ -275,6 +278,28 @@ def test_descoberta_ignora_cursor_geral_antigo(tmp_db, monkeypatch):
     assert payload == [{"taskId": 100, "preExecTime": 0}]
 
 
+def test_reinicio_reutiliza_objetos_confirmados_para_restaurar_mapeamento(
+        tmp_db, monkeypatch):
+    monkeypatch.setattr(db, "get_event_vips", lambda *_: [])
+    monkeypatch.setattr(
+        db, "get_collection_checkpoints",
+        lambda *_: {"": "1700000000000", "91162": "1700000000100", "91163": "1700000000200"},
+    )
+    collector = HttpCollector(_event_com_celula("18NLCTAL01GI"), "https://oss.example")
+
+    payload = collector._monitoring_payload(
+        [{"task_id": 100, "technology": "4G"}], "OUTRAS")
+
+    assert payload == [{
+        "taskId": 100,
+        "preExecTime": 1700000000000,
+        "objNoExecTimes": [
+            {"objNo": 91162, "preExecTime": 1700000000100},
+            {"objNo": 91163, "preExecTime": 1700000000200},
+        ],
+    }]
+
+
 def test_resposta_vazia_na_descoberta_nao_confirma_cursor(tmp_db, monkeypatch):
     monkeypatch.setattr(db, "get_event_vips", lambda *_: [])
     monkeypatch.setattr(
@@ -339,3 +364,112 @@ def test_unreliable_and_non_numeric_counters_create_diagnostics(tmp_db, monkeypa
     parsed = collector._parse_monitoring_response(response, {"10": "4G"})
     assert parsed["invalid"] > 0
     assert any(item.code == "invalid_counter" for item in parsed["diagnostics"])
+
+
+@lru_cache(maxsize=1)
+def _sp_nrducell_response():
+    har_path = Path(__file__).parents[1] / "har-5g-oss" / "har-monitoring-oss-tsp-5g-ducell.har"
+    har = json.loads(har_path.read_text(encoding="utf-8"))
+    entry = next(
+        item for item in har["log"]["entries"]
+        if "/monitor/task/result" in item["request"]["url"]
+    )
+    return json.loads(entry["response"]["content"]["text"])
+
+
+def _sp_nrducell_event():
+    sites = {}
+    task = _sp_nrducell_response()["data"][0]
+    for result in task["results"]:
+        for item in result["objRes"]:
+            match = re.search(r"Cell Name\s*=\s*([^,]+)", item["obj"]["objName"], re.I)
+            assert match
+            cell_id = match.group(1).strip()
+            site_id = cell_id.split("-", 2)[1]
+            sites.setdefault(site_id, []).append({"id": cell_id, "tech": "5G"})
+    return {
+        "id": "santo-amaro-nrducell",
+        "oss": {"region": "SP"},
+        "integration": {"pm_tasks": [{"task_id": 748, "tech": "NRDUCELL"}]},
+        "sites": [
+            {"id": site_id, "name": site_id, "cells": cells}
+            for site_id, cells in sites.items()
+        ],
+    }
+
+
+def test_task_748_real_mapeia_celulas_e_calcula_so_kpis_nrducell(tmp_db, monkeypatch):
+    monkeypatch.setattr(db, "get_event_vips", lambda *_: [])
+    collector = HttpCollector(_sp_nrducell_event(), "https://10.220.50.9:31943")
+
+    parsed = collector._parse_monitoring_response(
+        _sp_nrducell_response(), {"748": "5G_NRDUCELL"})
+
+    cell_rows = [row for row in parsed["rows"] if row["scope"] == "CELL"]
+    assert parsed["received"] == 5
+    assert parsed["unmapped"] == 0
+    assert {row["technology"] for row in cell_rows} == {"5G_NRDUCELL"}
+    assert {row["metric"] for row in cell_rows} == {
+        "utilization_dl", "utilization_ul", "throughput_ul", "interference_ul",
+        "traffic_volume_dl_sa", "traffic_volume_dl_nsa",
+        "traffic_volume_ul_sa", "traffic_volume_ul_nsa",
+    }
+    formula_errors = [item for item in parsed["diagnostics"] if item.code == "invalid_formula"]
+    assert formula_errors
+    assert {item.details["metric"] for item in formula_errors} == {"throughput_dl"}
+
+
+def test_configured_pm_tasks_preserva_os_tipos_de_objeto_5g(tmp_db, monkeypatch):
+    monkeypatch.setattr(db, "get_event_vips", lambda *_: [])
+    event = _sp_nrducell_event()
+    event["integration"]["pm_tasks"] = [
+        {"task_id": 747, "tech": "LTE"},
+        {"task_id": 749, "tech": "NR CELL"},
+        {"task_id": 748, "tech": "NR DU CELL"},
+    ]
+    collector = HttpCollector(event, "https://10.220.50.9:31943")
+
+    assert collector._configured_pm_tasks({}) == [
+        {"task_id": 747, "technology": "4G"},
+        {"task_id": 749, "technology": "5G_NRCELL"},
+        {"task_id": 748, "technology": "5G_NRDUCELL"},
+    ]
+
+
+def test_objno_igual_em_tasks_5g_nao_reaproveita_mapeamento(tmp_db, monkeypatch):
+    monkeypatch.setattr(db, "get_event_vips", lambda *_: [])
+    event = {
+        "id": "objno-por-task", "oss": {"region": "OUTRAS"},
+        "sites": [{"id": "SITE", "cells": [
+            {"id": "5G-CELL-A", "tech": "5G"},
+            {"id": "5G-CELL-B", "tech": "5G"},
+        ]}],
+    }
+    collector = HttpCollector(event, "https://oss.example")
+
+    nr_cell = collector._resolve_monitoring_cell(
+        2241, 705, "NR Cell Name=5G-CELL-A", "5G_NRCELL")
+    nr_du_cell = collector._resolve_monitoring_cell(
+        2242, 705, "NR DU Cell Name=5G-CELL-B", "5G_NRDUCELL")
+
+    assert nr_cell["cell_id"] == "5G-CELL-A"
+    assert nr_du_cell["cell_id"] == "5G-CELL-B"
+    assert (2241, 705) in collector._obj_to_cell
+    assert (2242, 705) in collector._obj_to_cell
+
+
+def test_cobertura_de_uma_task_5g_nao_cobra_celulas_4g(tmp_db, monkeypatch):
+    monkeypatch.setattr(db, "get_event_vips", lambda *_: [])
+    event = {
+        "id": "coverage-5g", "oss": {"region": "SP"},
+        "integration": {"pm_tasks": [{"task_id": 748, "tech": "NRDUCELL"}]},
+        "sites": [{"id": "SITE", "cells": [
+            {"id": "4G-CELL", "tech": "4G"},
+            {"id": "5G-CELL", "tech": "5G"},
+            {"id": "CELL-SEM-TECH"},
+        ]}],
+    }
+    collector = HttpCollector(event, "https://oss.example")
+    tasks = collector._configured_pm_tasks({})
+
+    assert collector._expected_pm_cell_ids(tasks) == {"5G-CELL", "CELL-SEM-TECH"}

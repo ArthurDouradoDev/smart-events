@@ -70,6 +70,14 @@ _DEFAULT_BASE_URL = "https://10.220.50.9:31943"  # fallback = SP
 # Quantos corpos de Monitoring sem medição são gravados automaticamente por processo.
 MONITORING_AUTO_DUMPS = 3
 
+# O inventário conhece somente a família da célula, mas cada task 5G consulta
+# um tipo de objeto distinto e, portanto, um catálogo de contadores distinto.
+_TECH_FAMILY = {
+    "4G": "4G",
+    "5G_NRCELL": "5G",
+    "5G_NRDUCELL": "5G",
+}
+
 
 # ── Coleta de alarmes (iMaster FM website) ───────────────────────────
 # Lógica portada de imaster_alarms.py (validada AO VIVO na VPN em 30/06): o cmd 1102
@@ -316,6 +324,23 @@ class BaseCollector(ABC):
         return None
 
     @staticmethod
+    def _normalize_task_technology(value) -> Optional[str]:
+        """Normaliza o tipo de objeto configurado na task PM.
+
+        Diferentemente da tecnologia da célula, ``NRCELL`` e ``NRDUCELL`` não
+        podem ser achatados para 5G: seus contadores são disjuntos.
+        """
+        text = re.sub(r"[^A-Z0-9]+", "_", str(value or "").strip().upper()).strip("_")
+        if text in {"4G", "LTE"}:
+            return "4G"
+        if text in {"NRCELL", "NR_CELL", "5G_NRCELL", "5G_NR_CELL"}:
+            return "5G_NRCELL"
+        if text in {"NRDUCELL", "NR_DU_CELL", "DUCELL", "DU_CELL",
+                    "5G_NRDUCELL", "5G_NR_DU_CELL"}:
+            return "5G_NRDUCELL"
+        return None
+
+    @staticmethod
     def _normalized_name(value) -> str:
         return re.sub(r"[^A-Z0-9]", "", str(value or "").upper())
 
@@ -329,9 +354,14 @@ class BaseCollector(ABC):
         for item in configured:
             if not isinstance(item, dict) or item.get("task_id") is None:
                 continue
-            tech = self._normalize_cell_technology(item.get("tech"))
+            tech = self._normalize_task_technology(item.get("tech"))
             if tech:
                 tasks.append({"task_id": int(item["task_id"]), "technology": tech})
+            else:
+                logger.warning(
+                    "[monitoring] tecnologia de task PM desconhecida: %r (task_id=%r); task ignorada.",
+                    item.get("tech"), item.get("task_id"),
+                )
         if not tasks:
             fallback = integration.get("pm_task_id") or session_data.get("monitoring", {}).get("task_id")
             if fallback is not None:
@@ -347,14 +377,29 @@ class BaseCollector(ABC):
         return unique
 
     def _request_objects_for_task(self, task: dict) -> list[int]:
-        tech = task["technology"]
-        known = [obj for obj, info in self._obj_to_cell.items()
-                 if info.get("technology") == tech or (tech == "4G" and info.get("technology") is None)]
+        task_id = int(task["task_id"])
+        task_family = _TECH_FAMILY.get(task["technology"])
+        known = [obj_no for (mapped_task_id, obj_no), info in self._obj_to_cell.items()
+                 if mapped_task_id in (None, task_id)
+                 and (mapped_task_id is not None
+                      or info.get("technology") in (task_family, None))]
         # Descoberta aberta ocorre no máximo uma vez por task nesta instância. Depois,
         # células ainda não mapeadas viram cobertura parcial, não uma consulta crescente.
         if not known and str(task["task_id"]) not in self._discovered_pm_tasks:
             return []
         return known
+
+    def _expected_pm_cell_ids(self, tasks: list[dict]) -> set[str]:
+        families = {_TECH_FAMILY.get(task["technology"]) for task in tasks}
+        return {
+            cell_id for cell_id, metadata in self._cell_metadata.items()
+            if metadata.get("technology") is None
+            or metadata.get("technology") in families
+        }
+
+    def _mapped_cell_count(self, expected_cell_ids: set[str] | None = None) -> int:
+        mapped = {info["cell_id"] for info in self._obj_to_cell.values()}
+        return len(mapped if expected_cell_ids is None else mapped & expected_cell_ids)
 
     def _monitoring_payload(self, tasks: list[dict], oss: str) -> list[dict]:
         """Monta a consulta sem deixar um checkpoint antigo impedir descoberta.
@@ -368,6 +413,18 @@ class BaseCollector(ABC):
             checkpoints = db.get_collection_checkpoints(
                 self.event_id, "monitoring", task["task_id"], oss)
             objects = self._request_objects_for_task(task)
+            # O mapeamento objNo -> célula vive em memória, mas os objNos já
+            # confirmados sobrevivem ao reinício nos checkpoints. O OSS de SP
+            # pode responder ``state=-1`` para a descoberta aberta; ignorar essas
+            # chaves fazia todo restart voltar a zero KPIs mesmo com 28 objetos
+            # válidos persistidos. Reconsultá-los permite reconstruir os nomes e
+            # continua isolado por evento/OSS/task pelo lookup acima.
+            if not objects:
+                objects = sorted(
+                    int(object_key)
+                    for object_key in checkpoints
+                    if object_key and str(object_key).isdigit()
+                )
             fallback = checkpoints.get("")
             discovering = not objects
             item = {
@@ -432,12 +489,20 @@ class BaseCollector(ABC):
 
     def _collect_kpis_v2(self) -> CollectionResult:
         session_data = self._load_session_data()
-        tasks = self._configured_pm_tasks(session_data)
+        try:
+            tasks = self._configured_pm_tasks(session_data)
+        except (ValueError, TypeError, KeyError) as error:
+            logger.error("Configuração inválida de tasks PM: %s", error)
+            return CollectionResult.error(
+                f"Configuração inválida de tasks PM: {error}",
+                stage="configuration", code="contract",
+            )
         if not tasks:
             logger.warning("[monitoring] nenhuma task PM configurada para as tecnologias do evento.")
             return CollectionResult.partial(cause="Nenhuma task PM foi configurada para as tecnologias do evento.",
                                             coverage={"cells_mapped": 0, "cells_expected": len(self.cell_ids)})
         oss = (self._region or self.base_url).upper()
+        expected_cell_ids = self._expected_pm_cell_ids(tasks)
         payload = self._monitoring_payload(tasks, oss)
         discovery_tasks = {
             str(item["taskId"]) for item in payload if not item.get("objNoExecTimes")
@@ -468,14 +533,16 @@ class BaseCollector(ABC):
                                            response_payload)
                 for task in tasks:
                     self._discovered_pm_tasks.add(str(task["task_id"]))
+                mapped_cells = self._mapped_cell_count(expected_cell_ids)
                 coverage = {
-                    "cells_mapped": len(self._obj_to_cell), "cells_expected": len(self.cell_ids),
+                    "cells_mapped": mapped_cells, "cells_expected": len(expected_cell_ids),
                     "mapped_objects": parsed["received"] - parsed["unmapped"],
                     "unmapped_objects": parsed["unmapped"], "unmapped_cells": parsed["unmapped_cells"],
-                    "event_cells": sorted(self.cell_ids)[:5],
+                    "event_cells": sorted(expected_cell_ids)[:5],
                 }
                 self._log_unmapped(parsed)
-                partial = bool(parsed["unmapped"] or parsed["invalid"] or len(self._obj_to_cell) < len(self.cell_ids))
+                partial = bool(parsed["unmapped"] or parsed["invalid"]
+                               or mapped_cells < len(expected_cell_ids))
                 kwargs = dict(cursors=parsed["cursors"], received=parsed["received"],
                               calculated=len(parsed["rows"]), invalid=parsed["invalid"],
                               diagnostics=parsed["diagnostics"], coverage=coverage,
@@ -749,7 +816,7 @@ class HttpCollector(BaseCollector):
                     if isinstance(cell, dict) and "obj_no" in cell:
                         obj_no = int(cell["obj_no"])
                         self._static_obj_nos.add(obj_no)
-                        self._obj_to_cell[obj_no] = {
+                        self._obj_to_cell[(None, obj_no)] = {
                             "cell_id": c_id,
                             "site_id": site["id"],
                             "technology": tech,
@@ -1259,7 +1326,11 @@ class HttpCollector(BaseCollector):
                     cwd=str(Path(__file__).parent.parent),
                 )
                 stdout_tail = result.stdout.strip()[-2000:] if result.stdout.strip() else ""
-                stderr_tail = result.stderr.strip()[-500:] if result.stderr.strip() else ""
+                # A mensagem acionável do Playwright (por exemplo, a revisão exata
+                # do Chromium ausente) aparece antes do banner final. O corte antigo
+                # de 500 caracteres preservava apenas a moldura do banner e escondia
+                # a causa raiz, deixando o log repetir um erro sem diagnóstico.
+                stderr_tail = result.stderr.strip()[-4000:] if result.stderr.strip() else ""
 
                 if result.returncode == EXIT_SUCCESS:
                     if stdout_tail:
@@ -1421,8 +1492,15 @@ class HttpCollector(BaseCollector):
                 return CollectionResult.error(f"Resposta inválida do Monitoring: {e}", stage="parsing", code="contract")
         return CollectionResult.error("Monitoring terminou sem resposta.", code="unknown")
 
-    def _resolve_monitoring_cell(self, obj_no: int, obj_name: str, technology: Optional[str]) -> Optional[dict]:
-        known = self._obj_to_cell.get(obj_no)
+    def _resolve_monitoring_cell(self, task_id: int, obj_no: int, obj_name: str,
+                                 technology: Optional[str]) -> Optional[dict]:
+        cache_key = (int(task_id), obj_no)
+        known = self._obj_to_cell.get(cache_key)
+        if not known:
+            static = self._obj_to_cell.get((None, obj_no))
+            task_family = _TECH_FAMILY.get(technology)
+            if static and static.get("technology") in (task_family, None):
+                known = static
         if known:
             return known
         if not technology:
@@ -1440,8 +1518,10 @@ class HttpCollector(BaseCollector):
         # qualquer task (quem define a tecnologia do dado é a task consultada); célula de
         # tecnologia CONHECIDA e diferente continua fora — essa é a troca silenciosa de 4G por
         # 5G que o gate existe para impedir.
+        task_family = _TECH_FAMILY.get(technology)
         choices = [cell_id for cell_id, metadata in self._cell_metadata.items()
-                   if metadata.get("technology") in (technology, None)
+                   if (metadata.get("technology") is None
+                       or metadata.get("technology") == task_family)
                    and self._normalized_name(cell_id) == candidate]
         if len(choices) != 1:
             return None
@@ -1449,7 +1529,7 @@ class HttpCollector(BaseCollector):
         # A task é a fonte da tecnologia do dado. Gravá-la aqui faz os ciclos seguintes
         # pedirem este objNo explicitamente (ver _request_objects_for_task).
         result = {**self._cell_metadata[cell_id], "cell_id": cell_id, "technology": technology}
-        self._obj_to_cell[obj_no] = result
+        self._obj_to_cell[cache_key] = result
         return result
 
     @staticmethod
@@ -1555,7 +1635,7 @@ class HttpCollector(BaseCollector):
                         continue
                     received += 1
                     obj_name = self._obj_field(item, obj, "objName", "objectName") or ""
-                    info = self._resolve_monitoring_cell(obj_no, obj_name, technology)
+                    info = self._resolve_monitoring_cell(task_id, obj_no, obj_name, technology)
                     if not info:
                         unmapped += 1
                         # O nome registrado é o MESMO que a resolução tentou casar; antes

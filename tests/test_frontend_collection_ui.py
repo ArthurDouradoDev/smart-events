@@ -67,7 +67,7 @@ def test_kpi_dropdown_expoe_somente_a_tecnologia_do_monitoring():
             browser = playwright.chromium.launch(headless=True)
             page = browser.new_page()
             page.goto(f"{url}/index.html", wait_until="domcontentloaded")
-            page.locator("#metric-selector option").first.wait_for(timeout=5000)
+            page.locator("#metric-selector optgroup").first.wait_for(state="attached", timeout=5000)
 
             technologies = page.locator("#metric-selector option").evaluate_all(
                 "options => options.map(option => option.textContent)"
@@ -80,6 +80,42 @@ def test_kpi_dropdown_expoe_somente_a_tecnologia_do_monitoring():
             assert technologies
             assert all("· 4G ·" in label for label in technologies)
             assert all("5G" not in label for label in technologies)
+            browser.close()
+    except Exception as exc:
+        if "Executable doesn't exist" in str(exc):
+            pytest.skip("Chromium do Playwright não está instalado neste ambiente")
+        raise
+
+
+def test_kpi_dropdown_nrducell_expoe_somente_kpis_disponiveis_na_task_748():
+    sync_api = pytest.importorskip("playwright.sync_api")
+    try:
+        with _frontend_server() as url, sync_api.sync_playwright() as playwright:
+            browser = playwright.chromium.launch(headless=True)
+            page = browser.new_page()
+            page.goto(
+                f"{url}/index.html?kpiTechnology=5G_NRDUCELL",
+                wait_until="domcontentloaded",
+            )
+            page.locator("#metric-selector optgroup").first.wait_for(state="attached", timeout=5000)
+
+            labels = page.locator("#metric-selector option").evaluate_all(
+                "options => options.map(option => option.textContent)"
+            )
+            values = page.locator("#metric-selector option").evaluate_all(
+                "options => options.map(option => option.value)"
+            )
+            groups = page.locator("#metric-selector optgroup").evaluate_all(
+                "items => items.map(item => item.label)"
+            )
+
+            assert groups == ["KPIs 5G"]
+            assert all("· 5G ·" in label for label in labels)
+            assert set(values) == {
+                "utilization_dl", "utilization_ul", "throughput_ul", "interference_ul",
+            }
+            assert "accessibility" not in values
+            assert "availability" not in values
             browser.close()
     except Exception as exc:
         if "Executable doesn't exist" in str(exc):

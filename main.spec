@@ -1,6 +1,8 @@
 # -*- mode: python ; coding: utf-8 -*-
 
 import os
+import json
+import importlib.util
 from pathlib import Path
 from PyInstaller.utils.hooks import collect_submodules, collect_data_files, collect_all
 
@@ -32,17 +34,41 @@ if _cat_file.exists():
     _cred_seed = [(str(_cat_file), 'data')]
 
 _ms_playwright = Path(os.environ.get("LOCALAPPDATA", "")) / "ms-playwright"
+# O navegador não é compatível por "ser o mais novo": cada versão do pacote
+# Playwright exige revisões exatas, declaradas no browsers.json do próprio driver.
+# Empacotar qualquer pasta chromium-* disponível criou builds que continham um
+# browser incompatível e derrubavam toda renovação de sessão.
+_playwright_spec = importlib.util.find_spec("playwright")
+if not _playwright_spec or not _playwright_spec.origin:
+    raise RuntimeError("Playwright não está instalado no ambiente do build.")
+_browser_manifest = (
+    Path(_playwright_spec.origin).parent / "driver" / "package" / "browsers.json"
+)
+_browser_entries = json.loads(_browser_manifest.read_text(encoding="utf-8"))["browsers"]
+_required_browser_names = {"chromium", "chromium-headless-shell", "ffmpeg", "winldd"}
 _browser_dirs = [
-    "chromium-1223",
-    "chromium_headless_shell-1223",
-    "ffmpeg-1011",
-    "winldd-1007",
+    f"{entry['name'].replace('-', '_')}-{entry['revision']}"
+    for entry in _browser_entries
+    if entry["name"] in _required_browser_names
 ]
+_missing_browser_dirs = [
+    name for name in _browser_dirs if not (_ms_playwright / name).is_dir()
+]
+if _missing_browser_dirs:
+    raise RuntimeError(
+        "Browsers compatíveis com o Playwright estão ausentes: "
+        + ", ".join(_missing_browser_dirs)
+        + ". Execute: .venv\\Scripts\\playwright.exe install chromium"
+    )
 _browser_datas = [
     (str(_ms_playwright / d), f"ms-playwright/{d}")
     for d in _browser_dirs
-    if (_ms_playwright / d).exists()
 ]
+
+# Permite gerar distribuições com uma semente isolada sem alterar ``server_data`` da
+# instalação de desenvolvimento. Sem a variável, o build normal continua usando a
+# pasta padrão do projeto.
+_server_data_seed = Path(os.environ.get("SMARTEVENTS_SERVER_DATA_SEED", "server_data"))
 
 a = Analysis(
     ['main.py'],
@@ -51,7 +77,7 @@ a = Analysis(
     datas=[
         ('frontend', 'frontend'),
         ('server_frontend', 'server_frontend'),
-        ('server_data', 'server_data'),  # semente: evento Rio + VIPs finalizados
+        (str(_server_data_seed), 'server_data'),
         ('core/session_renew.py', 'core'),  # garante o módulo de renovação no bundle
         ('alarms/catalogo-alarmes.csv', 'alarms'),  # catálogo nome→pares (coleta de alarmes)
     ] + _cred_seed + collect_data_files('certifi') + _pw_datas + _browser_datas,
