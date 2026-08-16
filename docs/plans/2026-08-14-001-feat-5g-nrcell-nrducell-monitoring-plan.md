@@ -259,7 +259,7 @@ recebendo o corpo, nunca `_resolve_monitoring_cell` com argumentos já desembrul
 
 ```
 .venv\Scripts\python.exe -m pytest tests/test_kpi_monitoring.py tests/test_kpi_formulas.py -v
-.venv\Scripts\python.exe -m pytest tests/ -q --basetemp=.pytest-work/tmp
+.venv\Scripts\python.exe -m pytest tests/ -q
 ```
 Sem falhas novas além das 3 pré-existentes já documentadas em `MEMORY.md`.
 
