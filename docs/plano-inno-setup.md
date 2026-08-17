@@ -28,7 +28,7 @@ O Inno Setup será utilizado para instalar e validar o aplicativo, mas a geraç�
 - Em atualizações, nunca sobrescrever credenciais, sessões ou alterações já realizadas pelo operador.
 - Continuar incluindo os dois navegadores do Playwright:
   - `chromium_headless_shell`, utilizado na renovação automática da sessão;
-  - `chromium`, utilizado no login visual e em situações com CAPTCHA.
+  - `chromium`, utilizado quando for necessário realizar o login em uma janela visível.
 
 ## 3. Diagnóstico interno
 
@@ -128,7 +128,7 @@ O instalador deverá ser testado, preferencialmente em máquinas virtuais limpas
 10. Desinstalação e reinstalação.
 11. Preservação dos dados do operador durante uma atualização.
 12. Login automático.
-13. Login visual e tratamento de CAPTCHA.
+13. Login em janela visível.
 14. Renovação automática da sessão usando o Chromium headless.
 15. Abertura da interface pelo WebView2.
 16. Coleta real com a VPN conectada.
