@@ -856,14 +856,14 @@ class HttpCollector(BaseCollector):
         PERSISTIR entre execuções para manter o SSO quente e a renovação headless funcionando."""
         _SP_DEFAULT = "https://10.220.50.9:31943"
         if not base_url or base_url.rstrip("/") == _SP_DEFAULT.rstrip("/"):
-            return db.BASE_DIR / "data" / "session.json"
+            return credentials.data_dir() / "session.json"
         try:
             import urllib.parse
             host = urllib.parse.urlparse(base_url).hostname or base_url
             slug = host.replace(".", "_")
         except Exception:
             slug = "regional"
-        return db.BASE_DIR / "data" / f"session_{slug}.json"
+        return credentials.data_dir() / f"session_{slug}.json"
 
     def _load_session_data(self) -> dict:
         session_path = self._session_file

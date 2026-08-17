@@ -22,6 +22,8 @@ import shutil
 import sys
 from pathlib import Path
 
+from core.paths import data_dir as _persistent_data_dir, resource_dir
+
 logger = logging.getLogger(__name__)
 
 # Chave reservada dentro de credentials.json[CLIENTE] para a credencial compartilhada
@@ -47,11 +49,8 @@ _DEFAULT_BASE_URL = "https://10.220.50.9:31943"
 
 
 def data_dir() -> Path:
-    """Diretório de dados PERSISTENTE (frozen-aware). No .exe fica ao lado do executável —
-    NÃO em _MEIPASS, que no onefile é temporário e apagado a cada execução."""
-    if getattr(sys, "frozen", False):
-        return Path(sys.executable).parent / "data"
-    return Path(__file__).parent.parent / "data"
+    """Diretório persistente (``%LOCALAPPDATA%\\SmartEvents`` no instalável)."""
+    return _persistent_data_dir()
 
 
 def credentials_file() -> Path:
@@ -64,13 +63,13 @@ def clientes_file() -> Path:
 
 def _bundled(name: str) -> Path:
     """Caminho da cópia embutida no .exe (_MEIPASS/data/<name>)."""
-    base = Path(getattr(sys, "_MEIPASS", Path(sys.executable).parent))
-    return base / "data" / name
+    return resource_dir() / "data" / name
 
 
 def seed_files() -> None:
-    """1ª execução do .exe: garante data/clientes.json e data/credentials.json graváveis ao lado
-    do executável. clientes.json é semeado da cópia embutida (ou do fallback); credentials.json é
+    """1ª execução: garante clientes.json e credentials.json na pasta do operador.
+
+    clientes.json é semeado da cópia embutida (ou do fallback); credentials.json é
     semeado VAZIO — nunca distribuímos segredos no bundle."""
     if not getattr(sys, "frozen", False):
         return

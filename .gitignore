@@ -24,6 +24,7 @@ var/
 
 # --- Virtual Environments ---
 .venv/
+.venv-build/
 venv/
 ENV/
 env.bak/
@@ -38,6 +39,7 @@ server_data/
 # --- PyInstaller / Executable Builds ---
 dist/
 build/
+installer/prerequisites/*.exe
 
 # --- Testes / artefatos temporários locais ---
 .pytest*/

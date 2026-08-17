@@ -20,7 +20,7 @@ pytestmark = pytest.mark.vpn
 def http_col_sp(event_in_db, sample_event, monkeypatch):
     """HttpCollector apontado para o OSS SP."""
     ev = {**sample_event, "oss": {**sample_event["oss"], "base_url": _DEFAULT_BASE_URL, "region": "SP"}}
-    return HttpCollector(ev)
+    return HttpCollector(ev, _DEFAULT_BASE_URL)
 
 
 @pytest.fixture
@@ -28,14 +28,14 @@ def http_col_rj(event_in_db, sample_event, monkeypatch):
     """HttpCollector apontado para o OSS RJ."""
     ev = {**sample_event, "oss": {**sample_event["oss"],
           "base_url": _REGIONAL_BASE_URLS["RJ"], "region": "RJ"}}
-    return HttpCollector(ev)
+    return HttpCollector(ev, _REGIONAL_BASE_URLS["RJ"])
 
 
 class TestHttpSessionSP:
     def test_session_file_resolved_sp(self, http_col_sp):
         fname = http_col_sp._resolve_session_file(_DEFAULT_BASE_URL)
-        assert "session" in fname
-        assert "10_220_30" not in fname  # não deve confundir SP com RJ
+        assert "session" in fname.name
+        assert "10_220_30" not in fname.name  # não deve confundir SP com RJ
 
     def test_session_valid_sp(self, http_col_sp):
         """Verifica que a sessão SP está ativa (cookie válido, sem redirect SSO)."""
@@ -54,7 +54,7 @@ class TestHttpSessionSP:
 class TestHttpSessionRJ:
     def test_session_file_resolved_rj(self, http_col_rj):
         fname = http_col_rj._resolve_session_file(_REGIONAL_BASE_URLS["RJ"])
-        assert "10_220_30" in fname or "session_" in fname
+        assert "10_220_30" in fname.name or "session_" in fname.name
 
     def test_session_valid_rj(self, http_col_rj):
         """Verifica que a sessão RJ está ativa."""

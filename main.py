@@ -35,6 +35,7 @@ sys.path.insert(0, str(Path(__file__).parent))
 
 from core import database as db
 from core import credentials
+from core.paths import resource_dir
 
 _log_handlers = [logging.StreamHandler()]
 try:
@@ -61,7 +62,7 @@ logger = logging.getLogger("main")
 from core.log_buffer import install as _install_log_buffer
 _install_log_buffer()
 
-FRONTEND = Path(__file__).parent / "frontend" / "index.html"
+FRONTEND = resource_dir() / "frontend" / "index.html"
 
 
 _JOB_HANDLE = None  # mantém o handle do Job Object vivo durante a sessão
@@ -291,7 +292,7 @@ def main():
     webview.start(
         debug=dev_mode,
         http_server=False,   # serve arquivos locais diretamente
-        storage_path=str(Path(__file__).parent / "data"),
+        storage_path=str(credentials.data_dir() / "webview"),
         # private_mode=False: o pywebview, em private_mode (default=True), APAGA a
         # storage_path ao fechar o app. Como a storage_path é a pasta data/, isso
         # destruía o session.json (cookies/roarand) e o browser_profile a cada
@@ -303,7 +304,25 @@ def main():
 
 if __name__ == "__main__":
     # Subprocessos sem janela: servidor embutido (--serve) ou renovação de sessão (--get-session).
-    if "--serve" in sys.argv:
+    if "--self-test-webview" in sys.argv:
+        from core.self_test import run_webview_probe
+        sys.exit(run_webview_probe())
+    elif "--self-test" in sys.argv:
+        from core.self_test import run_self_test
+        report_arg = _get_arg("--report", None)
+        exit_code, report_path, report = run_self_test(report_arg)
+        logger.info("Diagnostico %s: %s", "aprovado" if exit_code == 0 else "reprovado", report_path)
+        if "--show-dialog" in sys.argv:
+            import ctypes
+            failed = [item["name"] for item in report["checks"] if not item["ok"]]
+            message = (
+                "Todos os testes foram aprovados."
+                if not failed
+                else "Falha em: " + ", ".join(failed) + f"\n\nRelatorio: {report_path}"
+            )
+            ctypes.windll.user32.MessageBoxW(None, message, "SmartEvents - Diagnostico", 0x40 if not failed else 0x10)
+        sys.exit(exit_code)
+    elif "--serve" in sys.argv:
         _run_server_only()
     elif "--get-session" in sys.argv:
         sys.exit(_run_get_session())

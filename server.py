@@ -1,7 +1,6 @@
 import json
 import logging
 import sys
-import shutil
 from pathlib import Path
 from typing import Optional
 from fastapi import FastAPI, HTTPException, Request, UploadFile, File
@@ -9,6 +8,8 @@ from fastapi.responses import FileResponse, HTMLResponse
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 import uvicorn
+from core.paths import data_dir, resource_dir
+from core.seed import seed_operator_data
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(name)s: %(message)s")
@@ -46,26 +47,18 @@ def startup_event():
 #   RESOURCE_DIR → recursos read-only embutidos no bundle (server_frontend + semente de server_data)
 #   DATA_DIR     → diretório gravável ao lado do .exe (mesmo critério de core/database.py),
 #                  garantindo que app desktop e servidor compartilhem o MESMO server_data.
-if getattr(sys, "frozen", False):
-    RESOURCE_DIR = Path(getattr(sys, "_MEIPASS", Path(sys.executable).parent))
-    DATA_DIR = Path(sys.executable).parent
-else:
-    RESOURCE_DIR = Path(__file__).parent
-    DATA_DIR = Path(__file__).parent
+RESOURCE_DIR = resource_dir()
+DATA_DIR = data_dir().parent if not getattr(sys, "frozen", False) else data_dir()
 
 SERVER_DATA_DIR = DATA_DIR / "server_data"
 
 # Seed na 1ª execução: se server_data ainda não existe ao lado do .exe, copia a cópia embutida no bundle.
 def _seed_server_data():
-    bundled = RESOURCE_DIR / "server_data"
-    if SERVER_DATA_DIR.exists() and any(SERVER_DATA_DIR.iterdir()):
-        return
-    if bundled.exists() and bundled.resolve() != SERVER_DATA_DIR.resolve():
-        try:
-            shutil.copytree(bundled, SERVER_DATA_DIR, dirs_exist_ok=True)
-            logger.info(f"server_data semeado a partir de {bundled} -> {SERVER_DATA_DIR}")
-        except Exception as e:
-            logger.error(f"Falha ao semear server_data: {e}")
+    try:
+        target = seed_operator_data()
+        logger.info("server_data disponivel em %s", target)
+    except Exception as e:
+        logger.error(f"Falha ao semear server_data: {e}")
 
 _seed_server_data()
 

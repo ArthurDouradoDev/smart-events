@@ -7,21 +7,23 @@ from pathlib import Path
 from typing import List, Optional
 from datetime import datetime
 
+from core.paths import data_dir
+
 _db_logger = logging.getLogger(__name__)
 
 # Rastreia quais eventos já tiveram dados de VIP migrados para o banco global nesta sessão.
 # Garante que a migração rode apenas uma vez por evento por processo Python.
 _migrated_events: set = set()
 
-# Determina o diretório base para dados persistentes (próximo ao executável ou no workspace)
-if getattr(sys, 'frozen', False):
-    # Executando a partir do binário compilado pelo PyInstaller
-    BASE_DIR = Path(sys.executable).parent
+# ``BASE_DIR`` permanece por compatibilidade com testes e extensoes antigas. Em
+# desenvolvimento aponta para a raiz do projeto; no instalavel, para a propria
+# pasta persistente (nao para Program Files).
+if getattr(sys, "frozen", False):
+    BASE_DIR = data_dir()
+    DB_PATH = BASE_DIR / "smart_events.db"
 else:
-    # Executando em modo de desenvolvimento (código fonte)
     BASE_DIR = Path(__file__).parent.parent
-
-DB_PATH = BASE_DIR / "data" / "smart_events.db"
+    DB_PATH = data_dir() / "smart_events.db"
 
 _local = threading.local()
 
@@ -60,7 +62,8 @@ _event_local = threading.local()
 
 def get_event_db_path(event_id: str) -> Path:
     safe_id = "".join([c for c in event_id if c.isalnum() or c in ("-", "_")]).strip()
-    return BASE_DIR / "data" / f"smart_events_{safe_id}.db"
+    base = BASE_DIR if getattr(sys, "frozen", False) else BASE_DIR / "data"
+    return base / f"smart_events_{safe_id}.db"
 
 def init_event_db(conn: sqlite3.Connection):
     conn.executescript("""
@@ -1074,7 +1077,7 @@ def get_event_timestamps(event_id: str) -> List[str]:
 
 # ── Configurações e Sincronização Compartilhada de Eventos ──────────────────
 
-SETTINGS_PATH = BASE_DIR / "data" / "settings.json"
+SETTINGS_PATH = (BASE_DIR if getattr(sys, "frozen", False) else BASE_DIR / "data") / "settings.json"
 
 
 def get_settings() -> dict:

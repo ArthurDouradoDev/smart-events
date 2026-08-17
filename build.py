@@ -1,96 +1,142 @@
-"""
-build.py — Gera o executável do SmartEvents.
+"""Build reproduzivel do pacote ONEDIR do SmartEvents.
 
-Uso:
-    python build.py
+Requer CPython 3.12 x64 e as versoes de ``requirements-build.lock``.
 """
 
+from __future__ import annotations
+
+import hashlib
+import json
+import os
+import platform
 import shutil
 import subprocess
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
 
-ROOT = Path(__file__).parent
+
+ROOT = Path(__file__).resolve().parent
 DIST = ROOT / "dist"
+BUILD = ROOT / "build"
 SPEC = ROOT / "main.spec"
-
-# Dados persistentes que precisam viver AO LADO do .exe (não dentro dele): o app, quando
-# congelado, lê/grava em <pasta do .exe>/data (ver core/database.BASE_DIR e _data_dir()).
-# clientes.json é o catálogo Cliente→Regional→IP (editável sem recompilar) — copiado para
-# dist/main/data para já ficar disponível ao lado do .exe. As CREDENCIAIS (credentials.json) NÃO são copiadas:
-# o .exe circula entre clientes e não pode carregar segredos; core.credentials.seed_files() cria
-# um credentials.json VAZIO na 1ª execução e o operador digita suas contas no app.
-PERSIST_DATA_FILES = ["clientes.json"]
+LOCK = ROOT / "requirements-build.lock"
+VERSION_FILE = ROOT / "VERSION"
+APP_DIR = DIST / "SmartEvents"
 
 
-def main():
-    if not SPEC.exists():
-        print(f"ERRO: {SPEC} não encontrado. Execute na raiz do projeto.")
-        sys.exit(1)
+def run(command: list[str], *, env: dict[str, str] | None = None, log=None) -> None:
+    print("+", subprocess.list2cmdline(command), flush=True)
+    completed = subprocess.run(
+        command,
+        cwd=ROOT,
+        env=env,
+        stdout=log or None,
+        stderr=subprocess.STDOUT if log else None,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+    )
+    if completed.returncode:
+        raise SystemExit(completed.returncode)
 
-    print("=" * 55)
-    print(" SmartEvents — Build")
-    print("=" * 55)
 
-    # 1. Limpa dist/
+def require_build_python() -> None:
+    if sys.version_info[:2] != (3, 12):
+        raise SystemExit(
+            f"ERRO: use CPython 3.12 x64; encontrado {platform.python_version()}."
+        )
+    if platform.architecture()[0] != "64bit":
+        raise SystemExit("ERRO: o build requer Python x64.")
+
+
+def sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def main() -> int:
+    require_build_python()
+    version = VERSION_FILE.read_text(encoding="utf-8").strip()
+    if not version:
+        raise SystemExit("ERRO: VERSION esta vazio.")
+
     if DIST.exists():
-        print(f"\n[1/2] Removendo {DIST} ...")
         shutil.rmtree(DIST)
-        print("      OK")
-    else:
-        print(f"\n[1/2] {DIST} não existe, nada a limpar.")
+    DIST.mkdir(parents=True)
+    BUILD.mkdir(parents=True, exist_ok=True)
+    artifacts = DIST / "artifacts"
+    artifacts.mkdir()
+    seed = BUILD / "installer_seed"
+    build_log = artifacts / "build.log"
 
-    # 2. PyInstaller
-    print("\n[2/2] Gerando executável (pode levar alguns minutos)...")
-    result = subprocess.run(
-        [sys.executable, "-m", "PyInstaller", "--noconfirm", "--clean", str(SPEC)],
-        cwd=str(ROOT),
+    env = os.environ.copy()
+    env["SMARTEVENTS_SERVER_DATA_SEED"] = str(seed)
+    browsers = Path(env.get("PLAYWRIGHT_BROWSERS_PATH", ""))
+    if not browsers.is_dir():
+        raise SystemExit("ERRO: defina PLAYWRIGHT_BROWSERS_PATH para o cache homologado.")
+
+    with build_log.open("w", encoding="utf-8") as log:
+        run(
+            [sys.executable, "-m", "tools.prepare_installer_seed", "--source", "server_data", "--output", str(seed)],
+            env=env,
+            log=log,
+        )
+        run(
+            [sys.executable, "-m", "PyInstaller", "--noconfirm", "--clean", str(SPEC)],
+            env=env,
+            log=log,
+        )
+
+    exe = APP_DIR / "SmartEvents.exe"
+    if not exe.is_file():
+        raise SystemExit(f"ERRO: executavel ausente: {exe}")
+
+    shutil.copy2(ROOT / "installer" / "README-operador.txt", APP_DIR / "LEIA-ME.txt")
+    freeze = subprocess.check_output(
+        [sys.executable, "-m", "pip", "freeze", "--all"], text=True, encoding="utf-8"
+    )
+    (artifacts / "dependencies.txt").write_text(freeze, encoding="utf-8")
+    shutil.copy2(LOCK, artifacts / LOCK.name)
+
+    smoke_data = BUILD / "self-test-data"
+    if smoke_data.exists():
+        shutil.rmtree(smoke_data)
+    smoke_env = env.copy()
+    smoke_env["SMARTEVENTS_DATA_DIR"] = str(smoke_data)
+    run(
+        [str(exe), "--self-test", "--report", str(artifacts / "self-test-build-machine.json")],
+        env=smoke_env,
     )
 
-    if result.returncode != 0:
-        print("\nERRO: PyInstaller encerrou com código", result.returncode)
-        sys.exit(result.returncode)
-
-    # ONEDIR: a saída é a pasta dist/main/ com o main.exe (e _internal/) dentro.
-    app_dir = DIST / "main"
-    exe = app_dir / "main.exe"
-    if not exe.exists():
-        print("\nERRO: executável não encontrado em", exe)
-        sys.exit(1)
-
-    # Copia os dados persistentes para data/ AO LADO do .exe (dentro de dist/main/), de onde o
-    # app congelado lê/grava (core.database.BASE_DIR / credentials.data_dir() = pasta do .exe).
-    dist_data = app_dir / "data"
-    for fname in PERSIST_DATA_FILES:
-        src = ROOT / "data" / fname
-        if src.exists():
-            dist_data.mkdir(parents=True, exist_ok=True)
-            shutil.copy2(src, dist_data / fname)
-            print(f"      Copiado {fname} -> {dist_data / fname}")
-        else:
-            print(f"      AVISO: {src} não existe — o autologin por regional pode pedir "
-                  f"login manual no .exe. Crie data/{fname} antes do build.")
-
-    # Empacota a pasta inteira num .zip para envio a outras máquinas. Transferir a pasta como
-    # ZIP é robusto: cada arquivo tem CRC próprio, então uma transferência corrompida falha
-    # visível na extração — ao contrário do onefile, que corrompia silenciosamente e só
-    # estourava "decompression error -1" ao abrir.
-    print("\n[3/3] Gerando ZIP para distribuição...")
-    zip_base = DIST / "SmartEvents"
-    if (zip_base.with_suffix(".zip")).exists():
-        (zip_base.with_suffix(".zip")).unlink()
-    zip_path = shutil.make_archive(str(zip_base), "zip", root_dir=str(DIST), base_dir="main")
-    zip_path = Path(zip_path)
-
-    folder_mb = round(sum(f.stat().st_size for f in app_dir.rglob("*") if f.is_file()) / 1024 / 1024, 1)
-    zip_mb = round(zip_path.stat().st_size / 1024 / 1024, 1)
-    print(f"\n{'=' * 55}")
-    print(f" Build concluído (onedir):")
-    print(f"   Pasta: {app_dir}  ({folder_mb} MB)")
-    print(f"   Abrir: {exe}")
-    print(f"   Enviar: {zip_path}  ({zip_mb} MB)")
-    print(f"{'=' * 55}\n")
+    archive = shutil.make_archive(str(DIST / "SmartEvents_RoadShow"), "zip", DIST, "SmartEvents")
+    metadata = {
+        "application": "SmartEvents",
+        "version": version,
+        "built_at_utc": datetime.now(timezone.utc).isoformat(),
+        "python": platform.python_version(),
+        "architecture": platform.architecture()[0],
+        "pyinstaller_package_sha256": sha256(Path(archive)),
+        "executable_sha256": sha256(exe),
+        "playwright_browsers_path": str(browsers),
+        "source_commit": subprocess.check_output(
+            ["git", "rev-parse", "HEAD"], cwd=ROOT, text=True, encoding="utf-8"
+        ).strip(),
+        "source_dirty": bool(
+            subprocess.check_output(
+                ["git", "status", "--porcelain"], cwd=ROOT, text=True, encoding="utf-8"
+            ).strip()
+        ),
+    }
+    (artifacts / "build-manifest.json").write_text(
+        json.dumps(metadata, indent=2, ensure_ascii=False), encoding="utf-8"
+    )
+    print(f"Build aprovado: {exe}")
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())

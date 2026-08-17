@@ -33,7 +33,10 @@ _cat_file = Path('data/clientes.json')
 if _cat_file.exists():
     _cred_seed = [(str(_cat_file), 'data')]
 
-_ms_playwright = Path(os.environ.get("LOCALAPPDATA", "")) / "ms-playwright"
+_ms_playwright = Path(
+    os.environ.get("PLAYWRIGHT_BROWSERS_PATH")
+    or (Path(os.environ.get("LOCALAPPDATA", "")) / "ms-playwright")
+)
 # O navegador não é compatível por "ser o mais novo": cada versão do pacote
 # Playwright exige revisões exatas, declaradas no browsers.json do próprio driver.
 # Empacotar qualquer pasta chromium-* disponível criou builds que continham um
@@ -120,7 +123,7 @@ exe = EXE(
     a.scripts,
     [],
     exclude_binaries=True,  # binaries/datas vão para o COLLECT (pasta), não para dentro do .exe
-    name='main',
+    name='SmartEvents',
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
@@ -142,5 +145,5 @@ coll = COLLECT(
     strip=False,
     upx=False,
     upx_exclude=[],
-    name='main',  # gera dist/main/ (main.exe + _internal/)
+    name='SmartEvents',
 )
