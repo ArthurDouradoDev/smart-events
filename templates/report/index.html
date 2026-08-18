@@ -1,0 +1,155 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Performance Dashboard — Relatório Horário</title>
+  <link rel="stylesheet" href="report.css">
+</head>
+
+<body>
+
+  <!-- =======================================================================
+       Toolbar de Customização Interativa (Ocultada no Snapshot / Impressão)
+       ======================================================================= -->
+  <div id="customizer-toolbar">
+    <div class="toolbar-group">
+      <span class="toolbar-label">Tema / Evento:</span>
+      <select id="select-theme-preset" class="toolbar-select">
+        <!-- Populado dinamicamente pelo themes.js -->
+      </select>
+    </div>
+
+    <div class="toolbar-group">
+      <span class="toolbar-label">Cor Primária:</span>
+      <input type="color" id="color-primary" class="toolbar-color-picker" value="#1a052e"
+        title="Cor das barras de seção e cabeçalho">
+    </div>
+
+    <div class="toolbar-group">
+      <span class="toolbar-label">Cor Secundária:</span>
+      <input type="color" id="color-secondary" class="toolbar-color-picker" value="#5b21b6"
+        title="Cor dos badges e tabela">
+    </div>
+
+    <div class="toolbar-group">
+      <span class="toolbar-label">Acento:</span>
+      <input type="color" id="color-accent" class="toolbar-color-picker" value="#9333ea"
+        title="Linha de acento do banner">
+    </div>
+
+    <div class="toolbar-group">
+      <span class="toolbar-label">Fundo Banner:</span>
+      <input type="text" id="input-banner-url" class="toolbar-input" placeholder="URL da imagem..."
+        style="width: 110px;">
+    </div>
+
+    <div class="toolbar-group">
+      <span class="toolbar-label">Fundo Faixa 1:</span>
+      <input type="text" id="input-band-1-url" class="toolbar-input" placeholder="URL da imagem..."
+        style="width: 110px;">
+    </div>
+
+    <div class="toolbar-group">
+      <span class="toolbar-label">Fundo Faixa 2:</span>
+      <input type="text" id="input-band-2-url" class="toolbar-input" placeholder="URL da imagem..."
+        style="width: 110px;">
+    </div>
+
+    <div class="toolbar-group">
+      <span class="toolbar-label">Fundo Faixa 3:</span>
+      <input type="text" id="input-band-3-url" class="toolbar-input" placeholder="URL da imagem..."
+        style="width: 110px;">
+    </div>
+
+    <div class="toolbar-group">
+      <button id="btn-download" class="toolbar-btn" style="background-color: #10b981;">Baixar PNG</button>
+      <button id="btn-toggle-export" class="toolbar-btn secondary">Modo Snapshot (Limpo)</button>
+    </div>
+  </div>
+
+  <!-- =======================================================================
+       Canvas Principal do Relatório (1080px de largura fixa)
+       ======================================================================= -->
+  <div id="report-canvas">
+
+    <!-- 1. Cabeçalho / Banner Temático -->
+    <header id="report-header">
+      <div class="header-overlay"></div>
+      <div id="header-logo-container" class="header-logo-container">
+        <!-- Renderizado dinamicamente pelo themes.js -->
+      </div>
+      <div id="header-title-container" class="header-title-container">
+        <!-- Renderizado dinamicamente pelo themes.js -->
+      </div>
+    </header>
+
+    <!-- 2. Seção 5G -->
+    <section id="section-5g">
+      <div class="section-title-bar">MONITORAMENTO 5G</div>
+
+      <!-- 5 Velocímetros 5G -->
+      <div id="gauges-row-5g" class="gauges-row">
+        <!-- Populado dinamicamente pelo report.js -->
+      </div>
+
+      <!-- 4 Gráficos de Barra + Stack Lateral de Métricas 5G -->
+      <div id="middle-row-5g" class="charts-middle-row">
+        <!-- Populado dinamicamente pelo report.js -->
+      </div>
+
+      <!-- 6 Cards de Saúde 5G -->
+      <div id="health-cards-row-5g" class="health-cards-row">
+        <!-- Populado dinamicamente pelo report.js -->
+      </div>
+    </section>
+
+    <!-- 3. Seção 4G -->
+    <section id="section-4g">
+      <div class="section-title-bar">MONITORAMENTO 4G</div>
+
+      <!-- 5 Velocímetros 4G -->
+      <div id="gauges-row-4g" class="gauges-row">
+        <!-- Populado dinamicamente pelo report.js -->
+      </div>
+
+      <!-- 3 Gráficos de Barra + Tabela VoLTE 4G -->
+      <div id="middle-row-4g" class="charts-middle-row">
+        <!-- Populado dinamicamente pelo report.js -->
+      </div>
+
+      <!-- 6 Cards de Saúde 4G -->
+      <div id="health-cards-row-4g" class="health-cards-row">
+        <!-- Populado dinamicamente pelo report.js -->
+      </div>
+    </section>
+
+    <!-- 4. Rodapé Corporativo -->
+    <footer id="report-footer">
+      <div class="footer-huawei-logo">
+        <svg viewBox="0 0 100 80" width="34" height="28">
+          <g fill="#ffffff">
+            <path d="M50 48 C49 32 45 15 50 2 C55 15 51 32 50 48 Z" />
+            <path d="M50 48 C43 33 34 19 32 8 C40 18 45 33 50 48 Z" />
+            <path d="M50 48 C57 33 66 19 68 8 C60 18 55 33 50 48 Z" />
+            <path d="M50 48 C38 37 25 27 18 18 C28 24 39 36 50 48 Z" />
+            <path d="M50 48 C62 37 75 27 82 18 C72 24 61 36 50 48 Z" />
+            <path d="M50 48 C34 43 18 38 8 32 C20 34 35 42 50 48 Z" />
+            <path d="M50 48 C66 43 82 38 92 32 C80 34 65 42 50 48 Z" />
+          </g>
+        </svg>
+        <span class="huawei-wordmark">HUAWEI</span>
+      </div>
+    </footer>
+
+  </div>
+
+  <!-- Scripts -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+  <script src="sample_data.js"></script>
+  <script src="themes.js"></script>
+  <script src="report.js"></script>
+</body>
+
+</html>
