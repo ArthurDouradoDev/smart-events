@@ -49,6 +49,11 @@ const CELL_COLORS = [
   "#f1e05a", // Bright Amber
 ];
 
+const FAMILY_COLORS = {
+  "4G": "#388BFD",
+  "5G": "#ab7df6",
+};
+
 function hexToRgba(hex, alpha) {
   const r = parseInt(hex.slice(1, 3), 16);
   const g = parseInt(hex.slice(3, 5), 16);
@@ -108,6 +113,7 @@ export function initKpi() {
   State.on("change:selectedSite",   _onSiteSelected);
   State.on("change:selectedMetric", _refreshChart);
   State.on("change:selectedCell",   _refreshChart);
+  State.on("change:techFilter",     _onTechFilterChanged);
   State.on("change:timeWindow",     _refreshChart);
   State.on("change:historicalTimestamp", _refreshChart);
 
@@ -121,6 +127,14 @@ export function initKpi() {
   if (cellSel) {
     cellSel.addEventListener("change", e => {
       State.set("selectedCell", e.target.value);
+    });
+  }
+
+  const techSel = document.getElementById("tech-selector");
+  if (techSel) {
+    techSel.value = State.techFilter || "all";
+    techSel.addEventListener("change", e => {
+      State.set("techFilter", e.target.value || "all");
     });
   }
 
@@ -138,7 +152,7 @@ export function initKpi() {
     if (!eventId) return;
     const ts = mode === "historical" ? historicalTimestamp : null;
     const metric = State.selectedMetric;
-    const sites = await API.getSites(eventId, ts, metric);
+    const sites = await API.getSites(eventId, ts, metric, _techFamilyParam());
     if (sites) State.set("sites", sites);
   });
 
@@ -233,6 +247,48 @@ function commonMetricTechnologies(metricId) {
     .map(item => _technologyFamily(item.technology)))].join("/");
 }
 
+function _techFamilyParam() {
+  return State.techFilter === "4G" || State.techFilter === "5G" ? State.techFilter : null;
+}
+
+function _cellFamilyFromId(cellId) {
+  const text = String(cellId || "").toUpperCase();
+  const has4g = /(^|[^A-Z0-9])(?:4G|LTE)([^A-Z0-9]|$)/.test(text);
+  const has5g = /(^|[^A-Z0-9])(?:5G|NR|NCI)([^A-Z0-9]|$)/.test(text);
+  if (has4g === has5g) return null;
+  return has4g ? "4G" : "5G";
+}
+
+function _siteHasBothFamilies(site) {
+  const families = site?.tech_families || [];
+  return families.includes("4G") && families.includes("5G");
+}
+
+function _effectiveTechFilter(site) {
+  if (!_siteHasBothFamilies(site)) return "all";
+  return State.techFilter || "all";
+}
+
+function _syncTechSelector(site) {
+  const sel = document.getElementById("tech-selector");
+  if (!sel) return;
+  const show = _siteHasBothFamilies(site);
+  sel.classList.toggle("hidden", !show);
+  if (show) sel.value = State.techFilter || "all";
+}
+
+async function _onTechFilterChanged() {
+  const { eventId, historicalTimestamp, mode, selectedSite } = State;
+  _syncTechSelector(State.sites.find(s => s.id === selectedSite));
+  if (eventId) {
+    const ts = mode === "historical" ? historicalTimestamp : null;
+    const sites = await API.getSites(eventId, ts, State.selectedMetric, _techFamilyParam());
+    if (sites) State.set("sites", sites);
+  }
+  if (selectedSite) await _populateCellSelector(selectedSite, true);
+  _refreshChart();
+}
+
 // ── Lista de sites ────────────────────────────────────────────────
 
 function _renderSiteList(sites) {
@@ -302,10 +358,14 @@ function _renderSiteList(sites) {
     const alarmTag = siteAlarms.length
       ? ` <span class="site-alarm${hasCritical ? " critical" : ""}" title="${siteAlarms.length} alarme(s)">⚠</span>`
       : "";
+    const families = site.tech_families || [];
+    const familyTag = (State.techFilter === "all" && families.length > 1)
+      ? ` <span class="site-tech">${_esc(families.join(" · "))}</span>`
+      : "";
 
     item.innerHTML = `
       <span class="site-dot" style="background:${STATUS_COLORS[site.status]}"></span>
-      <span class="site-name">${_esc(site.name)}${hasVip ? ' <span class="vip-crown">👑</span>' : ""}${alarmTag}</span>
+      <span class="site-name">${_esc(site.name)}${familyTag}${hasVip ? ' <span class="vip-crown">👑</span>' : ""}${alarmTag}</span>
       <span class="site-util ${displayClass}">${displayVal}</span>`;
 
     item.addEventListener("click", () => State.set("selectedSite", site.id));
@@ -323,7 +383,7 @@ function _getMetricSuffix(metric) {
   return "";
 }
 
-async function _populateCellSelector(siteId) {
+async function _populateCellSelector(siteId, preserveScope = false) {
   const sel = document.getElementById("cell-selector");
   if (!sel) return;
 
@@ -333,21 +393,27 @@ async function _populateCellSelector(siteId) {
     return;
   }
 
-  const cells = await API.getSiteCells(eventId, siteId);
+  const site = State.sites.find(s => s.id === siteId);
+  const familyFilter = _effectiveTechFilter(site);
+  const family = familyFilter === "all" ? null : familyFilter;
+  const cells = await API.getSiteCells(eventId, siteId, family);
+  const previous = State.selectedCell;
   sel.innerHTML = '<option value="__all__">Site completo</option>';
 
   if (cells && cells.length > 1) {
-    // Adiciona opção "Média" apenas quando há mais de 1 célula
     sel.innerHTML += '<option value="__media__">— Média —</option>';
     cells.forEach(cell => {
       const label = cell.label || cell.id;
       const tech = cell.tech ? ` (${cell.tech})` : "";
       sel.innerHTML += `<option value="${_esc(cell.id)}">${_esc(label)}${_esc(tech)}</option>`;
     });
-    sel.value = "__media__";
-    State.set("selectedCell", "__media__");
+    const keepScope = preserveScope && (previous === "__all__" || previous === "__media__");
+    const next = keepScope
+      ? previous
+      : (_siteHasBothFamilies(site) && (State.techFilter || "all") === "all" ? "__all__" : "__media__");
+    sel.value = next;
+    State.set("selectedCell", next);
   } else if (cells && cells.length === 1) {
-    // Site com célula única: não faz sentido exibir seletor
     sel.innerHTML = `<option value="${_esc(cells[0].id)}">${_esc(cells[0].label || cells[0].id)}</option>`;
     sel.value = cells[0].id;
     State.set("selectedCell", cells[0].id);
@@ -369,6 +435,7 @@ async function _onSiteSelected(siteId) {
 
   const site = State.sites.find(s => s.id === siteId);
   document.getElementById("chart-site-label").textContent = site?.name ?? "—";
+  _syncTechSelector(site);
 
   await _populateCellSelector(siteId);
 }
@@ -574,13 +641,15 @@ async function _refreshChart(arg) {
 
   const cellId = selectedCell || "__all__";
   const queryWindow = mode === "historical" ? 0 : (timeWindow || 0);
-  const data = await API.getKpiSeries(eventId, selectedSite, selectedMetric, queryWindow, cellId);
+  const data = await API.getKpiSeries(
+    eventId, selectedSite, selectedMetric, queryWindow, cellId, _techFamilyParam());
   if (!data.ok) return;
 
   let labels = data.labels;
   let values = data.values;
   let cellsData = data.cells_data;
   let gaps = data.gaps;
+  let techSeries = Array.isArray(data.series) ? data.series : [];
 
   if (mode === "historical" && historicalTimestamp) {
     const maxTime = new Date(historicalTimestamp).getTime();
@@ -604,6 +673,18 @@ async function _refreshChart(arg) {
       });
       cellsData = newCellsData;
     }
+    if (techSeries.length) {
+      techSeries = techSeries.map(item => {
+        const lookup = Object.fromEntries(
+          (item.labels || []).map((ts, i) => [ts, (item.values || [])[i]])
+        );
+        return {
+          ...item,
+          labels,
+          values: labels.map(ts => lookup[ts]),
+        };
+      });
+    }
 
     gaps = _detectGapsJS(labels, 90);
   }
@@ -614,17 +695,38 @@ async function _refreshChart(arg) {
 
   let datasets = [];
   let legendDisplay = false;
+  const useFamilyAverages = cellId === "__media__" && techSeries.length > 0;
 
-  if (cellId === "__all__" && cellsData && Object.keys(cellsData).length > 0) {
+  if (useFamilyAverages) {
+    labels = techSeries[0].labels || labels;
+    techSeries.forEach(item => {
+      const color = FAMILY_COLORS[item.technology] || "#388BFD";
+      datasets.push({
+        label: item.technology ? `Média ${item.technology}` : "Média",
+        data: _applyGaps(item.values || [], gaps),
+        borderColor:     color,
+        backgroundColor: hexToRgba(color, 0.08),
+        borderWidth:     2,
+        pointRadius:     0,
+        pointHoverRadius:4,
+        tension:         0.3,
+        fill:            false,
+        spanGaps:        false,
+      });
+    });
+    legendDisplay = datasets.length > 1;
+  } else if (cellId === "__all__" && cellsData && Object.keys(cellsData).length > 0) {
     const cellIds = Object.keys(cellsData).sort();
 
+    const mixedFamilies = new Set(cellIds.map(_cellFamilyFromId).filter(Boolean)).size > 1;
     cellIds.forEach((cid, index) => {
       const color = CELL_COLORS[index % CELL_COLORS.length];
       const cellValues = cellsData[cid];
       const adjustedCellValues = _applyGaps(cellValues, gaps);
+      const family = _cellFamilyFromId(cid);
 
       datasets.push({
-        label: cid,
+        label: mixedFamilies && family ? `${family} · ${cid}` : cid,
         data: adjustedCellValues,
         borderColor:     color,
         backgroundColor: hexToRgba(color, 0.02),

@@ -18,6 +18,7 @@ const State = {
   selectedSite:   null,   // site id
   selectedMetric: "utilization_dl",
   selectedCell:   "__all__", // "__all__" = site completo, "__media__" = média, ou cell_id específico
+  techFilter:     "all",  // "all" | "4G" | "5G"
   timeWindow:     60,     // minutos
 
   // ── Gravação ─────────────────────────────────────────────────────

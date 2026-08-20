@@ -357,3 +357,60 @@ Persistência de KPI, VIP, alarmes, alertas e checkpoints usa WAL, `busy_timeout
 curtas e rollback explícito. `resolve_base_url` e `get_event_vips` falham fechado quando
 cliente/regional não estão resolvidos; não existe mais fallback silencioso para SP ou para toda a
 lista global de VIPs.
+
+---
+
+## 2026-08-19 — Fase 1: fusão de sites 4G/5G e filtro por tecnologia
+
+Plano: `docs/plans/2026-08-19-001-feat-site-merge-clusters-kpi-overview-plan.md`.
+
+A EP entrega o mesmo site físico duas vezes (eNodeB 4G e gNodeB 5G, ids distintos, nome e
+coordenada iguais). A fusão é recorte de leitura: não migra dado, não altera coleta, não muda
+schema. `kpi_measurements.site_id` continua guardando os ids originais.
+
+**Decisões travadas:**
+
+- **Chave de fusão:** nome normalizado (`strip().upper()`) **e** distância ≤ 50 m (haversine).
+  Nome igual em coordenada distante **não funde** e emite `logger.warning` com os dois ids.
+- **Id do site fundido é sintético** (nome normalizado, ex. `SPSMG7`), com
+  `members: [{site_id, family}]`. Nunca reaproveita o id de um dos gêmeos.
+- **Site sem gêmeo mantém o id original** (ex. `725469` / `SR-SPPNB2`). Usar o nome como id
+  também nos não-fundidos quebraria consumidores que já resolvem pelo eNodeB (`get_vip_series`,
+  alarmes, testes).
+- **Uma única função:** `Api._merged_sites(config)` em `api/api.py`. Consumida por
+  `get_sites`, `get_site_cells`, `get_kpi_series`, `get_alarms`, `get_vips` e `get_vip_series`.
+  Quem ler `config["sites"]` cru devolve um `site_id` que nenhum marcador tem.
+- **Família do membro** sai das células via `_cell_technology_family`. Membro sem família
+  identificável entra como `None` e permanece visível em qualquer filtro.
+- **`metric_by_site` é chaveado por `(merged_id, family)`.** Corrige o §0.3: duas linhas SITE
+  (4G e 5G) para a mesma métrica deixam de se sobrescrever. Em "Ambas", o valor da lista combina
+  as famílias com a regra da métrica: soma (throughput/volume), média (availability/accessibility),
+  máximo (utilização/usuários).
+- **`get_kpi_series` aceita o id fundido**, expande para os membros e devolve
+  `series: [{technology, labels, values}]`. Com uma família só, `labels`/`values` no formato
+  antigo. Com duas, `values` fica vazio de propósito — não misturar 4G e 5G num array só.
+- **`serving_site` de alarme e VIP é o id fundido.** Pré-requisito da Fase 2 (badge no marcador).
+- **Filtro de tecnologia** (`State.techFilter`: `"all"|"4G"|"5G"`). `#tech-selector` no
+  `#chart-controls`, oculto quando o site tem uma família só. Recorta células no seletor e
+  pétalas no mapa. Cores de série fixas por família (4G `#388BFD`, 5G `#ab7df6`).
+
+**Baseline de testes (corrigido):** o plano mediu 332 passed / 10 skipped em 19/08.
+A menção antiga "261 passed, 3 failed" (13/08) está superada — as 3 falhas pré-existentes de
+`TestMockCollectAlarms` / catálogo já tinham sido corrigidas em sessões posteriores.
+
+---
+
+## 2026-08-19 — Correção: média e site completo no site fundido
+
+Campo: no SPSMG7 fundido, "Média" e "Site completo" saíam em branco. Causa: `get_kpi_series`
+curto-circuitava nas linhas SITE e, com duas famílias, devolvia `values: []` e `cells_data: {}`.
+
+- **Média:** média das células **por família** — duas linhas (Média 4G / Média 5G) em "Ambas".
+  O agregado SITE não substitui a média.
+- **Site completo:** devolve `cells_data` das células dos membros. Ambas / 4G / 5G recortam
+  as linhas; a legenda do Chart.js continua ocultando célula por clique.
+- Trocar o filtro de tecnologia **mantém** Site completo ou Média se já estava selecionado.
+  Na primeira carga de um site, o default continua Média (site de uma família) ou Site
+  completo (site 4G+5G).
+
+Gate: `pytest tests/ -q --basetemp=.pytest-work/tmp` → **343 passed, 10 skipped, 0 failed**.

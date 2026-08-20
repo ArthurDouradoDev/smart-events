@@ -403,3 +403,248 @@ class TestApiVipSeries:
         assert res["ok"] is True
         series = res["series"]
         assert all(r["serving_site"] is None for r in series)
+
+
+def _cells(prefix: str, n: int) -> list:
+    return [{"id": f"{prefix}-{i}", "azimuth": (i * 30) % 360} for i in range(n)]
+
+
+def _twin_sites_event(sample_event, event_id="twin-merge"):
+    return {
+        **sample_event,
+        "id": event_id,
+        "integration": {
+            "pm_tasks": [
+                {"task_id": 2225, "tech": "4G"},
+                {"task_id": 749, "tech": "NRCELL"},
+                {"task_id": 748, "tech": "NRDUCELL"},
+            ]
+        },
+        "sites": [
+            {"id": "725483", "name": "SPSMG7", "lat": -23.640913, "lng": -46.710655,
+             "is_event_site": True, "cells": _cells("4G-SPSMG7", 12)},
+            {"id": "1774059", "name": "SPSMG7", "lat": -23.640913, "lng": -46.710655,
+             "is_event_site": True, "cells": _cells("5G-SPSMG7", 3)},
+            {"id": "725471", "name": "SPSMH1", "lat": -23.639723, "lng": -46.721558,
+             "is_event_site": True, "cells": _cells("4G-SPSMH1", 6)},
+            {"id": "1774047", "name": "SPSMH1", "lat": -23.639723, "lng": -46.721558,
+             "is_event_site": True, "cells": _cells("5G-SPSMH1", 2)},
+            {"id": "725469", "name": "SPSMH2", "lat": -23.639723, "lng": -46.721558,
+             "is_event_site": True, "cells": _cells("4G-SPSMH2", 10)},
+        ],
+    }
+
+
+def _insert_site_kpi(event_id, site_id, technology, value, ts="2026-08-19T12:00:00Z",
+                     metric="utilization_dl"):
+    database.insert_kpi_batch([{
+        "event_id": event_id,
+        "site_id": site_id,
+        "cell_id": "__site__",
+        "metric": metric,
+        "value": value,
+        "timestamp": ts,
+        "scope": "SITE",
+        "technology": technology,
+    }])
+
+
+def _insert_cell_kpi(event_id, site_id, cell_id, technology, value,
+                     ts="2026-08-19T12:00:00Z", metric="utilization_dl"):
+    database.insert_kpi_batch([{
+        "event_id": event_id,
+        "site_id": site_id,
+        "cell_id": cell_id,
+        "metric": metric,
+        "value": value,
+        "timestamp": ts,
+        "scope": "CELL",
+        "technology": technology,
+    }])
+
+
+class TestSiteMerge:
+    def test_sites_com_mesmo_nome_e_coordenada_sao_fundidos(self, api, sample_event):
+        event = _twin_sites_event(sample_event)
+        database.save_event(event)
+
+        sites = {site["id"]: site for site in api.get_sites(event["id"])}
+        spsmg7 = sites["SPSMG7"]
+
+        assert "725483" not in sites
+        assert "1774059" not in sites
+        assert spsmg7["tech_families"] == ["4G", "5G"]
+        assert len(spsmg7["cells"]) == 15
+        assert {m["site_id"]: m["family"] for m in spsmg7["members"]} == {
+            "725483": "4G", "1774059": "5G",
+        }
+
+    def test_site_sem_gemeo_permanece_intacto(self, api, sample_event):
+        event = _twin_sites_event(sample_event)
+        database.save_event(event)
+
+        sites = {site["id"]: site for site in api.get_sites(event["id"])}
+
+        assert "725469" in sites
+        assert sites["725469"]["name"] == "SPSMH2"
+        assert sites["725469"]["tech_families"] == ["4G"]
+        assert len(sites["725469"]["cells"]) == 10
+        assert sites["725469"]["members"] == [{"site_id": "725469", "family": "4G"}]
+
+    def test_nome_igual_em_coordenada_distante_nao_funde(
+            self, api, sample_event, caplog):
+        event = {
+            **sample_event,
+            "id": "homonym-distant",
+            "sites": [
+                {"id": "A1", "name": "SPSMG7", "lat": -23.640913, "lng": -46.710655,
+                 "cells": _cells("4G-SPSMG7", 2)},
+                {"id": "B1", "name": "SPSMG7", "lat": -23.650913, "lng": -46.710655,
+                 "cells": _cells("5G-SPSMG7", 2)},
+            ],
+        }
+        database.save_event(event)
+
+        with caplog.at_level("WARNING"):
+            sites = api.get_sites(event["id"])
+        ids = {site["id"] for site in sites}
+
+        assert ids == {"A1", "B1"}
+        assert "não fundidos" in caplog.text
+
+    def test_valor_da_lista_nao_depende_da_ordem_das_linhas_site(
+            self, api, sample_event):
+        event = _twin_sites_event(sample_event, "twin-order")
+        database.save_event(event)
+
+        _insert_site_kpi(event["id"], "725483", "4G", 10.0)
+        _insert_site_kpi(event["id"], "1774059", "5G_NRDUCELL", 80.0)
+        first = {site["id"]: site["metric_value"] for site in api.get_sites(
+            event["id"], metric="utilization_dl")}
+
+        event_rev = _twin_sites_event(sample_event, "twin-order-rev")
+        database.save_event(event_rev)
+        _insert_site_kpi(event_rev["id"], "1774059", "5G_NRDUCELL", 80.0)
+        _insert_site_kpi(event_rev["id"], "725483", "4G", 10.0)
+        second = {site["id"]: site["metric_value"] for site in api.get_sites(
+            event_rev["id"], metric="utilization_dl")}
+
+        assert first["SPSMG7"] == second["SPSMG7"] == 80.0
+
+    def test_serie_do_site_fundido_traz_uma_entrada_por_tecnologia(
+            self, api, sample_event):
+        event = _twin_sites_event(sample_event, "twin-series")
+        database.save_event(event)
+        _insert_site_kpi(event["id"], "725483", "4G", 10.0, "2026-08-19T12:00:00Z")
+        _insert_site_kpi(event["id"], "725483", "4G", 12.0, "2026-08-19T12:05:00Z")
+        _insert_site_kpi(event["id"], "1774059", "5G_NRDUCELL", 40.0, "2026-08-19T12:00:00Z")
+        _insert_site_kpi(event["id"], "1774059", "5G_NRDUCELL", 42.0, "2026-08-19T12:05:00Z")
+
+        result = api.get_kpi_series(
+            event["id"], "SPSMG7", "utilization_dl", minutes=0)
+
+        by_tech = {item["technology"]: item for item in result["series"]}
+        assert set(by_tech) == {"4G", "5G"}
+        assert result["values"] == []
+        assert 10.0 in by_tech["4G"]["values"]
+        assert 12.0 in by_tech["4G"]["values"]
+        assert 40.0 in by_tech["5G"]["values"]
+        assert 42.0 in by_tech["5G"]["values"]
+        assert 40.0 not in by_tech["4G"]["values"]
+        assert 10.0 not in by_tech["5G"]["values"]
+
+    def test_media_do_site_fundido_traz_uma_media_por_tecnologia(
+            self, api, sample_event):
+        event = _twin_sites_event(sample_event, "twin-media")
+        database.save_event(event)
+        ts = "2026-08-19T12:00:00Z"
+        _insert_cell_kpi(event["id"], "725483", "4G-SPSMG7-0", "4G", 10.0, ts)
+        _insert_cell_kpi(event["id"], "725483", "4G-SPSMG7-1", "4G", 20.0, ts)
+        _insert_cell_kpi(event["id"], "1774059", "5G-SPSMG7-0", "5G_NRDUCELL", 40.0, ts)
+        _insert_cell_kpi(event["id"], "1774059", "5G-SPSMG7-1", "5G_NRDUCELL", 50.0, ts)
+        _insert_site_kpi(event["id"], "725483", "4G", 99.0, ts)
+        _insert_site_kpi(event["id"], "1774059", "5G_NRDUCELL", 99.0, ts)
+
+        result = api.get_kpi_series(
+            event["id"], "SPSMG7", "utilization_dl", minutes=0, cell_id="__media__")
+        by_tech = {item["technology"]: item for item in result["series"]}
+
+        assert set(by_tech) == {"4G", "5G"}
+        assert result["values"] == []
+        assert by_tech["4G"]["values"] == [15.0]
+        assert by_tech["5G"]["values"] == [45.0]
+        assert 99.0 not in by_tech["4G"]["values"]
+        assert 99.0 not in by_tech["5G"]["values"]
+
+    def test_site_completo_do_fundido_traz_as_celulas_por_familia(
+            self, api, sample_event):
+        event = _twin_sites_event(sample_event, "twin-site-cells")
+        database.save_event(event)
+        ts = "2026-08-19T12:00:00Z"
+        _insert_cell_kpi(event["id"], "725483", "4G-SPSMG7-0", "4G", 10.0, ts)
+        _insert_cell_kpi(event["id"], "725483", "4G-SPSMG7-1", "4G", 20.0, ts)
+        _insert_cell_kpi(event["id"], "1774059", "5G-SPSMG7-0", "5G_NRDUCELL", 40.0, ts)
+        _insert_site_kpi(event["id"], "725483", "4G", 10.0, ts)
+        _insert_site_kpi(event["id"], "1774059", "5G_NRDUCELL", 40.0, ts)
+
+        all_cells = api.get_kpi_series(
+            event["id"], "SPSMG7", "utilization_dl", minutes=0, cell_id="__all__")
+        only_5g = api.get_kpi_series(
+            event["id"], "SPSMG7", "utilization_dl", minutes=0,
+            cell_id="__all__", technology_family="5G")
+        only_4g = api.get_kpi_series(
+            event["id"], "SPSMG7", "utilization_dl", minutes=0,
+            cell_id="__all__", technology_family="4G")
+
+        assert set(all_cells["cells_data"]) == {
+            "4G-SPSMG7-0", "4G-SPSMG7-1", "5G-SPSMG7-0",
+        }
+        assert set(only_5g["cells_data"]) == {"5G-SPSMG7-0"}
+        assert set(only_4g["cells_data"]) == {"4G-SPSMG7-0", "4G-SPSMG7-1"}
+
+    def test_alarme_e_vip_apontam_para_o_id_fundido(self, api, sample_event):
+        event = _twin_sites_event(sample_event, "twin-alarm-vip")
+        database.save_event(event)
+        eid = event["id"]
+
+        database.insert_alarms_batch([
+            {"csn": 11, "event_id": eid, "alarm_id": "1", "alarm_group_id": "1",
+             "alarm_name": "Cell Unavailable", "severity": "Major",
+             "source": "1774059", "ip": "", "location": "",
+             "occur_time": "2026-08-19T12:00:00Z",
+             "arrive_time": "2026-08-19T12:00:00Z", "additional_info": "",
+             "collected_at": "2026-08-19T12:00:00Z"},
+        ])
+        alarms = {row["csn"]: row for row in api.get_alarms(eid)}
+        assert alarms[11]["serving_site"] == "SPSMG7"
+        assert alarms[11]["in_event"] is True
+
+        vip = database.save_vip({"name": "VIP 5G Twin", "oss": "SP", "cliente": "TIM"})
+        api.assign_vip_to_event(eid, vip["id"], task_id=1)
+        database.insert_vip_batch([{
+            "event_id": eid,
+            "vip_name": "VIP 5G Twin",
+            "task_id": 1,
+            "serial_no": 1,
+            "timestamp": "2026-08-19T12:00:00Z",
+            "serving_cell": "5G-SPSMG7-0",
+            "rsrp": -80.0,
+            "rsrq": -8.0,
+            "in_event": True,
+        }])
+        vips = {row["name"]: row for row in api.get_vips(eid)}
+        assert vips["VIP 5G Twin"]["serving_site"] == "SPSMG7"
+
+    def test_filtro_de_tecnologia_recorta_as_celulas(self, api, sample_event):
+        event = _twin_sites_event(sample_event, "twin-cells")
+        database.save_event(event)
+
+        cells_5g = api.get_site_cells(event["id"], "SPSMG7", "5G")
+        cells_4g = api.get_site_cells(event["id"], "SPSMG7", "4G")
+        cells_all = api.get_site_cells(event["id"], "SPSMG7")
+
+        assert len(cells_5g) == 3
+        assert len(cells_4g) == 12
+        assert len(cells_all) == 15
+        assert {cell["family"] for cell in cells_5g} == {"5G"}
+        assert {cell["family"] for cell in cells_4g} == {"4G"}

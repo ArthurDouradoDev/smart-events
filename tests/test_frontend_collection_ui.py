@@ -121,3 +121,115 @@ def test_kpi_dropdown_nrducell_expoe_somente_kpis_disponiveis_na_task_748():
         if "Executable doesn't exist" in str(exc):
             pytest.skip("Chromium do Playwright não está instalado neste ambiente")
         raise
+
+
+def _close_chart_popup(page):
+    modal = page.locator("#chart-popup-modal:not(.hidden)")
+    if modal.count():
+        page.locator("#popup-chart-close").click()
+        page.locator("#chart-popup-modal.hidden").wait_for(state="attached", timeout=3000)
+
+
+def test_lista_de_sites_nao_repete_nome_e_tech_selector_recorta_celulas():
+    sync_api = pytest.importorskip("playwright.sync_api")
+    try:
+        with _frontend_server() as url, sync_api.sync_playwright() as playwright:
+            browser = playwright.chromium.launch(headless=True)
+            page = browser.new_page()
+            page.goto(f"{url}/index.html", wait_until="domcontentloaded")
+            page.locator(".site-item").first.wait_for(state="visible", timeout=8000)
+
+            names = page.locator(".site-item .site-name").evaluate_all(
+                """els => els.map(el => {
+                    const text = el.childNodes[0] ? el.childNodes[0].textContent : el.textContent;
+                    return (text || "").trim();
+                })"""
+            )
+            assert names
+            assert len(names) == len(set(names))
+            assert names.count("SPSMG7") == 1
+
+            _close_chart_popup(page)
+            page.locator('.site-item[data-id="SPSMG7"]').click()
+            tech = page.locator("#tech-selector")
+            tech.wait_for(state="visible", timeout=5000)
+
+            tech.select_option("4G")
+            page.wait_for_function(
+                """() => [...document.querySelectorAll('#cell-selector option')]
+                    .filter(o => o.value !== '__all__' && o.value !== '__media__').length === 12""",
+                timeout=5000,
+            )
+
+            tech.select_option("5G")
+            page.wait_for_function(
+                """() => [...document.querySelectorAll('#cell-selector option')]
+                    .filter(o => o.value !== '__all__' && o.value !== '__media__').length === 3""",
+                timeout=5000,
+            )
+            browser.close()
+    except Exception as exc:
+        if "Executable doesn't exist" in str(exc):
+            pytest.skip("Chromium do Playwright não está instalado neste ambiente")
+        raise
+
+
+def _chart_dataset_labels(page, canvas_id):
+    return page.evaluate(
+        """(id) => {
+          const canvas = document.getElementById(id);
+          if (!canvas) return [];
+          const charts = Object.values(Chart.instances || {});
+          const chart = charts.find(c => c.canvas === canvas)
+            || (typeof Chart.getChart === 'function' ? Chart.getChart(canvas) : null);
+          return chart ? chart.data.datasets.map(d => d.label) : [];
+        }""",
+        canvas_id,
+    )
+
+
+def test_media_e_site_completo_respeitam_familia_e_legendas():
+    sync_api = pytest.importorskip("playwright.sync_api")
+    try:
+        with _frontend_server() as url, sync_api.sync_playwright() as playwright:
+            browser = playwright.chromium.launch(headless=True)
+            page = browser.new_page()
+            page.goto(f"{url}/index.html", wait_until="domcontentloaded")
+            page.locator('.site-item[data-id="SPSMG7"]').wait_for(state="visible", timeout=8000)
+            page.locator('.site-item[data-id="SPSMG7"]').click()
+            _close_chart_popup(page)
+            page.locator("#tech-selector:not(.hidden)").wait_for(state="visible", timeout=5000)
+            page.locator("#tech-selector").select_option("all")
+
+            page.locator("#cell-selector").select_option("__media__")
+            page.wait_for_function(
+                """() => {
+                  const canvas = document.getElementById('kpi-chart');
+                  const charts = Object.values(Chart.instances || {});
+                  const chart = charts.find(c => c.canvas === canvas)
+                    || (typeof Chart.getChart === 'function' ? Chart.getChart(canvas) : null);
+                  return !!chart && chart.data.datasets.length === 2;
+                }""",
+                timeout=5000,
+            )
+            media_labels = _chart_dataset_labels(page, "kpi-chart")
+            assert media_labels == ["Média 4G", "Média 5G"]
+
+            page.locator("#cell-selector").select_option("__all__")
+            page.locator("#chart-popup-modal:not(.hidden)").wait_for(state="visible", timeout=5000)
+            page.wait_for_function(
+                """() => {
+                  const canvas = document.getElementById('popup-kpi-chart');
+                  const charts = Object.values(Chart.instances || {});
+                  const chart = charts.find(c => c.canvas === canvas)
+                    || (typeof Chart.getChart === 'function' ? Chart.getChart(canvas) : null);
+                  return !!chart && chart.data.datasets.length === 15
+                    && chart.options.plugins.legend.display === true;
+                }""",
+                timeout=5000,
+            )
+            browser.close()
+    except Exception as exc:
+        if "Executable doesn't exist" in str(exc):
+            pytest.skip("Chromium do Playwright não está instalado neste ambiente")
+        raise

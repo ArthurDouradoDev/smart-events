@@ -5,6 +5,7 @@ Todos os métodos retornam dicts/lists serializáveis para JSON.
 
 import json
 import logging
+import math
 import os
 import re
 import subprocess
@@ -421,8 +422,226 @@ class Api:
         }
         return next(iter(families)) if len(families) == 1 else None
 
+    _MERGE_DISTANCE_M = 50.0
+
+    @staticmethod
+    def _normalize_site_name(name) -> str:
+        return str(name or "").strip().upper()
+
+    @staticmethod
+    def _distance_m(a: dict, b: dict) -> float | None:
+        try:
+            lat1, lng1 = float(a["lat"]), float(a["lng"])
+            lat2, lng2 = float(b["lat"]), float(b["lng"])
+        except (TypeError, ValueError, KeyError):
+            return None
+        radius = 6_371_000.0
+        phi1, phi2 = math.radians(lat1), math.radians(lat2)
+        dphi = math.radians(lat2 - lat1)
+        dlmb = math.radians(lng2 - lng1)
+        h = (math.sin(dphi / 2) ** 2
+             + math.cos(phi1) * math.cos(phi2) * math.sin(dlmb / 2) ** 2)
+        return 2 * radius * math.asin(min(1.0, math.sqrt(h)))
+
+    @classmethod
+    def _annotate_cell(cls, cell) -> dict:
+        if isinstance(cell, str):
+            return {"id": cell, "label": cell, "family": cls._cell_technology_family(cell)}
+        out = dict(cell)
+        out["family"] = cls._cell_technology_family(cell)
+        if "label" not in out:
+            out["label"] = out.get("id", "")
+        return out
+
+    @classmethod
+    def _member_family(cls, site: dict) -> str | None:
+        families = {
+            cls._cell_technology_family(cell)
+            for cell in (site.get("cells") or [])
+        }
+        families.discard(None)
+        return next(iter(families)) if len(families) == 1 else None
+
+    @classmethod
+    def _as_merged_site(cls, cluster: list[dict], site_id: str) -> dict:
+        first = cluster[0]
+        name = first.get("name") or site_id
+        cells = []
+        members = []
+        lats: list[float] = []
+        lngs: list[float] = []
+        is_event_site = False
+        for site in cluster:
+            members.append({"site_id": site["id"], "family": cls._member_family(site)})
+            for cell in site.get("cells") or []:
+                cells.append(cls._annotate_cell(cell))
+            if site.get("is_event_site", True):
+                is_event_site = True
+            try:
+                lats.append(float(site["lat"]))
+                lngs.append(float(site["lng"]))
+            except (TypeError, ValueError, KeyError):
+                pass
+        families = []
+        for family in ("4G", "5G"):
+            if (any(member.get("family") == family for member in members)
+                    or any(cell.get("family") == family for cell in cells)):
+                families.append(family)
+        return {
+            "id": site_id,
+            "name": name,
+            "lat": (sum(lats) / len(lats)) if lats else first.get("lat"),
+            "lng": (sum(lngs) / len(lngs)) if lngs else first.get("lng"),
+            "members": members,
+            "tech_families": families,
+            "cells": cells,
+            "is_event_site": is_event_site,
+        }
+
+    @classmethod
+    def _merged_sites(cls, config: dict) -> list[dict]:
+        """Única fonte de fusão 4G/5G: nome normalizado + coordenada ≤ 50 m."""
+        raw_sites = list((config or {}).get("sites") or [])
+        by_name: dict[str, list[dict]] = {}
+        unnamed: list[dict] = []
+        for site in raw_sites:
+            key = cls._normalize_site_name(site.get("name") or "")
+            if not key:
+                unnamed.append(site)
+                continue
+            by_name.setdefault(key, []).append(site)
+
+        result: list[dict] = []
+        used_ids: set[str] = set()
+
+        def _unique_id(desired: str, fallback: str) -> str:
+            candidate = desired or fallback
+            if candidate not in used_ids:
+                used_ids.add(candidate)
+                return candidate
+            suffix = 2
+            while f"{candidate}#{suffix}" in used_ids:
+                suffix += 1
+            unique = f"{candidate}#{suffix}"
+            used_ids.add(unique)
+            return unique
+
+        for name, group in by_name.items():
+            clusters: list[list[dict]] = []
+            for site in group:
+                placed = False
+                for cluster in clusters:
+                    if any(
+                        (dist := cls._distance_m(site, member)) is not None
+                        and dist <= cls._MERGE_DISTANCE_M
+                        for member in cluster
+                    ):
+                        cluster.append(site)
+                        placed = True
+                        break
+                if not placed:
+                    clusters.append([site])
+
+            if len(clusters) > 1:
+                for i, left in enumerate(clusters):
+                    for right in clusters[i + 1:]:
+                        a, b = left[0], right[0]
+                        logger.warning(
+                            "Sites homônimos não fundidos (coordenada > %.0fm): "
+                            "%s %s (%s,%s) e %s %s (%s,%s)",
+                            cls._MERGE_DISTANCE_M,
+                            a.get("id"), a.get("name"), a.get("lat"), a.get("lng"),
+                            b.get("id"), b.get("name"), b.get("lat"), b.get("lng"),
+                        )
+
+            for cluster in clusters:
+                if len(cluster) > 1:
+                    site_id = _unique_id(name, cluster[0]["id"])
+                else:
+                    site_id = _unique_id(str(cluster[0]["id"]), name)
+                result.append(cls._as_merged_site(cluster, site_id))
+
+        for site in unnamed:
+            result.append(cls._as_merged_site([site], _unique_id(str(site["id"]), "site")))
+
+        order = {site["id"]: i for i, site in enumerate(raw_sites)}
+        result.sort(key=lambda site: min(
+            (order.get(member["site_id"], 10**9) for member in site["members"]),
+            default=10**9,
+        ))
+        return result
+
+    @classmethod
+    def _find_merged_site(cls, merged: list[dict], site_id: str) -> dict | None:
+        if not site_id:
+            return None
+        for site in merged:
+            if site["id"] == site_id:
+                return site
+            if any(member.get("site_id") == site_id for member in site.get("members") or []):
+                return site
+        return None
+
+    @staticmethod
+    def _combine_family_values(metric: str, values: list) -> float | None:
+        vals = [value for value in values if value is not None]
+        if not vals:
+            return None
+        if any(token in metric for token in ("availability", "accessibility", "rsrp", "rsrq")):
+            return sum(vals) / len(vals)
+        if "throughput" in metric or "traffic_volume" in metric:
+            return sum(vals)
+        return max(vals)
+
+    @classmethod
+    def _align_kpi_series(cls, series: list[dict]) -> tuple[list[dict], list]:
+        common = sorted({ts for item in series for ts in (item.get("labels") or [])})
+        aligned = []
+        for item in series:
+            lookup = dict(zip(item.get("labels") or [], item.get("values") or []))
+            aligned.append({
+                "technology": item.get("technology"),
+                "labels": common,
+                "values": [lookup.get(ts) for ts in common],
+            })
+        return aligned, common
+
+    def _index_original_to_merged(self, merged: list[dict]) -> dict:
+        index = {}
+        for site in merged:
+            for member in site.get("members") or []:
+                index[member["site_id"]] = (site["id"], member.get("family"))
+        return index
+
+    def _remap_metric_by_family(self, values_by_original: dict, index: dict) -> dict:
+        remapped = {}
+        for original_id, value in values_by_original.items():
+            mapped = index.get(original_id)
+            if mapped:
+                remapped[mapped] = value
+            else:
+                remapped[(original_id, None)] = value
+        return remapped
+
+    def _metric_value_for_merged(
+            self, metric_by_key: dict, merged_id: str, families: list,
+            display_family: str | None, metric: str):
+        if display_family:
+            return metric_by_key.get((merged_id, display_family))
+        values = [
+            metric_by_key[(merged_id, family)]
+            for family in (families or [None])
+            if (merged_id, family) in metric_by_key
+        ]
+        if not values:
+            return metric_by_key.get((merged_id, None))
+        if len(values) == 1:
+            return values[0]
+        return self._combine_family_values(metric, values)
+
     def get_sites(self, event_id: str, timestamp: Optional[str] = None,
-                  metric: str = "utilization_dl") -> list:
+                  metric: str = "utilization_dl",
+                  technology_family: Optional[str] = None) -> list:
         """Retorna sites com status atual para renderização no mapa."""
         config = (_active_event if _active_event and _active_event.get("id") == event_id else None)
         try:
@@ -430,36 +649,58 @@ class Api:
             if not config:
                 return []
 
-            latest = db.get_latest_kpi(event_id, timestamp)
-            util_by_site = self._aggregate_utilization(latest)
+            merged = self._merged_sites(config)
+            original_index = self._index_original_to_merged(merged)
 
-            # Calcula valor contextual para a métrica selecionada (exibição na lista)
-            VOLUME_METRICS = {"user_count", "traffic_volume_dl", "traffic_volume_ul"}
+            latest = db.get_latest_kpi(event_id, timestamp)
+            util_by_original = self._aggregate_utilization(latest)
 
             if metric != "utilization_dl":
                 latest_metric = db.get_latest_kpi_by_metric(event_id, metric, timestamp)
             else:
-                latest_metric = latest  # reusa os dados já carregados
+                latest_metric = latest
 
-            metric_by_site = self._aggregate_metric_for_list(latest_metric, metric)
-            # Dados novos possuem uma linha SITE; ela é a fonte de verdade e
-            # substitui qualquer regra antiga de agregação da lista.
+            metric_by_original = self._aggregate_metric_for_list(latest_metric, metric)
+            metric_by_key = self._remap_metric_by_family(metric_by_original, original_index)
+            util_by_key = self._remap_metric_by_family(util_by_original, original_index)
+
+            # Dados novos possuem uma linha SITE por (site_id, technology); a
+            # chave (merged_id, family) impede que 4G e 5G se sobrescrevam.
             persisted_metric = db.get_latest_site_kpi_by_metric(event_id, metric, timestamp)
             for row in persisted_metric:
-                metric_by_site[row["site_id"]] = row["value"]
+                mapped = original_index.get(row["site_id"])
+                if not mapped:
+                    continue
+                merged_id, member_family = mapped
+                family = self._technology_family(row.get("technology")) or member_family
+                metric_by_key[(merged_id, family)] = row["value"]
+
+            persisted_util = db.get_latest_site_kpi_by_metric(
+                event_id, "utilization_dl", timestamp)
+            for row in persisted_util:
+                mapped = original_index.get(row["site_id"])
+                if not mapped:
+                    continue
+                merged_id, member_family = mapped
+                family = self._technology_family(row.get("technology")) or member_family
+                util_by_key[(merged_id, family)] = row["value"]
 
             sites_out = []
             configured_family = self._single_configured_family(config)
+            user_family = technology_family if technology_family in ("4G", "5G") else None
+            cell_family = user_family or configured_family
             thresholds = config.get("thresholds", {})
             warn = thresholds.get("utilization_warning", 80)
             crit = thresholds.get("utilization_critical", 95)
 
-            for site in config.get("sites", []):
+            for site in merged:
                 visible_cells = self._filter_cells_for_family(
-                    site.get("cells", []), configured_family)
-                if configured_family and not visible_cells:
+                    site.get("cells", []), cell_family)
+                if cell_family and not visible_cells:
                     continue
-                util = util_by_site.get(site["id"])
+                util = self._metric_value_for_merged(
+                    util_by_key, site["id"], site.get("tech_families") or [],
+                    user_family, "utilization_dl")
                 status = "unknown"
                 if util is not None:
                     if util >= crit:
@@ -475,9 +716,13 @@ class Api:
                     "lat":             site["lat"],
                     "lng":             site["lng"],
                     "cells":           visible_cells,
+                    "members":         site.get("members") or [],
+                    "tech_families":   site.get("tech_families") or [],
                     "status":          status,
                     "utilization":     round(util, 1) if util is not None else None,
-                    "metric_value":    metric_by_site.get(site["id"]),
+                    "metric_value":    self._metric_value_for_merged(
+                        metric_by_key, site["id"], site.get("tech_families") or [],
+                        user_family, metric or "utilization_dl"),
                     "metric_is_share": False,
                     "is_event_site":   site.get("is_event_site", True),
                 })
@@ -490,45 +735,57 @@ class Api:
             if cached is not None:
                 return cached
             if config:
-                fallback = [{
-                    "id": site["id"], "name": site["name"],
-                    "lat": site["lat"], "lng": site["lng"],
-                    "cells": site.get("cells", []), "status": "unknown",
-                    "utilization": None, "metric_value": None,
-                    "metric_is_share": False,
-                    "is_event_site": site.get("is_event_site", True),
-                } for site in config.get("sites", [])]
+                fallback = []
+                for site in self._merged_sites(config):
+                    fallback.append({
+                        "id": site["id"], "name": site["name"],
+                        "lat": site["lat"], "lng": site["lng"],
+                        "cells": site.get("cells", []), "status": "unknown",
+                        "members": site.get("members") or [],
+                        "tech_families": site.get("tech_families") or [],
+                        "utilization": None, "metric_value": None,
+                        "metric_is_share": False,
+                        "is_event_site": site.get("is_event_site", True),
+                    })
                 self._sites_cache[event_id] = fallback
                 return fallback
             return []
 
-    def get_site_cells(self, event_id: str, site_id: str) -> list:
+    def get_site_cells(self, event_id: str, site_id: str,
+                       technology_family: Optional[str] = None) -> list:
         """
         Retorna a lista de células de um site específico.
         Usado para popular o seletor de célula no gráfico.
+        Aceita o id fundido e recorta pela família quando pedida.
         """
         try:
             config = db.get_event(event_id) or _active_event
             if not config:
                 return []
+            merged = self._merged_sites(config)
+            site = self._find_merged_site(merged, site_id)
+            if not site:
+                return []
             configured_family = self._single_configured_family(config)
-            for site in config.get("sites", []):
-                if site["id"] == site_id:
-                    cells = self._filter_cells_for_family(
-                        site.get("cells", []), configured_family)
-                    out = []
-                    for c in cells:
-                        if isinstance(c, str):
-                            out.append({"id": c, "label": c})
-                        else:
-                            out.append({
-                                "id":    c.get("id", ""),
-                                "label": c.get("id", ""),
-                                "tech":  c.get("tech"),
-                                "freq":  c.get("frequency"),
-                            })
-                    return out
-            return []
+            user_family = technology_family if technology_family in ("4G", "5G") else None
+            cell_family = user_family or configured_family
+            cells = self._filter_cells_for_family(site.get("cells") or [], cell_family)
+            out = []
+            for c in cells:
+                if isinstance(c, str):
+                    out.append({
+                        "id": c, "label": c,
+                        "family": self._cell_technology_family(c),
+                    })
+                else:
+                    out.append({
+                        "id":     c.get("id", ""),
+                        "label":  c.get("label") or c.get("id", ""),
+                        "tech":   c.get("tech"),
+                        "freq":   c.get("frequency") or c.get("freq"),
+                        "family": c.get("family") or self._cell_technology_family(c),
+                    })
+            return out
         except Exception as e:
             logger.error(f"get_site_cells error: {e}")
             return []
@@ -580,128 +837,272 @@ class Api:
         metrics = [item for item in catalog if item.get("technology") in technologies]
         return {"ok": True, "metrics": metrics, "technologies": technologies}
 
-    def get_kpi_series(self, event_id: str, site_id: str, metric: str,
-                       minutes: int = 60, cell_id: str = "__all__", technology: str = None) -> dict:
-        """Retorna série temporal para o gráfico de KPIs."""
-        try:
-            if cell_id == "__all__":
-                site_rows = db.get_kpi_site_series(event_id, site_id, metric, minutes, technology)
-                if site_rows:
-                    labels = [row["timestamp"] for row in site_rows]
-                    # O agregado persistido não substitui as linhas por célula do
-                    # gráfico "Site completo" — só a série somada/recalculada.
-                    cell_rows = db.get_kpi_series(event_id, site_id, metric, minutes)
-                    cell_ids = sorted({r["cell_id"] for r in cell_rows if r.get("cell_id")})
-                    cell_ts_vals = {(r["cell_id"], r["timestamp"]): r["value"]
-                                     for r in cell_rows if r.get("cell_id") and r.get("timestamp")}
-                    cells_data = {cid: [cell_ts_vals.get((cid, ts)) for ts in labels] for cid in cell_ids}
-                    return {
-                        "ok": True, "labels": labels, "values": [row["value"] for row in site_rows],
-                        "cells_data": cells_data, "gaps": self._detect_gaps(labels, max_gap_seconds=90),
-                        "technology": technology, "persisted_site_aggregate": True,
-                        "thresholds": self._metric_thresholds(event_id, metric),
-                    }
-            # Compatibilidade com históricos pré-Fase 2; novas linhas de Site
-            # completo retornam acima e não são agregadas por médias na API.
-            # 1. Obter medições brutas
+    def _member_ids_for_family(self, members: list, family: str | None) -> list[str]:
+        if not family:
+            return [member["site_id"] for member in members]
+        return [
+            member["site_id"] for member in members
+            if member.get("family") in (family, None)
+        ]
+
+    def _owner_site_id_for_cell(self, site: dict | None, cell_id: str, fallback: str) -> str:
+        if not site or not cell_id:
+            return fallback
+        wanted = str(cell_id).upper()
+        for member in site.get("members") or []:
+            if str(member.get("site_id", "")).upper() == wanted:
+                return member["site_id"]
+        for cell in site.get("cells") or []:
+            cell_key = cell if isinstance(cell, str) else cell.get("id", "")
+            if str(cell_key).upper() != wanted:
+                continue
+            family = None if isinstance(cell, str) else cell.get("family")
+            family = family or self._cell_technology_family(cell)
+            for member in site.get("members") or []:
+                if member.get("family") in (family, None):
+                    return member["site_id"]
+            break
+        members = site.get("members") or []
+        return members[0]["site_id"] if members else fallback
+
+    def _site_series_by_family(
+            self, event_id: str, member_ids: list[str], metric: str, minutes: int,
+            technology: str | None, technology_family: str | None) -> list[dict]:
+        by_family: dict[str, dict] = {}
+        for member_id in member_ids:
+            rows = db.get_kpi_site_series(event_id, member_id, metric, minutes, technology)
+            for row in rows:
+                family = self._technology_family(row.get("technology"))
+                if technology_family and family and family != technology_family:
+                    continue
+                family = family or technology_family or "unknown"
+                bucket = by_family.setdefault(family, {})
+                bucket.setdefault(row["timestamp"], []).append(row["value"])
+        series = []
+        for family in sorted(by_family, key=lambda item: (item == "unknown", item)):
+            ts_map = by_family[family]
+            labels = sorted(ts_map)
+            values = [self._combine_family_values(metric, ts_map[ts]) for ts in labels]
+            series.append({
+                "technology": None if family == "unknown" else family,
+                "labels": labels,
+                "values": values,
+            })
+        return series
+
+    def _collect_cell_rows(self, event_id: str, member_ids: list[str],
+                           metric: str, minutes: int) -> list:
+        rows = []
+        for member_id in member_ids:
             if metric == "utilization":
-                rows = db.get_kpi_series(event_id, site_id, "utilization", minutes)
-                if not rows:
-                    # Busca DL e UL e combina por cell/timestamp
-                    rows_dl = db.get_kpi_series(event_id, site_id, "utilization_dl", minutes)
-                    rows_ul = db.get_kpi_series(event_id, site_id, "utilization_ul", minutes)
-                    
+                raw = db.get_kpi_series(event_id, member_id, "utilization", minutes)
+                if not raw:
                     combined = {}
-                    for r in rows_dl:
+                    for r in db.get_kpi_series(event_id, member_id, "utilization_dl", minutes):
+                        combined[(r["cell_id"], r["timestamp"])] = r["value"]
+                    for r in db.get_kpi_series(event_id, member_id, "utilization_ul", minutes):
                         key = (r["cell_id"], r["timestamp"])
-                        combined[key] = r["value"]
-                    for r in rows_ul:
-                        key = (r["cell_id"], r["timestamp"])
-                        if key in combined:
-                            combined[key] = max(combined[key], r["value"])
-                        else:
-                            combined[key] = r["value"]
-                    
-                    rows = [
-                        {"cell_id": cell, "timestamp": ts, "value": val}
+                        combined[key] = max(combined[key], r["value"]) if key in combined else r["value"]
+                    raw = [
+                        {"cell_id": cell, "timestamp": ts, "value": val, "site_id": member_id}
                         for (cell, ts), val in combined.items()
                     ]
+                rows.extend(raw)
             else:
-                rows = db.get_kpi_series(event_id, site_id, metric, minutes)
+                rows.extend(db.get_kpi_series(event_id, member_id, metric, minutes))
+        return rows
 
-            # Se célula específica solicitada, filtrar antes de agregar
-            if cell_id and cell_id not in ("__all__", "__media__"):
-                rows = [r for r in rows if r.get("cell_id") == cell_id]
+    def _cells_data_for_rows(self, rows: list, labels: list) -> dict:
+        cell_ids = sorted({r["cell_id"] for r in rows if r.get("cell_id")})
+        cell_ts_vals = {
+            (r["cell_id"], r["timestamp"]): r["value"]
+            for r in rows if r.get("cell_id") and r.get("timestamp")
+        }
+        return {cid: [cell_ts_vals.get((cid, ts)) for ts in labels] for cid in cell_ids}
 
-            # 2. Agrupar por timestamp para consolidar dados de múltiplas células do mesmo site
-            ts_groups = {}
-            for r in rows:
-                ts = r["timestamp"]
-                val = r["value"]
-                if val is not None:
-                    if ts not in ts_groups:
-                        ts_groups[ts] = []
-                    ts_groups[ts].append(val)
+    def _filter_cell_rows_for_family(self, rows: list, family: str | None) -> list:
+        if not family:
+            return list(rows)
+        return [
+            row for row in rows
+            if self._cell_technology_family(row.get("cell_id")) in (family, None)
+        ]
 
-            # 3. Consolidar grupos de timestamps para ter um único valor por timestamp no gráfico
-            aggregated = []
-            for ts, vals in sorted(ts_groups.items()):
-                if not vals:
-                    continue
-                # Se o usuário escolheu "Média" explicitamente, sempre calcula AVG
-                if cell_id == "__media__":
-                    val = sum(vals) / len(vals)
-                elif "availability" in metric or "accessibility" in metric:
-                    val = sum(vals) / len(vals)
-                elif "throughput" in metric:
-                    val = sum(vals)          # throughput é somado (capacidade do site)
-                elif "rsrp" in metric or "rsrq" in metric:
-                    val = sum(vals) / len(vals)
-                else:
-                    val = max(vals)          # utilização, user_count → pior/máximo
-                aggregated.append({"timestamp": ts, "value": val})
+    def _average_series_by_family(self, rows: list) -> list[dict]:
+        by_family: dict[str, dict] = {}
+        for row in rows:
+            if row.get("value") is None:
+                continue
+            family = self._cell_technology_family(row.get("cell_id")) or "unknown"
+            by_family.setdefault(family, {}).setdefault(row["timestamp"], []).append(row["value"])
+        series = []
+        for family in sorted(by_family, key=lambda item: (item == "unknown", item)):
+            ts_map = by_family[family]
+            labels = sorted(ts_map)
+            values = [sum(ts_map[ts]) / len(ts_map[ts]) for ts in labels]
+            series.append({
+                "technology": None if family == "unknown" else family,
+                "labels": labels,
+                "values": values,
+            })
+        return series
 
-            labels = [r["timestamp"] for r in aggregated]
-            values = [r["value"] for r in aggregated]
-            gaps = self._detect_gaps(labels, max_gap_seconds=90)
+    def _kpi_series_for_one_site(self, event_id: str, site_id: str, metric: str,
+                                 minutes: int, cell_id: str, technology: str | None) -> dict:
+        if cell_id == "__all__":
+            site_rows = db.get_kpi_site_series(event_id, site_id, metric, minutes, technology)
+            if site_rows:
+                labels = [row["timestamp"] for row in site_rows]
+                cell_rows = db.get_kpi_series(event_id, site_id, metric, minutes)
+                return {
+                    "ok": True, "labels": labels, "values": [row["value"] for row in site_rows],
+                    "cells_data": self._cells_data_for_rows(cell_rows, labels),
+                    "gaps": self._detect_gaps(labels, max_gap_seconds=90),
+                    "technology": technology, "persisted_site_aggregate": True,
+                    "thresholds": self._metric_thresholds(event_id, metric),
+                }
+        rows = self._collect_cell_rows(event_id, [site_id], metric, minutes)
+        if cell_id and cell_id not in ("__all__", "__media__"):
+            rows = [r for r in rows if r.get("cell_id") == cell_id]
 
-            cells_data = {}
-            if cell_id == "__all__":
-                # Obter todas as cell_ids únicas presentes
-                cell_ids = sorted(list({r["cell_id"] for r in rows if r.get("cell_id")}))
-                # Mapear (cell_id, timestamp) -> value
-                cell_ts_vals = {}
-                for r in rows:
-                    if r.get("cell_id") and r.get("timestamp"):
-                        cell_ts_vals[(r["cell_id"], r["timestamp"])] = r["value"]
-                # Alinhar valores de cada célula com os timestamps ordenados em labels
-                for cid in cell_ids:
-                    cells_data[cid] = [cell_ts_vals.get((cid, ts)) for ts in labels]
+        ts_groups = {}
+        for r in rows:
+            ts = r["timestamp"]
+            val = r["value"]
+            if val is not None:
+                ts_groups.setdefault(ts, []).append(val)
 
+        aggregated = []
+        for ts, vals in sorted(ts_groups.items()):
+            if not vals:
+                continue
+            if cell_id == "__media__":
+                val = sum(vals) / len(vals)
+            elif "availability" in metric or "accessibility" in metric:
+                val = sum(vals) / len(vals)
+            elif "throughput" in metric:
+                val = sum(vals)
+            elif "rsrp" in metric or "rsrq" in metric:
+                val = sum(vals) / len(vals)
+            else:
+                val = max(vals)
+            aggregated.append({"timestamp": ts, "value": val})
+
+        labels = [r["timestamp"] for r in aggregated]
+        values = [r["value"] for r in aggregated]
+        cells_data = self._cells_data_for_rows(rows, labels) if cell_id == "__all__" else {}
+        return {
+            "ok": True,
+            "labels": labels,
+            "values": values,
+            "cells_data": cells_data,
+            "gaps": self._detect_gaps(labels, max_gap_seconds=90),
+            "thresholds": self._metric_thresholds(event_id, metric),
+        }
+
+    def get_kpi_series(self, event_id: str, site_id: str, metric: str,
+                       minutes: int = 60, cell_id: str = "__all__",
+                       technology: str = None,
+                       technology_family: str = None) -> dict:
+        """Retorna série temporal para o gráfico de KPIs.
+
+        Aceita o id fundido: expande para os ``site_id`` dos membros e devolve
+        ``series`` com uma entrada por família. Com uma família só, ``labels``/
+        ``values`` continuam no formato antigo.
+        """
+        try:
             config = db.get_event(event_id) or _active_event
-            thresholds = config.get("thresholds", {}) if config else {}
+            merged = self._merged_sites(config) if config else []
+            site = self._find_merged_site(merged, site_id)
+            members = list((site or {}).get("members") or [{"site_id": site_id, "family": None}])
+            family = technology_family if technology_family in ("4G", "5G") else None
+            if family:
+                filtered = [m for m in members if m.get("family") in (family, None)]
+                if filtered:
+                    members = filtered
 
-            warning_th = thresholds.get(f"{metric}_warning")
-            critical_th = thresholds.get(f"{metric}_critical")
-            if warning_th is None and "utilization" in metric:
-                warning_th = thresholds.get("utilization_warning")
-            if critical_th is None and "utilization" in metric:
-                critical_th = thresholds.get("utilization_critical")
+            if cell_id and cell_id not in ("__all__", "__media__"):
+                owner = self._owner_site_id_for_cell(site, cell_id, members[0]["site_id"])
+                result = self._kpi_series_for_one_site(
+                    event_id, owner, metric, minutes, cell_id, technology)
+                if result.get("ok"):
+                    cell_family = family
+                    if site:
+                        for cell in site.get("cells") or []:
+                            cid = cell if isinstance(cell, str) else cell.get("id")
+                            if cid == cell_id:
+                                cell_family = (
+                                    None if isinstance(cell, str) else cell.get("family")
+                                ) or self._cell_technology_family(cell) or family
+                                break
+                    result["series"] = [{
+                        "technology": cell_family,
+                        "labels": result.get("labels") or [],
+                        "values": result.get("values") or [],
+                    }]
+                return result
 
+            member_ids = self._member_ids_for_family(members, family) or [site_id]
+            cell_rows = self._filter_cell_rows_for_family(
+                self._collect_cell_rows(event_id, member_ids, metric, minutes), family)
+            thresholds = self._metric_thresholds(event_id, metric)
+
+            if cell_id == "__media__":
+                series = self._average_series_by_family(cell_rows)
+                if not series:
+                    series = self._site_series_by_family(
+                        event_id, member_ids, metric, minutes, technology, family)
+                if not series:
+                    return {
+                        "ok": True, "labels": [], "values": [], "series": [],
+                        "cells_data": {}, "gaps": [], "thresholds": thresholds,
+                    }
+                aligned, common = self._align_kpi_series(series)
+                axis = aligned[0]["labels"] if len(aligned) == 1 else common
+                return {
+                    "ok": True,
+                    "labels": axis,
+                    "values": aligned[0]["values"] if len(aligned) == 1 else [],
+                    "series": aligned,
+                    "cells_data": {},
+                    "gaps": self._detect_gaps(axis, max_gap_seconds=90),
+                    "thresholds": thresholds,
+                }
+
+            site_series = self._site_series_by_family(
+                event_id, member_ids, metric, minutes, technology, family)
+            cell_labels = sorted({row["timestamp"] for row in cell_rows if row.get("timestamp")})
+            if site_series:
+                aligned, common = self._align_kpi_series(site_series)
+            else:
+                aligned, common = [], cell_labels
+            axis = cell_labels or common
+            cells_data = self._cells_data_for_rows(cell_rows, axis) if axis else {}
+            if not axis and not aligned:
+                result = self._kpi_series_for_one_site(
+                    event_id, member_ids[0], metric, minutes, cell_id, technology)
+                if result.get("ok") and not result.get("series"):
+                    fam = family or (members[0].get("family") if members else None)
+                    result["series"] = [{
+                        "technology": fam,
+                        "labels": result.get("labels") or [],
+                        "values": result.get("values") or [],
+                    }]
+                return result
             return {
-                "ok":         True,
-                "labels":     labels,
-                "values":     values,
+                "ok": True,
+                "labels": axis,
+                "values": aligned[0]["values"] if len(aligned) == 1 else [],
+                "series": aligned,
                 "cells_data": cells_data,
-                "gaps":       gaps,
-                "thresholds": {
-                    "warning":  warning_th,
-                    "critical": critical_th,
-                },
+                "gaps": self._detect_gaps(axis, max_gap_seconds=90),
+                "technology": technology,
+                "persisted_site_aggregate": bool(aligned),
+                "thresholds": thresholds,
             }
         except Exception as e:
             logger.error(f"get_kpi_series error: {e}")
-            return {"ok": False, "labels": [], "values": [], "gaps": []}
+            return {"ok": False, "labels": [], "values": [], "series": [], "gaps": []}
 
     def _metric_thresholds(self, event_id: str, metric: str) -> dict:
         config = db.get_event(event_id) or _active_event or {}
@@ -815,9 +1216,10 @@ class Api:
             rsrp_warn = thresholds.get("rsrp_warning", -100)
             rsrp_crit = thresholds.get("rsrp_critical", -110)
 
-            resolve_site_id = self._create_cell_resolver(config.get("sites", []))
+            merged_sites = self._merged_sites(config)
+            resolve_site_id = self._create_cell_resolver(merged_sites)
 
-            site_id_to_name = {site["id"]: site["name"] for site in config.get("sites", [])}
+            site_id_to_name = {site["id"]: site["name"] for site in merged_sites}
 
             out = []
             for vip in event_vips:
@@ -895,7 +1297,7 @@ class Api:
         """Retorna série temporal de RSRP/RSRQ para um VIP específico."""
         try:
             config = db.get_event(event_id) or _active_event
-            sites = config.get("sites", []) if config else []
+            sites = self._merged_sites(config) if config else []
             resolve_site_id = self._create_cell_resolver(sites)
             site_id_to_name = {site["id"]: site["name"] for site in sites}
 
@@ -925,7 +1327,7 @@ class Api:
         try:
             rows = db.get_alarms(event_id, timestamp)
             config = db.get_event(event_id) or _active_event or {}
-            sites = config.get("sites", [])
+            sites = self._merged_sites(config)
             for r in rows:
                 site_id, site_name = self._resolve_site_for_source(sites, r.get("source"))
                 r["serving_site"] = site_id
@@ -935,6 +1337,13 @@ class Api:
         except Exception as e:
             logger.error(f"get_alarms error: {e}")
             return []
+
+    @staticmethod
+    def _site_identity_keys(site: dict) -> list[str]:
+        keys = [site.get("id", ""), site.get("name", "")]
+        for member in site.get("members") or []:
+            keys.append(member.get("site_id") or "")
+        return [key for key in keys if key]
 
     @staticmethod
     def _create_cell_resolver(sites: list):
@@ -951,6 +1360,10 @@ class Api:
                     obj_no = cell.get("obj_no")
                     if obj_no is not None:
                         cell_to_site[str(obj_no).upper()] = site_id
+            for member in site.get("members") or []:
+                mid = member.get("site_id")
+                if mid:
+                    cell_to_site[str(mid).upper()] = site_id
 
         def resolve_site_id(cell_id):
             if not cell_id:
@@ -958,24 +1371,27 @@ class Api:
             cell_id_str = str(cell_id).strip()
             cell_id_upper = cell_id_str.upper()
 
-            # 1. Match exato com célula/obj_no mapeado
+            # 1. Match exato com célula/obj_no/membro mapeado
             if cell_id_upper in cell_to_site:
                 return cell_to_site[cell_id_upper]
 
-            # 2. Match por prefixo ou contendo no site ID/Nome
+            # 2. Match por prefixo ou contendo no id fundido, nome ou membros
             for site in sites:
                 s_id = site["id"]
-                s_id_upper = s_id.upper()
                 s_name_upper = site.get("name", "").upper()
-                id_matches = (
-                    cell_id_upper.startswith(s_id_upper)
-                    or (len(s_id_upper) >= 4 and s_id_upper in cell_id_upper)
-                )
+                for key in Api._site_identity_keys(site):
+                    key_upper = key.upper()
+                    id_matches = (
+                        cell_id_upper.startswith(key_upper)
+                        or (len(key_upper) >= 4 and key_upper in cell_id_upper)
+                    )
+                    if id_matches:
+                        return s_id
                 name_matches = len(s_name_upper) >= 4 and (
                     s_name_upper in cell_id_upper
                     or (len(cell_id_upper) >= 4 and cell_id_upper in s_name_upper)
                 )
-                if id_matches or name_matches:
+                if name_matches:
                     return s_id
 
             # 3. Decodificação de ID global de célula (4G ECI // 256 ou 5G NCI // 4096)
@@ -987,11 +1403,9 @@ class Api:
                         inferred_str = str(inferred_site)
                         if inferred_site > 0:
                             for site in sites:
-                                s_id = site["id"]
-                                s_id_upper = s_id.upper()
-                                s_name_upper = site.get("name", "").upper()
-                                if inferred_str in s_id_upper or inferred_str in s_name_upper:
-                                    return s_id
+                                for key in Api._site_identity_keys(site):
+                                    if inferred_str in key.upper():
+                                        return site["id"]
                 except ValueError:
                     pass
 
@@ -1019,20 +1433,20 @@ class Api:
     @staticmethod
     def _resolve_site_for_source(sites: list, source) -> tuple:
         """Casa o `source` do alarme (meName, ex.: SR-UWCTJ1) com um site do evento.
-        Match por igualdade/prefixo/substring contra o id e o nome do site."""
+        Match por igualdade/prefixo/substring contra o id fundido, o nome e os membros."""
         if not source:
             return None, None
         src = str(source).strip().upper()
         if not src:
             return None, None
         for site in sites:
-            s_id = site.get("id", "")
-            s_id_u = s_id.upper()
+            for key in Api._site_identity_keys(site):
+                key_u = key.upper()
+                if src == key_u or src.startswith(key_u) or key_u in src:
+                    return site.get("id"), site.get("name")
             s_name_u = (site.get("name") or "").upper()
-            if s_id_u and (src == s_id_u or src.startswith(s_id_u) or s_id_u in src):
-                return s_id, site.get("name")
             if s_name_u and (s_name_u in src or src in s_name_u):
-                return s_id, site.get("name")
+                return site.get("id"), site.get("name")
         return None, None
 
     def get_alarm_catalog(self) -> dict:

@@ -769,6 +769,13 @@ input[type="range"] {
   color: var(--text-primary);
   min-width: 80px;
 }
+.site-tech {
+  margin-left: 6px;
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  letter-spacing: 0.02em;
+}
 #time-tabs {
   display: flex;
   gap: 3px;

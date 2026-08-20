@@ -116,6 +116,7 @@ export function initMap() {
   State.on("change:sites", renderSites);
   State.on("change:vips", () => renderSites(State.sites));
   State.on("change:selectedSite", _onSiteSelected);
+  State.on("change:techFilter", () => renderSites(State.sites || []));
 
   _map.on("zoomend", () => {
     Object.keys(_markers).forEach(id => {
@@ -316,10 +317,32 @@ function _getCellColor(cell) {
   return "#484F58";
 }
 
-function _buildSectorIcon(site) {
+function _cellFamily(cell) {
+  if (cell?.family) return cell.family;
+  const id = String(cell?.id || cell?.tech || "").toUpperCase();
+  const has4g = /(^|[^A-Z0-9])(?:4G|LTE)([^A-Z0-9]|$)/.test(id);
+  const has5g = /(^|[^A-Z0-9])(?:5G|NR|NCI)([^A-Z0-9]|$)/.test(id);
+  if (has4g === has5g) return null;
+  return has4g ? "4G" : "5G";
+}
+
+function _visibleCells(site) {
   const cells = site.cells || [
     { azimuth: 0 }, { azimuth: 120 }, { azimuth: 240 }
   ];
+  const filter = State.techFilter;
+  if (!filter || filter === "all") return cells;
+  return cells.filter(cell => {
+    const family = _cellFamily(cell);
+    return !family || family === filter;
+  });
+}
+
+function _buildSectorIcon(site) {
+  const visible = _visibleCells(site);
+  const cells = visible.length
+    ? visible
+    : (site.cells || [{ azimuth: 0 }, { azimuth: 120 }, { azimuth: 240 }]);
 
   const zoom = _map ? _map.getZoom() : 13;
   const scale = _getZoomScale(zoom);

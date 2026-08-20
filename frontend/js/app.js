@@ -229,7 +229,7 @@ async function _poll() {
 
   try {
     const [sites, vips, alerts, alarms, status] = await Promise.all([
-      API.getSites(id, null, State.selectedMetric),
+      API.getSites(id, null, State.selectedMetric, State.techFilter === "all" ? null : State.techFilter),
       API.getVips(id),
       API.getAlerts(id),
       API.getAlarms(id),
@@ -422,7 +422,7 @@ async function _updateHistoricalView(index) {
   try {
     const id = State.eventId;
     const [sites, vips, alerts, alarms] = await Promise.all([
-      API.getSites(id, timestamp, State.selectedMetric),
+      API.getSites(id, timestamp, State.selectedMetric, State.techFilter === "all" ? null : State.techFilter),
       API.getVips(id, timestamp),
       API.getAlerts(id, timestamp),
       API.getAlarms(id, timestamp),
