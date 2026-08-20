@@ -245,7 +245,7 @@ function _syncBadge(site) {
     _removeBadge(site.id);
     return;
   }
-  const icon = _buildBadgeIcon(hasVip, alarms);
+  const icon = _buildBadgeIcon(site, hasVip, alarms);
   const existing = _badgeMarkers[site.id];
   if (existing) {
     existing.setLatLng([site.lat, site.lng]);
@@ -261,13 +261,20 @@ function _syncBadge(site) {
   }).addTo(_map);
 }
 
-function _buildBadgeIcon(hasVip, alarms) {
+function _buildBadgeIcon(site, hasVip, alarms) {
   const zoom = _map ? _map.getZoom() : 13;
   const scale = _getZoomScale(zoom);
   const offset = Math.max(7, 11 * scale);
   const badgeRadius = Math.max(3.5, 7 * scale);
   const strokeWidth = scale < 0.3 ? 0.3 : 1;
-  const ext = offset + badgeRadius + 2;
+  const triHeight = Math.max(8, 14 * scale);
+  const triHalf = triHeight * 0.58;
+
+  // O viewBox precisa caber a MAIOR das extensões dos dois badges: em zoom alto
+  // o triângulo é mais largo que o círculo do VIP e seria recortado.
+  const vipExt = hasVip ? badgeRadius : 0;
+  const alarmExt = alarms.length ? Math.max(triHalf, triHeight * 0.55) : 0;
+  const ext = offset + Math.max(vipExt, alarmExt) + strokeWidth + 1;
   const size = ext * 2;
   const cx = size / 2;
   const cy = size / 2;
@@ -278,8 +285,10 @@ function _buildBadgeIcon(hasVip, alarms) {
     const badgeY = cy - offset;
     const fontSize = Math.max(5, 9 * scale);
     vipBadge = `
-      <circle cx="${badgeX}" cy="${badgeY}" r="${badgeRadius}" fill="var(--vip-gold)" stroke="#0D1117" stroke-width="${strokeWidth}"/>
-      <text x="${badgeX}" y="${badgeY + 0.35 * badgeRadius}" font-size="${fontSize}" font-family="Outfit, sans-serif" font-weight="700" fill="#0D1117" text-anchor="middle">V</text>
+      <g class="badge-vip">
+        <circle cx="${badgeX}" cy="${badgeY}" r="${badgeRadius}" fill="var(--vip-gold)" stroke="#0D1117" stroke-width="${strokeWidth}"/>
+        <text x="${badgeX}" y="${badgeY + 0.35 * badgeRadius}" font-size="${fontSize}" font-family="Outfit, sans-serif" font-weight="700" fill="#0D1117" text-anchor="middle">V</text>
+      </g>
     `;
   }
 
@@ -287,24 +296,25 @@ function _buildBadgeIcon(hasVip, alarms) {
   if (alarms.length) {
     const ax = cx - offset;
     const ay = cy - offset;
-    const h = Math.max(8, 14 * scale);
-    const half = h * 0.58;
     const color = _alarmBadgeColor(alarms);
     const fontSize = Math.max(6, 9 * scale);
     alarmBadge = `
-      <path d="M${ax},${ay - h * 0.55} L${ax + half},${ay + h * 0.45} L${ax - half},${ay + h * 0.45} Z"
-            fill="${color}" stroke="#0D1117" stroke-width="${strokeWidth}"/>
-      <text x="${ax}" y="${ay + h * 0.22}" font-size="${fontSize}" font-family="Outfit, sans-serif" font-weight="700" fill="#0D1117" text-anchor="middle">!</text>
+      <g class="badge-alarm">
+        <path d="M${ax},${ay - triHeight * 0.55} L${ax + triHalf},${ay + triHeight * 0.45} L${ax - triHalf},${ay + triHeight * 0.45} Z"
+              fill="${color}" stroke="#0D1117" stroke-width="${strokeWidth}"/>
+        <text x="${ax}" y="${ay + triHeight * 0.22}" font-size="${fontSize}" font-family="Outfit, sans-serif" font-weight="700" fill="#0D1117" text-anchor="middle">!</text>
+      </g>
     `;
   }
 
   const svg = `
-    <svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}" viewBox="0 0 ${size} ${size}">
+    <svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}" viewBox="0 0 ${size} ${size}"
+         data-site="${_esc(site.id)}">
       ${alarmBadge}${vipBadge}
     </svg>`;
   return L.divIcon({
     html: svg,
-    className: "",
+    className: "site-badge",
     iconSize: [size, size],
     iconAnchor: [cx, cy],
   });

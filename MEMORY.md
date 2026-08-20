@@ -417,3 +417,31 @@ curto-circuitava nas linhas SITE e, com duas famílias, devolvia `values: []` e 
   `markerPane`). Sites indoor na mesma coordenada não tapam o V / o triângulo.
 
 Gate: `pytest tests/ -q --basetemp=.pytest-work/tmp` → **343 passed, 10 skipped, 0 failed**.
+
+---
+
+## 2026-08-19 — Fase 2 fechada: badges de VIP e de alarme no marcador
+
+Plano: `docs/plans/2026-08-19-001-feat-site-merge-clusters-kpi-overview-plan.md`.
+
+- **Badge é marcador próprio, não elemento do ícone de setores.** Cada site com VIP e/ou alarme
+  ganha um `L.marker` extra no pane `badges` (z-index 625), com `interactive: false`. O SVG das
+  pétalas continua sendo só pétalas — o recorte do `viewBox` do ícone de setores deixa de ser
+  problema por construção.
+- **O `viewBox` do badge dimensiona pela MAIOR das duas extensões** (`offset + max(raio do VIP,
+  metade da base/altura do triângulo) + stroke + 1`). Só com o raio do VIP, o triângulo era
+  recortado em zoom máximo (`scale = 2`).
+- **VIP à direita (círculo dourado com "V"), alarme à esquerda (triângulo com "!").** A cor do
+  triângulo vem da maior severidade do site: Critical `#F85149`, Major `#FF7B00`,
+  Minor `#D29922`, resto `#58A6FF`.
+- **Ganchos de teste no SVG:** `className: "site-badge"` no divIcon, `data-site` no `<svg>` e
+  grupos `.badge-vip` / `.badge-alarm`. Os testes de Playwright medem `getBBox()` contra o
+  `viewBox` — sem esses ganchos não há como afirmar que o ícone não foi cortado.
+- **O alarme do mock cai no site fundido** (`serving_site: "SPSMG7"` vindo de célula 5G), que é o
+  que exercita a dependência da Fase 1 sem VPN.
+
+Gate: `pytest tests/ -q --basetemp=.pytest-work/tmp` → **345 passed, 10 skipped, 1 failed**.
+A falha é `test_vip_modal_time_windows_switch_without_leaking_state` e **não vem desta fase**:
+reproduz em `HEAD` limpo. O mock do VIP gera só as últimas 2 h, e a janela "Hoje" corta em 00:00
+local — rodando a suíte logo depois da meia-noite, a janela fica vazia e o gráfico não aparece.
+

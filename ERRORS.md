@@ -256,3 +256,26 @@ host e VIPs agora falha fechado. O status expõe regional/host/contrato FARS e d
 **Regra:** uma lista vazia por configuração ausente não é sucesso operacional; não capturar a
 exceção e fingir “nenhum VIP configurado”. Uma limpeza reproduzível sempre parte de relatório
 imutável e backup, nunca de IDs digitados diretamente num `DELETE`.
+
+---
+
+## 2026-08-19 — O badge de alarme era cortado e o teste de reatividade passava sozinho
+
+**Sintoma:** o triângulo de alarme aparecia recortado no zoom máximo. E, ao remover de propósito
+`State.on("change:alarms", ...)` do `map.js`, o teste que deveria travar essa regressão continuava
+passando — às vezes.
+
+**Causas:** (1) o SVG do badge era dimensionado por `offset + raio do VIP + 2`, mas o triângulo é
+mais largo que o círculo quando `scale = 2` (zoom ≥ 18) — a extensão maior é que manda no `viewBox`.
+(2) O `fitBounds` da abertura dispara um `zoomend`, e o handler de `zoomend` re-renderiza todos os
+marcadores; se o teste publicasse `State.alarms` antes de o mapa assentar, esse re-render acidental
+criava o badge e o teste passava sem o listener.
+
+**Correção:** o `viewBox` passou a usar `max` das extensões dos dois badges; o teste espera o mapa
+assentar (`leaflet-zoom-anim` fora + folga) antes de publicar o estado. Verificado nos dois
+sentidos: com a correção revertida, cada teste falha 3/3.
+
+**Regra:** teste de reatividade em mapa tem que rodar com o mapa parado — qualquer animação
+pendente do Leaflet re-renderiza tudo e valida o listener que não existe. E ícone com dois
+elementos em lados opostos dimensiona pela maior extensão, nunca pela do primeiro que foi escrito.
+

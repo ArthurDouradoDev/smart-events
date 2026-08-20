@@ -234,3 +234,158 @@ def test_media_e_site_completo_respeitam_familia_e_legendas():
         if "Executable doesn't exist" in str(exc):
             pytest.skip("Chromium do Playwright não está instalado neste ambiente")
         raise
+
+
+# ── Fase 2: badges de VIP e de alarme no marcador do site ────────────────
+
+_BADGE_GEOMETRY_JS = """
+  () => {
+    const out = [];
+    document.querySelectorAll('.site-badge svg').forEach(svg => {
+      const size = svg.viewBox.baseVal.width;
+      svg.querySelectorAll('.badge-vip circle, .badge-alarm path').forEach(shape => {
+        const box = shape.getBBox();
+        out.push({
+          site: svg.getAttribute('data-site'),
+          kind: shape.parentNode.getAttribute('class'),
+          x: box.x, y: box.y, width: box.width, height: box.height, size,
+        });
+      });
+    });
+    return out;
+  }
+"""
+
+
+def _wait_map_idle(page):
+    page.wait_for_function(
+        "() => !document.getElementById('map').classList.contains('leaflet-zoom-anim')",
+        timeout=5000,
+    )
+
+
+def _zoom_to_limit(page, direction, steps):
+    """Aproxima/afasta até o limite do mapa. O clique é despachado direto porque
+    o controle do Leaflet fica `leaflet-disabled` no extremo e o Playwright
+    recusaria a ação."""
+    selector = ".leaflet-control-zoom-in" if direction == "in" else ".leaflet-control-zoom-out"
+    control = page.locator(selector)
+    for _ in range(steps):
+        if "leaflet-disabled" in (control.get_attribute("class") or ""):
+            break
+        control.dispatch_event("click")
+        _wait_map_idle(page)
+        page.wait_for_timeout(120)
+
+
+def _badge_kinds(page, site_id):
+    return page.evaluate(
+        """(id) => {
+          const svg = document.querySelector(`.site-badge svg[data-site="${id}"]`);
+          if (!svg) return null;
+          return {
+            vip: svg.querySelectorAll('.badge-vip').length,
+            alarm: svg.querySelectorAll('.badge-alarm').length,
+          };
+        }""",
+        site_id,
+    )
+
+
+def test_badge_de_vip_e_alarme_cabem_no_viewbox():
+    """O triângulo do alarme é mais largo que a bola do VIP em zoom alto: se o
+    tamanho do SVG considerar só a extensão do VIP, o ícone é recortado."""
+    sync_api = pytest.importorskip("playwright.sync_api")
+    try:
+        with _frontend_server() as url, sync_api.sync_playwright() as playwright:
+            browser = playwright.chromium.launch(headless=True)
+            page = browser.new_page()
+            page.goto(f"{url}/index.html", wait_until="domcontentloaded")
+            page.locator(".site-badge svg").first.wait_for(state="attached", timeout=8000)
+
+            checked = 0
+            for direction, steps in (("in", 0), ("in", 12), ("out", 24)):
+                _zoom_to_limit(page, direction, steps)
+                shapes = page.evaluate(_BADGE_GEOMETRY_JS)
+                assert shapes, "nenhum badge renderizado no mapa"
+                for shape in shapes:
+                    size = shape["size"]
+                    assert shape["x"] >= 0, shape
+                    assert shape["y"] >= 0, shape
+                    assert shape["x"] + shape["width"] <= size, shape
+                    assert shape["y"] + shape["height"] <= size, shape
+                    checked += 1
+            assert checked
+            browser.close()
+    except Exception as exc:
+        if "Executable doesn't exist" in str(exc):
+            pytest.skip("Chromium do Playwright não está instalado neste ambiente")
+        raise
+
+
+def test_triangulo_aparece_so_com_alarme_no_site():
+    sync_api = pytest.importorskip("playwright.sync_api")
+    try:
+        with _frontend_server() as url, sync_api.sync_playwright() as playwright:
+            browser = playwright.chromium.launch(headless=True)
+            page = browser.new_page()
+            page.goto(f"{url}/index.html", wait_until="domcontentloaded")
+            page.locator(".site-badge svg").first.wait_for(state="attached", timeout=8000)
+
+            # ERB-07 tem VIP e alarme ao mesmo tempo.
+            assert _badge_kinds(page, "ERB-07") == {"vip": 1, "alarm": 1}
+            # ERB-11 tem VIP e nenhum alarme.
+            assert _badge_kinds(page, "ERB-11") == {"vip": 1, "alarm": 0}
+            # SPSMG7 é o site fundido: o alarme veio de uma célula 5G e o
+            # serving_site é o id fundido (Fase 1).
+            assert _badge_kinds(page, "SPSMG7") == {"vip": 0, "alarm": 1}
+            # ERB-15 não tem nem VIP nem alarme: nenhum badge é criado.
+            assert _badge_kinds(page, "ERB-15") is None
+            browser.close()
+    except Exception as exc:
+        if "Executable doesn't exist" in str(exc):
+            pytest.skip("Chromium do Playwright não está instalado neste ambiente")
+        raise
+
+
+def test_badges_reagem_a_mudanca_de_alarmes():
+    """Regressão do listener esquecido: publicar State.alarms tem de
+    re-renderizar os marcadores sem recarregar a página."""
+    sync_api = pytest.importorskip("playwright.sync_api")
+    try:
+        with _frontend_server() as url, sync_api.sync_playwright() as playwright:
+            browser = playwright.chromium.launch(headless=True)
+            page = browser.new_page()
+            page.goto(f"{url}/index.html", wait_until="domcontentloaded")
+            page.locator(".site-badge svg").first.wait_for(state="attached", timeout=8000)
+            assert _badge_kinds(page, "SPSMG7") == {"vip": 0, "alarm": 1}
+            assert _badge_kinds(page, "ERB-15") is None
+
+            # O `fitBounds` da abertura dispara um `zoomend` que re-renderiza os
+            # marcadores por conta própria; sem esperar o mapa assentar, esse
+            # re-render mascararia a ausência do listener de alarmes.
+            _wait_map_idle(page)
+            page.wait_for_timeout(1000)
+
+            page.evaluate(
+                """async () => {
+                  const { default: State } = await import('/js/state.js');
+                  State.set('alarms', [
+                    { in_event: true, serving_site: 'ERB-15', severity: 'Critical' },
+                  ]);
+                }"""
+            )
+            page.wait_for_function(
+                """() => !!document.querySelector('.site-badge svg[data-site="ERB-15"] .badge-alarm')""",
+                timeout=5000,
+            )
+            # O alarme do site fundido saiu da lista: o triângulo dele some junto
+            # com o badge, porque SPSMG7 não tem VIP.
+            assert _badge_kinds(page, "SPSMG7") is None
+            # ERB-07 perde o triângulo mas mantém a bola do VIP.
+            assert _badge_kinds(page, "ERB-07") == {"vip": 1, "alarm": 0}
+            browser.close()
+    except Exception as exc:
+        if "Executable doesn't exist" in str(exc):
+            pytest.skip("Chromium do Playwright não está instalado neste ambiente")
+        raise

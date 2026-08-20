@@ -314,13 +314,13 @@ const _mock = {
   ]),
   get_alarms: (event_id, timestamp=null) => {
     const now = Date.now();
-    const mk = (i, name, sev, src, inEvent, siteName) => ({
+    const mk = (i, name, sev, src, inEvent, siteName, siteId = null) => ({
       csn: 90000 + i, event_id, alarm_id: String(3600 + i), alarm_group_id: "268435456",
       alarm_name: name, severity: sev, source: src, ip: `10.0.0.${10 + i}`,
       location: "Interlagos", occur_time: new Date(now - i * 6 * 60000).toISOString(),
       arrive_time: new Date(now - i * 6 * 60000).toISOString(), additional_info: "mock",
       collected_at: new Date(now).toISOString(),
-      in_event: inEvent, serving_site: inEvent ? src : null,
+      in_event: inEvent, serving_site: inEvent ? (siteId || src) : null,
       serving_site_name: inEvent ? siteName : null,
     });
     return [
@@ -328,6 +328,9 @@ const _mock = {
       mk(1, "Cell Unavailable", "Major", "ERB-03", true,  "ERB-03 Av. Interlagos"),
       mk(2, "Cell Unavailable", "Major", "SR-XYZ99", false, null),
       mk(3, "RF Unit VSWR Threshold Crossed", "Critical", "SR-ABC12", false, null),
+      // Alarme correlacionado ao site fundido (Fase 1): serving_site é o id fundido,
+      // não o id 4G/5G da EP — é o que faz o triângulo cair no marcador certo.
+      mk(4, "Cell Unavailable", "Minor", "5G-SPSMG7", true, "SPSMG7", "SPSMG7"),
     ];
   },
   get_alarm_catalog: () => ({
@@ -341,7 +344,7 @@ const _mock = {
     ok: true, names: ["RF Unit VSWR Threshold Crossed", "Cell Unavailable"],
   }),
   set_alarm_filter: (event_id, names) => ({ ok: true, names }),
-  refresh_alarms: (event_id) => ({ ok: true, count: 4 }),
+  refresh_alarms: (event_id) => ({ ok: true, count: 5 }),
   get_app_status: () => ({ recording:true, db_size_mb:4.2, now:new Date().toISOString() }),
   get_collection_status: () => _mockCollectionStatus(),
   activate_event: (id, mock) => {
