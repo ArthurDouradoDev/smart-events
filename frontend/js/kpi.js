@@ -408,9 +408,7 @@ async function _populateCellSelector(siteId, preserveScope = false) {
       sel.innerHTML += `<option value="${_esc(cell.id)}">${_esc(label)}${_esc(tech)}</option>`;
     });
     const keepScope = preserveScope && (previous === "__all__" || previous === "__media__");
-    const next = keepScope
-      ? previous
-      : (_siteHasBothFamilies(site) && (State.techFilter || "all") === "all" ? "__all__" : "__media__");
+    const next = keepScope ? previous : "__media__";
     sel.value = next;
     State.set("selectedCell", next);
   } else if (cells && cells.length === 1) {

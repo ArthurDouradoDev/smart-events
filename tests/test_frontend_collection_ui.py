@@ -151,6 +151,7 @@ def test_lista_de_sites_nao_repete_nome_e_tech_selector_recorta_celulas():
 
             _close_chart_popup(page)
             page.locator('.site-item[data-id="SPSMG7"]').click()
+            assert page.locator("#cell-selector").input_value() == "__media__"
             tech = page.locator("#tech-selector")
             tech.wait_for(state="visible", timeout=5000)
 

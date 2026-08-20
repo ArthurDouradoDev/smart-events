@@ -410,7 +410,10 @@ curto-circuitava nas linhas SITE e, com duas famílias, devolvia `values: []` e 
 - **Site completo:** devolve `cells_data` das células dos membros. Ambas / 4G / 5G recortam
   as linhas; a legenda do Chart.js continua ocultando célula por clique.
 - Trocar o filtro de tecnologia **mantém** Site completo ou Média se já estava selecionado.
-  Na primeira carga de um site, o default continua Média (site de uma família) ou Site
-  completo (site 4G+5G).
+  Ao selecionar um site, o default é sempre **Média** — Site completo abre popup e não
+  deve disparar sozinho a cada troca de site.
+- O rótulo do filtro de tecnologia é **4G e 5G** (não "Ambas").
+- Badges de VIP e alarme vão num pane Leaflet `badges` (z-index 625, acima do
+  `markerPane`). Sites indoor na mesma coordenada não tapam o V / o triângulo.
 
 Gate: `pytest tests/ -q --basetemp=.pytest-work/tmp` → **343 passed, 10 skipped, 0 failed**.

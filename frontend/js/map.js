@@ -9,6 +9,7 @@ import State from "./state.js";
 
 let _map = null;
 let _markers = {};         // site_id → L.Marker
+let _badgeMarkers = {};    // site_id → L.Marker no pane acima dos sites
 let _polygon = null;
 let _showEventOnly = false;
 let _showPolygon = true;
@@ -74,6 +75,11 @@ export function initMap() {
   });
   L.control.zoom({ position: "bottomright" }).addTo(_map);
 
+  // Badges de VIP/alarme acima do markerPane (600) e abaixo de tooltip/popup.
+  // Dois sites na mesma coordenada (indoor) não podem tapar o badge.
+  _map.createPane("badges");
+  _map.getPane("badges").style.zIndex = 625;
+
   _osmLayer = L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
     maxZoom: 19,
     attribution: "",
@@ -115,6 +121,7 @@ export function initMap() {
   // Reage a mudanças de estado
   State.on("change:sites", renderSites);
   State.on("change:vips", () => renderSites(State.sites));
+  State.on("change:alarms", () => renderSites(State.sites || []));
   State.on("change:selectedSite", _onSiteSelected);
   State.on("change:techFilter", () => renderSites(State.sites || []));
 
@@ -162,6 +169,7 @@ export function renderSites(sites) {
     if (!siteIds.has(id)) {
       _markers[id].remove();
       delete _markers[id];
+      _removeBadge(id);
     }
   });
 
@@ -201,12 +209,114 @@ export function fitToEvent(sites, polygon) {
 
 // ── Internos ──────────────────────────────────────────────────────
 
+function _siteHasVip(site) {
+  return (State.vips || []).some(v => v.in_event && v.serving_site === site.id);
+}
+
+function _siteAlarms(site) {
+  return (State.alarms || []).filter(a => a.in_event && a.serving_site === site.id);
+}
+
+function _markerZIndexOffset(site) {
+  let z = 0;
+  if (_siteAlarms(site).length) z += 400;
+  if (_siteHasVip(site)) z += 800;
+  if (site.id === State.selectedSite) z += 2000;
+  return z;
+}
+
+function _alarmBadgeColor(alarms) {
+  if (alarms.some(a => a.severity === "Critical")) return "#F85149";
+  if (alarms.some(a => a.severity === "Major")) return "#FF7B00";
+  if (alarms.some(a => a.severity === "Minor")) return "#D29922";
+  return "#58A6FF";
+}
+
+function _removeBadge(siteId) {
+  if (!_badgeMarkers[siteId]) return;
+  _badgeMarkers[siteId].remove();
+  delete _badgeMarkers[siteId];
+}
+
+function _syncBadge(site) {
+  const hasVip = _siteHasVip(site);
+  const alarms = _siteAlarms(site);
+  if (!hasVip && !alarms.length) {
+    _removeBadge(site.id);
+    return;
+  }
+  const icon = _buildBadgeIcon(hasVip, alarms);
+  const existing = _badgeMarkers[site.id];
+  if (existing) {
+    existing.setLatLng([site.lat, site.lng]);
+    existing.setIcon(icon);
+    return;
+  }
+  _badgeMarkers[site.id] = L.marker([site.lat, site.lng], {
+    icon,
+    pane: "badges",
+    interactive: false,
+    keyboard: false,
+    zIndexOffset: 10000,
+  }).addTo(_map);
+}
+
+function _buildBadgeIcon(hasVip, alarms) {
+  const zoom = _map ? _map.getZoom() : 13;
+  const scale = _getZoomScale(zoom);
+  const offset = Math.max(7, 11 * scale);
+  const badgeRadius = Math.max(3.5, 7 * scale);
+  const strokeWidth = scale < 0.3 ? 0.3 : 1;
+  const ext = offset + badgeRadius + 2;
+  const size = ext * 2;
+  const cx = size / 2;
+  const cy = size / 2;
+
+  let vipBadge = "";
+  if (hasVip) {
+    const badgeX = cx + offset;
+    const badgeY = cy - offset;
+    const fontSize = Math.max(5, 9 * scale);
+    vipBadge = `
+      <circle cx="${badgeX}" cy="${badgeY}" r="${badgeRadius}" fill="var(--vip-gold)" stroke="#0D1117" stroke-width="${strokeWidth}"/>
+      <text x="${badgeX}" y="${badgeY + 0.35 * badgeRadius}" font-size="${fontSize}" font-family="Outfit, sans-serif" font-weight="700" fill="#0D1117" text-anchor="middle">V</text>
+    `;
+  }
+
+  let alarmBadge = "";
+  if (alarms.length) {
+    const ax = cx - offset;
+    const ay = cy - offset;
+    const h = Math.max(8, 14 * scale);
+    const half = h * 0.58;
+    const color = _alarmBadgeColor(alarms);
+    const fontSize = Math.max(6, 9 * scale);
+    alarmBadge = `
+      <path d="M${ax},${ay - h * 0.55} L${ax + half},${ay + h * 0.45} L${ax - half},${ay + h * 0.45} Z"
+            fill="${color}" stroke="#0D1117" stroke-width="${strokeWidth}"/>
+      <text x="${ax}" y="${ay + h * 0.22}" font-size="${fontSize}" font-family="Outfit, sans-serif" font-weight="700" fill="#0D1117" text-anchor="middle">!</text>
+    `;
+  }
+
+  const svg = `
+    <svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}" viewBox="0 0 ${size} ${size}">
+      ${alarmBadge}${vipBadge}
+    </svg>`;
+  return L.divIcon({
+    html: svg,
+    className: "",
+    iconSize: [size, size],
+    iconAnchor: [cx, cy],
+  });
+}
+
 function _createMarker(site) {
   const icon = _buildSectorIcon(site);
   const marker = L.marker([site.lat, site.lng], {
     icon,
     title: site.name,
     interactive: true,
+    zIndexOffset: _markerZIndexOffset(site),
   }).addTo(_map);
 
   marker.bindPopup(_buildPopup(site), { className: "site-popup", autoPan: false });
@@ -216,12 +326,15 @@ function _createMarker(site) {
   });
 
   _markers[site.id] = marker;
+  _syncBadge(site);
 }
 
 function _updateMarker(site) {
   const marker = _markers[site.id];
   marker.setIcon(_buildSectorIcon(site));
   marker.setPopupContent(_buildPopup(site));
+  marker.setZIndexOffset(_markerZIndexOffset(site));
+  _syncBadge(site);
 }
 
 function _resolveTechAndFreq(cell) {
@@ -356,8 +469,7 @@ function _buildSectorIcon(site) {
 
   // Se o site estiver selecionado ou possuir VIPs, aumenta o tamanho do SVG para acomodar o contorno com folga
   const isSelected = site.id === State.selectedSite;
-  const hasVip = (State.vips || []).some(v => v.in_event && v.serving_site === site.id);
-  const highlightDist = (isSelected ? Math.max(4, 7 * scale) : 2) + (hasVip ? Math.max(6, 10 * scale) : 0);
+  const highlightDist = isSelected ? Math.max(4, 7 * scale) : 2;
   const size = (maxR + highlightDist) * 2;
   const cx = size / 2;
   const cy = size / 2;
@@ -388,19 +500,6 @@ function _buildSectorIcon(site) {
                              stroke-dasharray="${4 * scale} ${3 * scale}" opacity="0.95"/>`;
   }
 
-  // Desenha um badge dourado "V" no canto superior direito para sites com VIP conectado
-  let vipBadge = "";
-  if (hasVip) {
-    const badgeRadius = Math.max(3.5, 7 * scale);
-    const badgeX = cx + Math.max(7, 11 * scale);
-    const badgeY = cy - Math.max(7, 11 * scale);
-    const fontSize = Math.max(5, 9 * scale);
-    vipBadge = `
-      <circle cx="${badgeX}" cy="${badgeY}" r="${badgeRadius}" fill="var(--vip-gold)" stroke="#0D1117" stroke-width="${strokeWidth}"/>
-      <text x="${badgeX}" y="${badgeY + 0.35 * badgeRadius}" font-size="${fontSize}" font-family="Outfit, sans-serif" font-weight="700" fill="#0D1117" text-anchor="middle">V</text>
-    `;
-  }
-
   const svg = `
     <svg xmlns="http://www.w3.org/2000/svg"
          width="${size}" height="${size}"
@@ -409,7 +508,6 @@ function _buildSectorIcon(site) {
       ${paths.join("")}
       <circle cx="${cx}" cy="${cy}" r="${circleRadius}"
               fill="${siteColor}" stroke="#0D1117" stroke-width="${centerStrokeWidth}"/>
-      ${vipBadge}
     </svg>`;
 
   return L.divIcon({
@@ -481,8 +579,13 @@ function _applyVisibility() {
     const site = State.sites.find(s => s.id === id);
     if (!site) return;
     const hide = _showEventOnly && !site.is_event_site;
-    if (hide) marker.remove();
-    else if (!_map.hasLayer(marker)) marker.addTo(_map);
+    if (hide) {
+      marker.remove();
+      _removeBadge(id);
+    } else {
+      if (!_map.hasLayer(marker)) marker.addTo(_map);
+      _syncBadge(site);
+    }
   });
 }
 
