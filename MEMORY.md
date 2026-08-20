@@ -480,3 +480,41 @@ Investigação a partir do painel "Parcial · recebidos 0" no evento `teste-curi
 
 Gate: `pytest tests/ -q --basetemp=.pytest-work/tmp` → **349 passed, 10 skipped, 0 failed**.
 
+---
+
+## 2026-08-20 — Fase 3: N tasks por tecnologia, um POST por task
+
+Plano: `docs/plans/2026-08-19-001-feat-site-merge-clusters-kpi-overview-plan.md`.
+
+O OSS responde uma task por POST (medido nos 8 HARs). Cada monitoring cabe 300 células, então
+um evento grande precisa de várias tasks da mesma tecnologia. A trava "uma task por tecnologia"
+foi removida; a unicidade passa a ser por `task_id` — o mesmo id com duas tecnologias era a
+ambiguidade real (`task_id → technology` perderia uma em silêncio).
+
+**Decisões travadas:**
+
+- **Um POST por task, sequencial.** O payload continua `[{taskId: N, …}]`. As respostas
+  bem-sucedidas são concatenadas e parseadas de uma vez, para o agregado SITE (sum/mean/
+  recalculate) continuar vendo todas as células da mesma tecnologia juntas. Concatenar as
+  linhas SITE de cada parse parcial duplicaria o site quando duas tasks 4G cobrissem células
+  do mesmo eNodeB.
+- **Falha de uma task não derruba as outras.** HTTP 500 / timeout / JSON inválido vira
+  diagnóstico daquela task (`details.task_id`) e o ciclo fecha `partial` com as linhas das
+  que responderam. Se nenhuma task responde, o ciclo fecha `error`.
+- **Renovação de sessão uma vez por ciclo**, não por task. Sessão inválida depois da
+  renovação: se já houver dado, persiste `partial` e para as restantes; se não houver, fecha
+  `auth_required`.
+- **Log:** uma linha `[monitoring] task=<id> HTTP=…` por task, mais uma linha de total do
+  ciclo com `duracao`. WARNING se a duração passar de `INTERVAL_KPI_SECONDS` (120 s).
+- **Diagnósticos deduplicados por `(metric, code)`** antes de sair do parser. Um contador
+  ausente em 100 objetos gera uma entrada, não 100.
+- **Cadastro:** os três inputs fixos viraram lista repetível `{tecnologia, task_id}`.
+  Reeditar um evento com duas tasks 4G deixa de apagar a segunda. Evento legado com
+  `pm_task_id` continua populando uma linha 4G via `configuredPmTasks`. Rótulo da lista:
+  `4G ×3 · NR Cell ×1`.
+- **`throughput_dl` 5G_NRDUCELL:** `production_ready=True`, unidade `Mbit/s`,
+  `monitoring_available=True`. Fecha o §0.9 (LastSlot passou a existir na task 748). A
+  fórmula não muda. `throughput_ul` 5G segue pendente.
+
+Gate: `pytest tests/ -q --basetemp=.pytest-work/tmp` → **357 passed, 10 skipped, 0 failed**.
+

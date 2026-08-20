@@ -46,7 +46,7 @@ import urllib3
 
 from core import database as db
 from core import credentials
-from core.collection_result import CollectionResult
+from core.collection_result import CollectionDiagnostic, CollectionResult
 from core.kpi_formulas import InvalidKpi, calculate as calculate_kpi, definitions_for
 from core.rrc_decode import decode_meas_report
 from core.session_renew import (
@@ -366,13 +366,15 @@ class BaseCollector(ABC):
             fallback = integration.get("pm_task_id") or session_data.get("monitoring", {}).get("task_id")
             if fallback is not None:
                 tasks.append({"task_id": int(fallback), "technology": "4G"})
-        # Uma task por tecnologia; duplicidade de configuração é ambígua e deve falhar visivelmente.
+        # Várias tasks da mesma tecnologia são o caso normal (teto de 300 células).
+        # O mesmo task_id duas vezes é a ambiguidade real: o mapa task→tecnologia
+        # ficaria com uma só e a outra sumiria em silêncio.
         seen = set()
         unique = []
         for item in tasks:
-            if item["technology"] in seen:
-                raise ValueError(f"Mais de uma task PM configurada para {item['technology']}")
-            seen.add(item["technology"])
+            if item["task_id"] in seen:
+                raise ValueError(f"Task PM {item['task_id']} configurada mais de uma vez")
+            seen.add(item["task_id"])
             unique.append(item)
         return unique
 
@@ -489,31 +491,59 @@ class BaseCollector(ABC):
             return None
         return "O OSS não registra execução nova do Monitoring: " + "; ".join(parts) + "."
 
-    def _log_monitoring_cycle(self, response, payload: list[dict], discovery_tasks: set,
-                              parsed: dict, response_payload) -> None:
-        """Registra o resultado de cada ciclo de PM, como já era feito em VIP e alarmes.
-
-        Sem esta linha, um ciclo que responde 200 sem objetos é indistinguível de um
-        worker parado: ambos não escrevem nada no log, no banco e nos checkpoints.
-        Quando o ciclo não produz medição, o corpo é gravado em ``data/diagnostics``
-        (limitado por processo) para que a causa possa ser lida sem novo build.
-        """
-        tasks_desc = ", ".join(
-            f"{item['taskId']}"
-            f"{'/descoberta' if str(item['taskId']) in discovery_tasks else '/' + str(len(item.get('objNoExecTimes') or [])) + 'obj'}"
-            for item in payload
-        )
+    def _log_monitoring_task(self, task_id, status_code, payload_item: dict,
+                             discovery_tasks: set, parsed: dict, response_payload) -> None:
+        """Uma linha por task. Com 21 tasks, o total do ciclo não aponta a que falhou."""
+        mode = ("descoberta" if str(task_id) in discovery_tasks
+                else f"{len((payload_item or {}).get('objNoExecTimes') or [])}obj")
+        http = status_code if status_code is not None else "erro"
         logger.info(
-            "[monitoring] tasks=%s HTTP=%s recebidos=%s mapeados=%s nao_mapeados=%s "
-            "invalidos=%s linhas=%s cursores=%s",
-            tasks_desc or "-", response.status_code, parsed["received"],
-            parsed["received"] - parsed["unmapped"], parsed["unmapped"],
-            parsed["invalid"], len(parsed["rows"]), len(parsed["cursors"]),
+            "[monitoring] task=%s/%s HTTP=%s recebidos=%s mapeados=%s nao_mapeados=%s invalidos=%s",
+            task_id, mode, http, parsed["received"],
+            parsed["received"] - parsed["unmapped"], parsed["unmapped"], parsed["invalid"],
         )
         if parsed["rows"] or self._auto_dumps_monitoring >= MONITORING_AUTO_DUMPS:
             return
+        if response_payload is None:
+            return
         if self._dump_raw(response_payload, "monitoring", force=True):
             self._auto_dumps_monitoring += 1
+
+    def _log_monitoring_cycle_total(self, parsed: dict, task_count: int,
+                                    failed_count: int, elapsed_s: float) -> None:
+        logger.info(
+            "[monitoring] ciclo tasks=%s falhas=%s recebidos=%s mapeados=%s nao_mapeados=%s "
+            "invalidos=%s linhas=%s cursores=%s duracao=%.1fs",
+            task_count, failed_count, parsed["received"],
+            parsed["received"] - parsed["unmapped"], parsed["unmapped"],
+            parsed["invalid"], len(parsed["rows"]), len(parsed["cursors"]), elapsed_s,
+        )
+
+    def _query_monitoring_task(self, url: str, payload: list[dict],
+                               renewed: bool) -> tuple:
+        """POST de uma task. Renova a sessão no máximo uma vez por ciclo."""
+        for attempt in range(2):
+            response = self._get_session("monitoring").post(
+                url, json=payload, timeout=30,
+                headers={"x-non-renewal-session": "true"}, allow_redirects=False)
+            if self._check_session_valid(response, "monitoring"):
+                return response, renewed
+            if renewed or attempt:
+                logger.error("Sessão de Monitoring continuou inválida após a renovação (KPIs v2).")
+                raise SessionExpiredError(
+                    "A sessão de Monitoring continuou inválida após a renovação.")
+            if not self._renew_session("monitoring"):
+                logger.error("Não foi possível renovar a sessão de Monitoring (KPIs v2).")
+                raise SessionExpiredError("Não foi possível renovar a sessão de Monitoring.")
+            renewed = True
+        raise SessionExpiredError("Sessão Monitoring expirada")
+
+    def _empty_monitoring_parse(self) -> dict:
+        return {
+            "rows": [], "received": 0, "invalid": 0, "unmapped": 0,
+            "unmapped_cells": [], "diagnostics": [], "cursors": {},
+            "latest_data_at": None, "idle_tasks": [],
+        }
 
     def _collect_kpis_v2(self) -> CollectionResult:
         session_data = self._load_session_data()
@@ -531,81 +561,134 @@ class BaseCollector(ABC):
                                             coverage={"cells_mapped": 0, "cells_expected": len(self.cell_ids)})
         oss = (self._region or self.base_url).upper()
         expected_cell_ids = self._expected_pm_cell_ids(tasks)
-        payload = self._monitoring_payload(tasks, oss)
-        discovery_tasks = {
-            str(item["taskId"]) for item in payload if not item.get("objNoExecTimes")
-        }
         url = f"{self.base_url}/rest/oss/access/pm/v1/monitor/task/result"
+        tech_by_task = {str(task["task_id"]): task["technology"] for task in tasks}
         renewed = False
-        for attempt in range(2):
+        combined_data = []
+        discovery_tasks: set[str] = set()
+        empty_discovery: set[str] = set()
+        task_failures: list[tuple[dict, str, str]] = []
+        any_success = False
+        started = time.monotonic()
+
+        for task in tasks:
+            payload = self._monitoring_payload([task], oss)
+            payload_item = payload[0] if payload else {"taskId": task["task_id"]}
+            if not payload_item.get("objNoExecTimes"):
+                discovery_tasks.add(str(task["task_id"]))
             try:
-                response = self._get_session("monitoring").post(
-                    url, json=payload, timeout=30, headers={"x-non-renewal-session": "true"}, allow_redirects=False)
-                if not self._check_session_valid(response, "monitoring"):
-                    raise SessionExpiredError("Sessão Monitoring expirada")
+                response, renewed = self._query_monitoring_task(url, payload, renewed)
                 response.raise_for_status()
-                response_payload = response.json()
-                self._dump_raw(response_payload, "monitoring")
-                parsed = self._parse_monitoring_response(
-                    response_payload, {str(t["task_id"]): t["technology"] for t in tasks}
-                )
-                # Uma resposta vazia só confirma o cursor geral depois que a
-                # cobertura da task já foi estabelecida. Durante descoberta,
-                # mantemos a consulta em zero até vermos e resolvermos objetos.
-                if parsed["received"] == 0:
-                    for task_id in discovery_tasks:
-                        parsed["cursors"].pop(f"{task_id}:", None)
-                # Depois do descarte de descoberta: o número de cursores logado é o
-                # que será realmente confirmado no banco.
-                self._log_monitoring_cycle(response, payload, discovery_tasks, parsed,
-                                           response_payload)
-                for task in tasks:
-                    self._discovered_pm_tasks.add(str(task["task_id"]))
-                mapped_cells = self._mapped_cell_count(expected_cell_ids)
-                coverage = {
-                    "cells_mapped": mapped_cells, "cells_expected": len(expected_cell_ids),
-                    "mapped_objects": parsed["received"] - parsed["unmapped"],
-                    "unmapped_objects": parsed["unmapped"], "unmapped_cells": parsed["unmapped_cells"],
-                    "event_cells": sorted(expected_cell_ids)[:5],
-                }
-                self._log_unmapped(parsed)
-                partial = bool(parsed["unmapped"] or parsed["invalid"]
-                               or mapped_cells < len(expected_cell_ids))
-                kwargs = dict(cursors=parsed["cursors"], received=parsed["received"],
-                              calculated=len(parsed["rows"]), invalid=parsed["invalid"],
-                              diagnostics=parsed["diagnostics"], coverage=coverage,
-                              latest_data_at=parsed["latest_data_at"])
-                idle_cause = (self._describe_idle_tasks(parsed["idle_tasks"])
-                              if not parsed["received"] else None)
-                if idle_cause:
-                    logger.warning("[monitoring] %s", idle_cause)
-                if partial:
-                    return CollectionResult.partial(
-                        parsed["rows"],
-                        cause=idle_cause or "Cobertura ou fórmulas de Monitoring parciais.",
-                        **kwargs)
-                if parsed["rows"]:
-                    return CollectionResult.data(parsed["rows"], **kwargs)
-                return CollectionResult.empty(
-                    idle_cause or "Monitoring respondeu sem medições novas.", **kwargs)
-            except SessionExpiredError:
-                if renewed or attempt:
-                    logger.error("Sessão de Monitoring continuou inválida após a renovação (KPIs v2).")
-                    return CollectionResult.auth_required("A sessão de Monitoring continuou inválida após a renovação.")
-                if not self._renew_session("monitoring"):
-                    logger.error("Não foi possível renovar a sessão de Monitoring (KPIs v2).")
-                    return CollectionResult.auth_required("Não foi possível renovar a sessão de Monitoring.")
-                renewed = True
-            except (requests.exceptions.ConnectTimeout, requests.exceptions.ConnectionError, requests.exceptions.Timeout) as error:
-                logger.error(f"Erro de conexão ao consultar KPIs: {error}")
-                return CollectionResult.error(f"Falha de conexão ao consultar KPIs: {error}", code="network")
+                body = response.json()
+                self._dump_raw(body, "monitoring")
+                task_parsed = self._parse_monitoring_response(
+                    body, {str(task["task_id"]): task["technology"]})
+                self._log_monitoring_task(
+                    task["task_id"], response.status_code, payload_item,
+                    discovery_tasks, task_parsed, body)
+                combined_data.extend(body.get("data") or [])
+                any_success = True
+                self._discovered_pm_tasks.add(str(task["task_id"]))
+                if str(task["task_id"]) in discovery_tasks and task_parsed["received"] == 0:
+                    empty_discovery.add(str(task["task_id"]))
+            except SessionExpiredError as error:
+                empty = self._empty_monitoring_parse()
+                self._log_monitoring_task(
+                    task["task_id"], None, payload_item, discovery_tasks, empty, None)
+                if not any_success:
+                    return CollectionResult.auth_required(str(error))
+                task_failures.append((task, str(error), "auth_required"))
+                break
+            except (requests.exceptions.ConnectTimeout, requests.exceptions.ConnectionError,
+                    requests.exceptions.Timeout) as error:
+                logger.error("Erro de conexão ao consultar KPIs (task %s): %s", task["task_id"], error)
+                empty = self._empty_monitoring_parse()
+                self._log_monitoring_task(
+                    task["task_id"], None, payload_item, discovery_tasks, empty, None)
+                task_failures.append((
+                    task, f"Falha de conexão ao consultar KPIs: {error}", "network"))
             except requests.exceptions.HTTPError as error:
-                logger.error(f"HTTP ao consultar KPIs: {error}")
-                return CollectionResult.error(f"Falha HTTP ao consultar KPIs: {error}", code="http")
+                logger.error("HTTP ao consultar KPIs (task %s): %s", task["task_id"], error)
+                status = getattr(getattr(error, "response", None), "status_code", None)
+                empty = self._empty_monitoring_parse()
+                self._log_monitoring_task(
+                    task["task_id"], status, payload_item, discovery_tasks, empty, None)
+                task_failures.append((
+                    task, f"Falha HTTP ao consultar KPIs: {error}", "http"))
             except (ValueError, TypeError, KeyError) as error:
-                logger.error(f"Resposta inválida do Monitoring: {error}")
-                return CollectionResult.error(f"Resposta inválida do Monitoring: {error}", stage="parsing", code="contract")
-        return CollectionResult.error("Monitoring terminou sem resposta.", code="unknown")
+                logger.error("Resposta inválida do Monitoring (task %s): %s", task["task_id"], error)
+                empty = self._empty_monitoring_parse()
+                self._log_monitoring_task(
+                    task["task_id"], 200, payload_item, discovery_tasks, empty, None)
+                task_failures.append((
+                    task, f"Resposta inválida do Monitoring: {error}", "contract"))
+
+        elapsed = time.monotonic() - started
+        from core.scheduler import INTERVAL_KPI_SECONDS
+        if elapsed > INTERVAL_KPI_SECONDS:
+            logger.warning(
+                "[monitoring] ciclo durou %.1fs, acima do intervalo de %ss",
+                elapsed, INTERVAL_KPI_SECONDS,
+            )
+
+        if not any_success:
+            cause = "; ".join(message for _, message, _ in task_failures) or (
+                "Monitoring terminou sem resposta.")
+            code = task_failures[0][2] if task_failures else "unknown"
+            stage = "parsing" if code == "contract" else "request"
+            diagnostics = [
+                CollectionDiagnostic(stage=stage if fail_code != "auth_required" else "authentication",
+                                     message=message, code=fail_code,
+                                     details={"task_id": fail_task["task_id"]})
+                for fail_task, message, fail_code in task_failures
+            ]
+            return CollectionResult.error(cause, stage=stage, code=code, diagnostics=diagnostics)
+
+        parsed = self._parse_monitoring_response({"data": combined_data}, tech_by_task)
+        for task_id in empty_discovery:
+            parsed["cursors"].pop(f"{task_id}:", None)
+        if task_failures:
+            parsed["diagnostics"] = list(parsed["diagnostics"]) + [
+                CollectionDiagnostic(
+                    stage="authentication" if code == "auth_required" else (
+                        "parsing" if code == "contract" else "request"),
+                    message=message, code=code, details={"task_id": fail_task["task_id"]},
+                )
+                for fail_task, message, code in task_failures
+            ]
+        self._log_monitoring_cycle_total(parsed, len(tasks), len(task_failures), elapsed)
+        mapped_cells = self._mapped_cell_count(expected_cell_ids)
+        coverage = {
+            "cells_mapped": mapped_cells, "cells_expected": len(expected_cell_ids),
+            "mapped_objects": parsed["received"] - parsed["unmapped"],
+            "unmapped_objects": parsed["unmapped"], "unmapped_cells": parsed["unmapped_cells"],
+            "event_cells": sorted(expected_cell_ids)[:5],
+        }
+        self._log_unmapped(parsed)
+        partial = bool(parsed["unmapped"] or parsed["invalid"]
+                       or mapped_cells < len(expected_cell_ids)
+                       or task_failures)
+        kwargs = dict(cursors=parsed["cursors"], received=parsed["received"],
+                      calculated=len(parsed["rows"]), invalid=parsed["invalid"],
+                      diagnostics=parsed["diagnostics"], coverage=coverage,
+                      latest_data_at=parsed["latest_data_at"])
+        idle_cause = (self._describe_idle_tasks(parsed["idle_tasks"])
+                      if not parsed["received"] else None)
+        if idle_cause:
+            logger.warning("[monitoring] %s", idle_cause)
+        failure_cause = (
+            "Falha em " + ", ".join(f"task {fail_task['task_id']}" for fail_task, _, _ in task_failures) + "."
+            if task_failures else None
+        )
+        if partial:
+            return CollectionResult.partial(
+                parsed["rows"],
+                cause=failure_cause or idle_cause or "Cobertura ou fórmulas de Monitoring parciais.",
+                **kwargs)
+        if parsed["rows"]:
+            return CollectionResult.data(parsed["rows"], **kwargs)
+        return CollectionResult.empty(
+            idle_cause or "Monitoring respondeu sem medições novas.", **kwargs)
 
     def collect_kpis(self) -> CollectionResult:
         return self._collect_kpis_v2()
@@ -1634,9 +1717,22 @@ class HttpCollector(BaseCollector):
                     return value
         return None
 
-    def _parse_monitoring_response(self, response_json: dict, task_technologies: dict[str, str]) -> dict:
-        from core.collection_result import CollectionDiagnostic
+    @staticmethod
+    def _dedupe_diagnostics(diagnostics: list) -> list:
+        """Uma entrada por (metric, code). 21 tasks × 300 objetos não podem
+        despejar dezenas de milhares de 'contador ausente' por ciclo."""
+        seen = set()
+        unique = []
+        for item in diagnostics:
+            metric = (item.details or {}).get("metric")
+            key = (metric, item.code)
+            if key in seen:
+                continue
+            seen.add(key)
+            unique.append(item)
+        return unique
 
+    def _parse_monitoring_response(self, response_json: dict, task_technologies: dict[str, str]) -> dict:
         rows, source, diagnostics = [], [], []
         idle_tasks = []
         task_cursor_candidates, object_cursor_candidates = {}, {}
@@ -1744,7 +1840,8 @@ class HttpCollector(BaseCollector):
                 for task_id, cursor in task_cursor_candidates.items()
             })
         return {"rows": rows, "received": received, "invalid": invalid, "unmapped": unmapped,
-                "unmapped_cells": sorted(set(unmapped_cells)), "diagnostics": diagnostics,
+                "unmapped_cells": sorted(set(unmapped_cells)),
+                "diagnostics": self._dedupe_diagnostics(diagnostics),
                 "cursors": cursors, "latest_data_at": latest_data_at, "idle_tasks": idle_tasks}
 
     def _parse_kpi_response(self, response_json: dict) -> List[dict]:

@@ -149,7 +149,7 @@ CATALOG: tuple[KpiDefinition, ...] = (
     KpiDefinition("drop_rate", "5G_NRCELL", "Drop considerando RRC Inactive", "%", ("N.QosFlow.AbnormRel", "N.QosFlow.NormRel", "N.QosFlow.RrcInactiveToIdle.Rel", "N.QosFlow.RrcConnToInactive.Suspend"), "recalculate", _n_drop),
     KpiDefinition("utilization_dl", "5G_NRDUCELL", "DL PRB Utility", "%", ("N.PRB.DL.Used.Avg", "N.PRB.DL.Avail.Avg"), "recalculate", _ratio_formula("N.PRB.DL.Used.Avg", "N.PRB.DL.Avail.Avg")),
     KpiDefinition("utilization_ul", "5G_NRDUCELL", "UL PRB Utility", "%", ("N.PRB.UL.Used.Avg", "N.PRB.UL.Avail.Avg"), "recalculate", _ratio_formula("N.PRB.UL.Used.Avg", "N.PRB.UL.Avail.Avg")),
-    KpiDefinition("throughput_dl", "5G_NRDUCELL", "Throughput DL", "unidade OSS pendente", ("N.ThpVol.DL", "N.ThpVol.DL.LastSlot", "N.ThpTime.DL.RmvLastSlot"), "sum", _n_thp_dl, False, False),
+    KpiDefinition("throughput_dl", "5G_NRDUCELL", "Throughput DL", "Mbit/s", ("N.ThpVol.DL", "N.ThpVol.DL.LastSlot", "N.ThpTime.DL.RmvLastSlot"), "sum", _n_thp_dl),
     KpiDefinition("throughput_ul", "5G_NRDUCELL", "Throughput UL", "unidade OSS pendente", ("N.ThpVol.UL", "N.ThpVol.UE.UL.SmallPkt", "N.ThpTime.UE.UL.RmvSmallPkt"), "sum", _n_thp_ul, False),
     KpiDefinition("traffic_volume_dl_sa", "5G_NRDUCELL", "Downlink Traffic Volume 5G SA", "kbit", ("N.ThpVol.DL", "N.NSA.ThpVol.DL"), "sum", _n_volume_dl_sa),
     KpiDefinition("traffic_volume_dl_nsa", "5G_NRDUCELL", "Downlink Traffic Volume 5G NSA", "kbit", ("N.NSA.ThpVol.DL",), "sum", _single("N.NSA.ThpVol.DL")),

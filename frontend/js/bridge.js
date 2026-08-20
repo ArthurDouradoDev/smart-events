@@ -108,6 +108,7 @@ function _mockKpiCatalog() {
     return { ok: true, technologies: ["5G_NRDUCELL"], metrics: [
       {id:"utilization_dl", technology:"5G_NRDUCELL", name:"DL PRB Utility", unit:"%", site_aggregation:"recalculate"},
       {id:"utilization_ul", technology:"5G_NRDUCELL", name:"UL PRB Utility", unit:"%", site_aggregation:"recalculate"},
+      {id:"throughput_dl", technology:"5G_NRDUCELL", name:"Throughput DL", unit:"Mbit/s", site_aggregation:"sum"},
       {id:"throughput_ul", technology:"5G_NRDUCELL", name:"Throughput UL", unit:"unidade OSS pendente", site_aggregation:"sum"},
       {id:"interference_ul", technology:"5G_NRDUCELL", name:"UL Interference Médio", unit:"dBm", site_aggregation:"mean"},
     ]};

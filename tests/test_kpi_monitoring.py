@@ -6,6 +6,7 @@ from functools import lru_cache
 from pathlib import Path
 
 import pytest
+import requests
 
 from core.collector import HttpCollector
 from core import database as db
@@ -545,3 +546,220 @@ def test_cobertura_de_uma_task_5g_nao_cobra_celulas_4g(tmp_db, monkeypatch):
     tasks = collector._configured_pm_tasks({})
 
     assert collector._expected_pm_cell_ids(tasks) == {"5G-CELL", "CELL-SEM-TECH"}
+
+
+def _event_multi_4g():
+    return {
+        "id": "multi-pm-4g", "oss": {"region": "SP"},
+        "integration": {"pm_tasks": [
+            {"task_id": 747, "tech": "4G"},
+            {"task_id": 752, "tech": "4G"},
+            {"task_id": 749, "tech": "NRCELL"},
+        ]},
+        "sites": [{"id": "SITE", "name": "SITE", "cells": [
+            {"id": "4G-CELL-A", "tech": "4G"},
+            {"id": "4G-CELL-B", "tech": "4G"},
+            {"id": "5G-CELL", "tech": "5G"},
+        ]}],
+    }
+
+
+def _task_body(task_id, cell_name, counters=None, obj_no=1, exec_time=1_700_000_000_000):
+    return {"data": [{
+        "taskId": task_id, "execTime": exec_time,
+        "results": [{"execTime": exec_time, "period": 5,
+                     "objRes": [_item(obj_no, cell_name, counters or _COUNTERS_4G)]}],
+        "objNoExecTimes": [{"objNo": obj_no, "preExecTime": exec_time}],
+    }]}
+
+
+def _http_response(body, status=200):
+    class Response:
+        status_code = status
+        url = "https://oss.example/monitoring"
+        text = ""
+        headers = {}
+
+        def raise_for_status(self):
+            if self.status_code >= 400:
+                error = requests.exceptions.HTTPError(f"{self.status_code} Server Error")
+                error.response = self
+                raise error
+
+        def json(self):
+            return body
+
+    return Response()
+
+
+def _sessao_por_task(monkeypatch, collector, bodies_by_task):
+    posts = []
+
+    class Session:
+        def post(self, _url, json, **_kwargs):
+            posts.append(json)
+            task_id = json[0]["taskId"]
+            spec = bodies_by_task[task_id]
+            if isinstance(spec, int):
+                return _http_response({}, status=spec)
+            return _http_response(spec)
+
+    monkeypatch.setattr(collector, "_get_session", lambda *_: Session())
+    monkeypatch.setattr(collector, "_check_session_valid", lambda *_: True)
+    return posts
+
+
+def test_duas_tasks_da_mesma_tecnologia_sao_aceitas(tmp_db, monkeypatch):
+    monkeypatch.setattr(db, "get_event_vips", lambda *_: [])
+    collector = HttpCollector(_event_multi_4g(), "https://oss.example")
+
+    assert collector._configured_pm_tasks({}) == [
+        {"task_id": 747, "technology": "4G"},
+        {"task_id": 752, "technology": "4G"},
+        {"task_id": 749, "technology": "5G_NRCELL"},
+    ]
+
+
+def test_task_id_repetido_e_rejeitado(tmp_db, monkeypatch):
+    monkeypatch.setattr(db, "get_event_vips", lambda *_: [])
+    event = _event_multi_4g()
+    event["integration"]["pm_tasks"] = [
+        {"task_id": 747, "tech": "4G"},
+        {"task_id": 747, "tech": "NRCELL"},
+    ]
+    collector = HttpCollector(event, "https://oss.example")
+
+    result = collector.collect_kpis()
+
+    assert result.state == "error"
+    assert "747" in (result.cause or "")
+
+
+def test_cada_task_vira_uma_requisicao(tmp_db, monkeypatch, caplog):
+    monkeypatch.setattr(db, "get_event_vips", lambda *_: [])
+    monkeypatch.setattr(db, "get_collection_checkpoints", lambda *_: {})
+    collector = HttpCollector(_event_multi_4g(), "https://oss.example")
+    posts = _sessao_por_task(monkeypatch, collector, {
+        747: _task_body(747, "4G-CELL-A", obj_no=11),
+        752: _task_body(752, "4G-CELL-B", obj_no=22),
+        749: _task_body(749, "5G-CELL", {"N.User.RRCConn.Avg": 4}, obj_no=33),
+    })
+
+    with caplog.at_level(logging.INFO, logger="core.collector"):
+        collector.collect_kpis()
+
+    assert len(posts) == 3
+    assert all(len(payload) == 1 for payload in posts)
+    assert [payload[0]["taskId"] for payload in posts] == [747, 752, 749]
+    messages = [record.getMessage() for record in caplog.records]
+    assert any("task=747" in message and "HTTP=200" in message for message in messages)
+    assert any("task=752" in message and "HTTP=200" in message for message in messages)
+    assert any("task=749" in message and "HTTP=200" in message for message in messages)
+    assert any("ciclo tasks=3" in message for message in messages)
+
+
+def test_falha_de_uma_task_nao_derruba_as_outras(tmp_db, monkeypatch):
+    monkeypatch.setattr(db, "get_event_vips", lambda *_: [])
+    monkeypatch.setattr(db, "get_collection_checkpoints", lambda *_: {})
+    collector = HttpCollector(_event_multi_4g(), "https://oss.example")
+    _sessao_por_task(monkeypatch, collector, {
+        747: _task_body(747, "4G-CELL-A", obj_no=11),
+        752: 500,
+        749: _task_body(749, "5G-CELL", {"N.User.RRCConn.Avg": 4}, obj_no=33),
+    })
+
+    result = collector.collect_kpis()
+
+    assert result.state == "partial"
+    cell_ids = {row["cell_id"] for row in result.measurements if row["scope"] == "CELL"}
+    assert "4G-CELL-A" in cell_ids
+    assert "5G-CELL" in cell_ids
+    assert "4G-CELL-B" not in cell_ids
+    assert any(
+        item.code == "http" and item.details.get("task_id") == 752
+        for item in result.diagnostics
+    )
+    assert "task 752" in (result.cause or "")
+
+
+def test_sessao_expirada_renova_uma_vez_por_ciclo(tmp_db, monkeypatch):
+    monkeypatch.setattr(db, "get_event_vips", lambda *_: [])
+    monkeypatch.setattr(db, "get_collection_checkpoints", lambda *_: {})
+    collector = HttpCollector(_event_multi_4g(), "https://oss.example")
+    session_ok = {"value": False}
+    renews = []
+    posts = []
+    bodies = {
+        747: _task_body(747, "4G-CELL-A", obj_no=11),
+        752: _task_body(752, "4G-CELL-B", obj_no=22),
+        749: _task_body(749, "5G-CELL", {"N.User.RRCConn.Avg": 4}, obj_no=33),
+    }
+
+    class Session:
+        def post(self, _url, json, **_kwargs):
+            posts.append(json)
+            return _http_response(bodies[json[0]["taskId"]])
+
+    monkeypatch.setattr(collector, "_get_session", lambda *_: Session())
+    monkeypatch.setattr(
+        collector, "_check_session_valid", lambda *_: session_ok["value"])
+
+    def _renew(_module):
+        renews.append(_module)
+        session_ok["value"] = True
+        return True
+
+    monkeypatch.setattr(collector, "_renew_session", _renew)
+
+    result = collector.collect_kpis()
+
+    assert len(renews) == 1
+    assert [payload[0]["taskId"] for payload in posts] == [747, 747, 752, 749]
+    assert result.state in {"data", "partial"}
+    cell_ids = {row["cell_id"] for row in result.measurements if row["scope"] == "CELL"}
+    assert "4G-CELL-A" in cell_ids
+    assert "4G-CELL-B" in cell_ids
+
+
+def test_diagnosticos_sao_deduplicados_por_metrica_e_codigo(tmp_db, monkeypatch):
+    monkeypatch.setattr(db, "get_event_vips", lambda *_: [])
+    collector = HttpCollector(_event_com_celula("18NLCTAL01GI"), "https://oss.example")
+    objects = [_item(index, "18NLCTAL01GI", _COUNTERS_4G) for index in range(100)]
+    parsed = collector._parse_monitoring_response(
+        {"data": [{"taskId": 100, "results": [{"period": 5, "objRes": objects}]}]},
+        {"100": "4G"},
+    )
+
+    formula = [item for item in parsed["diagnostics"] if item.code == "invalid_formula"]
+    by_metric = [item.details["metric"] for item in formula]
+    assert by_metric
+    assert len(by_metric) == len(set(by_metric))
+    assert by_metric.count("availability") == 1
+
+
+def test_cursores_de_tasks_distintas_nao_se_misturam(tmp_db, monkeypatch):
+    monkeypatch.setattr(db, "get_event_vips", lambda *_: [])
+    monkeypatch.setattr(db, "get_collection_checkpoints", lambda *_: {})
+    event = {
+        "id": "cursors-same-objno", "oss": {"region": "SP"},
+        "integration": {"pm_tasks": [
+            {"task_id": 747, "tech": "4G"},
+            {"task_id": 752, "tech": "4G"},
+        ]},
+        "sites": [{"id": "SITE", "name": "SITE", "cells": [
+            {"id": "4G-CELL-A", "tech": "4G"},
+            {"id": "4G-CELL-B", "tech": "4G"},
+        ]}],
+    }
+    collector = HttpCollector(event, "https://oss.example")
+    _sessao_por_task(monkeypatch, collector, {
+        747: _task_body(747, "4G-CELL-A", obj_no=70, exec_time=111),
+        752: _task_body(752, "4G-CELL-B", obj_no=70, exec_time=222),
+    })
+
+    result = collector.collect_kpis()
+
+    assert result.cursors["747:70"]["cursor"] == 111
+    assert result.cursors["752:70"]["cursor"] == 222
+    assert result.cursors["747:70"]["task_id"] == 747
+    assert result.cursors["752:70"]["task_id"] == 752

@@ -282,10 +282,13 @@ class TestApiKpiCatalog:
         assert result["technologies"] == ["5G_NRDUCELL"]
         assert {item["technology"] for item in result["metrics"]} == {"5G_NRDUCELL"}
         assert {item["id"] for item in result["metrics"]} == {
-            "utilization_dl", "utilization_ul", "throughput_ul",
+            "utilization_dl", "utilization_ul", "throughput_dl", "throughput_ul",
             "traffic_volume_dl_sa", "traffic_volume_dl_nsa",
             "traffic_volume_ul_sa", "traffic_volume_ul_nsa", "interference_ul",
         }
+        throughput_dl = next(item for item in result["metrics"] if item["id"] == "throughput_dl")
+        assert throughput_dl["production_ready"] is True
+        assert throughput_dl["unit"] == "Mbit/s"
 
     def test_evento_sem_task_nao_anuncia_kpi_indisponivel(
             self, api, sample_event):

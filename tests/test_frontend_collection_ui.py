@@ -112,7 +112,8 @@ def test_kpi_dropdown_nrducell_expoe_somente_kpis_disponiveis_na_task_748():
             assert groups == ["KPIs 5G"]
             assert all("· 5G ·" in label for label in labels)
             assert set(values) == {
-                "utilization_dl", "utilization_ul", "throughput_ul", "interference_ul",
+                "utilization_dl", "utilization_ul", "throughput_dl", "throughput_ul",
+                "interference_ul",
             }
             assert "accessibility" not in values
             assert "availability" not in values
