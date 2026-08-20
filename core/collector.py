@@ -461,6 +461,34 @@ class BaseCollector(ABC):
             f"exemplos de células cadastradas no evento: {esperados}"
         )
 
+    @staticmethod
+    def _describe_idle_tasks(idle_tasks: list[dict]) -> Optional[str]:
+        """Descreve, para o operador, a task PM que o OSS diz não executar.
+
+        Um ciclo com ``recebidos=0`` tem duas causas muito diferentes — o evento
+        ainda não descobriu os objetos, ou a task parou de rodar no OSS — e a
+        resposta distingue as duas pelo ``execTime`` da própria task. Sem esta
+        frase as duas aparecem como o mesmo "Parcial" no painel.
+        """
+        parts = []
+        now_ms = time.time() * 1000
+        for task in idle_tasks:
+            last_exec = task.get("last_exec_ms")
+            if not last_exec:
+                continue
+            age_min = max(0, int((now_ms - float(last_exec)) / 60000))
+            if age_min >= 1440:
+                age = f"há {age_min // 1440} d"
+            elif age_min >= 60:
+                age = f"há {age_min // 60} h"
+            else:
+                age = f"há {age_min} min"
+            moment = datetime.fromtimestamp(float(last_exec) / 1000.0).strftime("%d/%m %H:%M")
+            parts.append(f"task {task['task_id']} desde {moment} ({age})")
+        if not parts:
+            return None
+        return "O OSS não registra execução nova do Monitoring: " + "; ".join(parts) + "."
+
     def _log_monitoring_cycle(self, response, payload: list[dict], discovery_tasks: set,
                               parsed: dict, response_payload) -> None:
         """Registra o resultado de cada ciclo de PM, como já era feito em VIP e alarmes.
@@ -547,11 +575,19 @@ class BaseCollector(ABC):
                               calculated=len(parsed["rows"]), invalid=parsed["invalid"],
                               diagnostics=parsed["diagnostics"], coverage=coverage,
                               latest_data_at=parsed["latest_data_at"])
+                idle_cause = (self._describe_idle_tasks(parsed["idle_tasks"])
+                              if not parsed["received"] else None)
+                if idle_cause:
+                    logger.warning("[monitoring] %s", idle_cause)
                 if partial:
-                    return CollectionResult.partial(parsed["rows"], cause="Cobertura ou fórmulas de Monitoring parciais.", **kwargs)
+                    return CollectionResult.partial(
+                        parsed["rows"],
+                        cause=idle_cause or "Cobertura ou fórmulas de Monitoring parciais.",
+                        **kwargs)
                 if parsed["rows"]:
                     return CollectionResult.data(parsed["rows"], **kwargs)
-                return CollectionResult.empty("Monitoring respondeu sem medições novas.", **kwargs)
+                return CollectionResult.empty(
+                    idle_cause or "Monitoring respondeu sem medições novas.", **kwargs)
             except SessionExpiredError:
                 if renewed or attempt:
                     logger.error("Sessão de Monitoring continuou inválida após a renovação (KPIs v2).")
@@ -1602,6 +1638,7 @@ class HttpCollector(BaseCollector):
         from core.collection_result import CollectionDiagnostic
 
         rows, source, diagnostics = [], [], []
+        idle_tasks = []
         task_cursor_candidates, object_cursor_candidates = {}, {}
         persisted_object_keys = set()
         site_counter_groups = {}
@@ -1617,6 +1654,12 @@ class HttpCollector(BaseCollector):
             task_cursor = task_data.get("execTime")
             if task_cursor is not None:
                 task_cursor_candidates[task_id] = task_cursor
+            # Task que responde 200 sem nenhum `results` é indistinguível de rede
+            # muda: quem sabe a diferença é o `execTime`, que o OSS devolve com a
+            # última execução da própria task.
+            if not (task_data.get("results") or []):
+                idle_tasks.append({"task_id": task_id, "state": task_data.get("state"),
+                                   "last_exec_ms": task_cursor})
             for checkpoint in task_data.get("objNoExecTimes") or []:
                 if checkpoint.get("objNo") is not None and checkpoint.get("preExecTime") is not None:
                     object_cursor_candidates[(task_id, str(checkpoint["objNo"]))] = checkpoint["preExecTime"]
@@ -1702,7 +1745,7 @@ class HttpCollector(BaseCollector):
             })
         return {"rows": rows, "received": received, "invalid": invalid, "unmapped": unmapped,
                 "unmapped_cells": sorted(set(unmapped_cells)), "diagnostics": diagnostics,
-                "cursors": cursors, "latest_data_at": latest_data_at}
+                "cursors": cursors, "latest_data_at": latest_data_at, "idle_tasks": idle_tasks}
 
     def _parse_kpi_response(self, response_json: dict) -> List[dict]:
         rows = []

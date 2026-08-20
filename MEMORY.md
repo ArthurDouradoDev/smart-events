@@ -440,8 +440,43 @@ Plano: `docs/plans/2026-08-19-001-feat-site-merge-clusters-kpi-overview-plan.md`
 - **O alarme do mock cai no site fundido** (`serving_site: "SPSMG7"` vindo de célula 5G), que é o
   que exercita a dependência da Fase 1 sem VPN.
 
-Gate: `pytest tests/ -q --basetemp=.pytest-work/tmp` → **345 passed, 10 skipped, 1 failed**.
-A falha é `test_vip_modal_time_windows_switch_without_leaking_state` e **não vem desta fase**:
-reproduz em `HEAD` limpo. O mock do VIP gera só as últimas 2 h, e a janela "Hoje" corta em 00:00
-local — rodando a suíte logo depois da meia-noite, a janela fica vazia e o gráfico não aparece.
+**Corrigido junto (fragilidade pré-existente, não desta fase):** o mock de série do VIP
+(`_mockVipSeriesRows`) gerava 7 pontos com passo fixo de 20 min. A janela "Hoje" corta em 00:00
+local, então rodar a suíte antes das 2h20 deixava a fixture inteira no dia anterior e
+`test_vip_modal_time_windows_switch_without_leaking_state` falhava. O passo agora é
+`min(20 min, elapsed_desde_meia_noite / 7)` — a fixture cabe no dia corrente em qualquer hora e
+o comportamento durante o dia fica idêntico ao de antes.
+
+Gate: `pytest tests/ -q --basetemp=.pytest-work/tmp` → **346 passed, 10 skipped, 0 failed**
+(rodado às 00:24, exatamente a faixa horária que reprovava).
+
+---
+
+## 2026-08-20 — Coleta parada na OSS OUTRAS: a task é que não executa
+
+Investigação a partir do painel "Parcial · recebidos 0" no evento `teste-curitiba`
+(OSS OUTRAS, host 10.220.30.9).
+
+- **Monitoring (task PM 2225):** o OSS responde `HTTP 200`, `success: true`,
+  `state: -1`, `results: []` e `execTime = 2026-08-16 12:54`. Os 116 objetos voltam com
+  `preExecTime` congelado no mesmo instante. Última coleta com dado: **16/08 12:56**
+  (`recebidos=232`). Desde 18/08, todo ciclo é `recebidos=0`.
+- **`objNoExecTimes` da resposta é estado do OSS, não eco da requisição.** Prova: em
+  20/08 09:19 o app enviou 116 objetos (`tasks=2225/116obj` no log) e a resposta veio com
+  `objNoExecTimes: []`; em SP, com 28 objetos enviados, também veio `[]`.
+- **Trace/VIP (task FARS 14837):** `recordCount` congelado em **22635** desde 14/08 19:57,
+  com `backlog=0` — o coletor já consumiu tudo o que a task tem. O OSS não gera registro novo.
+- **O código não é a causa:** SP (10.220.50.9), com exatamente o mesmo coletor, coletou
+  normalmente em 20/08 09:14 (`recebidos=76`). O padrão "dois ciclos vazios e depois dado"
+  aparece nos dois OSS quando a task está rodando — é a descoberta, não uma falha.
+- **Ação fora do app:** reativar a task PM 2225 e a task de trace 14837 no iManager de
+  OUTRAS. Nenhuma mudança de código produz dado que o OSS não está gerando.
+- **Defeito real corrigido junto:** o ciclo virava "Parcial" genérico e escondia a frase do
+  próprio OSS. `_describe_idle_tasks` passa a ler `execTime`/`state` das tasks que voltaram
+  sem `results` e produz a causa `"O OSS não registra execução nova do Monitoring: task 2225
+  desde 16/08 12:54 (há 3 d)"`, em WARNING no log e no painel (`_syncHint` usa `s.cause`).
+  Só dispara com `recebidos == 0` **e** `execTime` presente — o primeiro ciclo de descoberta
+  não tem `execTime` e não pode ser acusado de task parada.
+
+Gate: `pytest tests/ -q --basetemp=.pytest-work/tmp` → **349 passed, 10 skipped, 0 failed**.
 

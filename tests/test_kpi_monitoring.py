@@ -1,5 +1,7 @@
 import json
+import logging
 import re
+import time
 from functools import lru_cache
 from pathlib import Path
 
@@ -335,6 +337,76 @@ def test_resposta_vazia_na_descoberta_nao_confirma_cursor(tmp_db, monkeypatch):
 
     assert session.payload[0]["preExecTime"] == 0
     assert result.cursors == {}
+
+
+def _sessao_que_responde(monkeypatch, collector, corpo):
+    class Response:
+        status_code = 200
+        url = "https://oss.example/monitoring"
+        text = ""
+
+        @staticmethod
+        def raise_for_status():
+            return None
+
+        @staticmethod
+        def json():
+            return corpo
+
+    class Session:
+        def post(self, _url, json, **_kwargs):
+            return Response()
+
+    monkeypatch.setattr(collector, "_get_session", lambda *_: Session())
+    monkeypatch.setattr(collector, "_check_session_valid", lambda *_: True)
+
+
+def test_task_parada_no_oss_vira_causa_com_a_ultima_execucao(tmp_db, monkeypatch, caplog):
+    """Reproduz o campo de 20/08: a task 2225 de OUTRAS respondia 200 com
+    ``state=-1``, ``results`` vazio e ``execTime`` de quatro dias antes. O painel
+    dizia só "Parcial", sem dizer que o OSS é que não executava a task."""
+    monkeypatch.setattr(db, "get_event_vips", lambda *_: [])
+    monkeypatch.setattr(db, "get_collection_checkpoints", lambda *_: {})
+    collector = HttpCollector(_event_com_celula("18NLCTAL01GI"), "https://oss.example")
+    parado_ms = int((time.time() - 4 * 24 * 3600) * 1000)
+    _sessao_que_responde(monkeypatch, collector, {"data": [{
+        "taskId": 100, "state": -1, "execTime": parado_ms, "results": [],
+        "objNoExecTimes": [{"objNo": 91162, "preExecTime": parado_ms}],
+    }]})
+
+    with caplog.at_level(logging.WARNING, logger="core.collector"):
+        result = collector.collect_kpis()
+
+    assert "task 100" in result.cause
+    assert "há 4 d" in result.cause
+    assert "não registra execução nova" in result.cause
+    assert any("task 100" in registro.getMessage() for registro in caplog.records)
+
+
+def test_descoberta_sem_execTime_nao_acusa_task_parada(tmp_db, monkeypatch):
+    """Primeiro ciclo de um evento novo: o OSS ainda não devolve ``execTime``.
+    Sem essa evidência, a coleta não pode acusar task parada."""
+    monkeypatch.setattr(db, "get_event_vips", lambda *_: [])
+    monkeypatch.setattr(db, "get_collection_checkpoints", lambda *_: {})
+    collector = HttpCollector(_event_com_celula("18NLCTAL01GI"), "https://oss.example")
+    _sessao_que_responde(monkeypatch, collector, {"data": [{
+        "taskId": 100, "state": -1, "results": [], "objNoExecTimes": [],
+    }]})
+
+    result = collector.collect_kpis()
+
+    assert "não registra execução nova" not in (result.cause or "")
+
+
+def test_ciclo_com_medicao_nao_acusa_task_parada(tmp_db, monkeypatch):
+    monkeypatch.setattr(db, "get_event_vips", lambda *_: [])
+    monkeypatch.setattr(db, "get_collection_checkpoints", lambda *_: {})
+    collector = HttpCollector(_event_com_celula("18NLCTAL01GI"), "https://oss.example")
+    _sessao_que_responde(monkeypatch, collector, _resposta(91162, "18NLCTAL01GI"))
+
+    result = collector.collect_kpis()
+
+    assert "não registra execução nova" not in (result.cause or "")
 
 
 def test_log_unmapped_emite_warning_so_quando_ha_descarte(tmp_db, monkeypatch, caplog):

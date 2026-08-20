@@ -970,7 +970,9 @@ function _syncRow(label, valueHtml) {
 function _syncHint(s) {
   if (s.state === "auth_required") return "Sessão expirada — reconecte para retomar a coleta.";
   if (s.state === "stale") return "Sem dados novos há mais de um ciclo.";
-  if (s.state === "partial") return "Coleta parcial — parte dos dados não chegou neste ciclo.";
+  // A causa vinda do coletor nomeia a task e desde quando ela não executa;
+  // a frase genérica só entra quando o ciclo não soube dizer mais que isso.
+  if (s.state === "partial") return s.cause || "Coleta parcial — parte dos dados não chegou neste ciclo.";
   if (s.state !== "error") return "";
   const code = s.diagnostics?.[s.diagnostics.length - 1]?.code;
   switch (code) {

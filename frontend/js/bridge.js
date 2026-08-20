@@ -126,7 +126,13 @@ function _mockKpiCatalog() {
 // exercitar o tooltip contextual e os estados do popup de forma repetível.
 function _mockVipSeriesRows() {
   const now = Date.now();
-  const stepMs = 20 * 60 * 1000; // 20min entre pontos
+  // A janela "Hoje" do modal corta em 00:00 local. Com passo fixo de 20 min, a
+  // fixture inteira cairia no dia anterior quando a hora atual fosse menor que
+  // 2h — o gráfico abriria vazio só por causa do relógio.
+  const startOfDay = new Date();
+  startOfDay.setHours(0, 0, 0, 0);
+  const elapsed = now - startOfDay.getTime();
+  const stepMs = Math.min(20 * 60 * 1000, Math.max(1, Math.floor(elapsed / 7)));
   const points = [
     { offset: 6, cell: "ERB-07-A1",      site: "ERB-07", siteName: "ERB-07 Interlagos",     rsrp: -82,   rsrq: -6 },
     { offset: 5, cell: "ERB-07-A1",      site: "ERB-07", siteName: "ERB-07 Interlagos",     rsrp: -85,   rsrq: -7 },

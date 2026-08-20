@@ -279,3 +279,47 @@ sentidos: com a correção revertida, cada teste falha 3/3.
 pendente do Leaflet re-renderiza tudo e valida o listener que não existe. E ícone com dois
 elementos em lados opostos dimensiona pela maior extensão, nunca pela do primeiro que foi escrito.
 
+---
+
+## 2026-08-20 — Fixture do VIP dependia da hora do relógio
+
+**Sintoma:** `test_vip_modal_time_windows_switch_without_leaking_state` falhava 3/3 rodando à
+00:24 e passava durante o dia. Reproduzia em `HEAD` limpo — nada a ver com a mudança em curso.
+
+**Causa:** `_mockVipSeriesRows` gerava 7 pontos com passo fixo de 20 min a partir de agora, e a
+janela "Hoje" do modal corta em 00:00 local. Antes das 2h20 a fixture inteira caía no dia anterior;
+o gráfico abria vazio e o `#vip-modal-chart-wrapper` nunca ficava visível.
+
+**Correção:** o passo virou `min(20 min, max(1, elapsed_desde_meia_noite / 7))`. A série cabe no
+dia corrente em qualquer horário e, depois das 2h20, o espaçamento é o mesmo de antes.
+
+**Regra:** fixture de tempo que alimenta uma janela ancorada em meia-noite tem que ser gerada a
+partir da meia-noite, não de `Date.now()` para trás. Suíte que só passa em parte do dia é suíte
+que não reprova quando deveria.
+
+---
+
+## 2026-08-20 — "Parcial" escondia que a task do OSS estava parada há 3 dias
+
+**Sintoma:** painel do evento de Curitiba (OSS OUTRAS) em `Parcial`, com
+`recebidos 0 · mapeados 0 · descartados 0`, sessão ativa e alarmes coletando normalmente.
+A leitura natural — e errada — é que a coleta quebrou no app.
+
+**Causa:** a task PM 2225 não executa no OSS desde 16/08 12:54, e a task de trace 14837 não
+gera registro desde 14/08 19:57. O OSS diz isso na própria resposta (`state: -1`,
+`results: []`, `execTime` de 4 dias atrás), mas o coletor descartava essa informação e
+devolvia a causa genérica "Cobertura ou fórmulas de Monitoring parciais.", que o frontend
+nem sequer exibia — `_syncHint` tinha a frase "Coleta parcial" fixa no código.
+
+**Correção:** `_parse_monitoring_response` registra as tasks que voltaram sem `results` com
+o `execTime` que o OSS reporta; `_describe_idle_tasks` transforma isso em causa datada; o
+painel passa a exibir `s.cause`. Sem falso positivo na descoberta: exige `recebidos == 0`
+**e** `execTime` presente.
+
+**Regra:** quando o OSS responde 200 e o ciclo não produz medição, a resposta quase sempre
+já contém a causa — ler `state`/`execTime` antes de classificar como "parcial". Um status
+que não distingue "a task parou lá" de "o app quebrou aqui" faz o operador procurar o
+problema no lugar errado. E antes de acusar mudança de código, comparar a data em que o dado
+parou com a data do commit: aqui a coleta parou 4 dias antes do commit suspeito, e o outro
+OSS seguia coletando com o mesmo código.
+
