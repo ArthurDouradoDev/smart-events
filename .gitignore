@@ -100,3 +100,4 @@ docs/references/npsmart/NPSmart Tim_files/
 
 # --- Arquivos a ser ignorados
 untracked/
+csvs_reference/
