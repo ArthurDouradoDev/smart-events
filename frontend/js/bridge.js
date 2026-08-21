@@ -220,6 +220,18 @@ const MOCK_SITES = [
   },
 ];
 
+const MOCK_CLUSTERS = [
+  {
+    id: "sul", name: "Arquibancada Sul", color: "#F85149", site_ids: ["ERB-07", "ERB-03"],
+    polygon: [[-23.703, -46.701], [-23.691, -46.701], [-23.691, -46.688], [-23.703, -46.688]],
+  },
+  { id: "campo", name: "Campo (5G)", color: "#388BFD", site_ids: ["SPSMG7"], polygon: [] },
+];
+
+function _clusterIdsFor(siteId) {
+  return MOCK_CLUSTERS.filter(c => c.site_ids.includes(siteId)).map(c => c.id);
+}
+
 const _mock = {
   get_active_event: () => ({
     ok: true,
@@ -246,9 +258,19 @@ const _mock = {
         cells,
         metric_value: metric === "user_count" ? Math.round(100 / arr.length) : s.utilization,
         metric_is_share: ["user_count","traffic_volume_dl","traffic_volume_ul"].includes(metric),
+        cluster_ids: _clusterIdsFor(s.id),
       };
     }).filter(s => !family || (s.cells && s.cells.length) || !(s.tech_families || []).length);
   },
+  get_clusters: (_eventId) => MOCK_CLUSTERS.map(c => (
+    {
+      id: c.id, name: c.name, color: c.color, site_count: c.site_ids.length,
+      cell_count: MOCK_SITES.filter(site => c.site_ids.includes(site.id))
+        .reduce((total, site) => total + (site.cells || []).length, 0),
+      has_partial_selection: false,
+      polygon: c.polygon || [],
+    }
+  )),
   get_kpi_catalog: (_eventId=null) => _mockKpiCatalog(),
   get_site_cells: async (event_id, site_id, technology_family=null) => {
     const site = MOCK_SITES.find(s => s.id === site_id);
@@ -273,7 +295,8 @@ const _mock = {
     { id:"fernanda-costa", name:"Fernanda Costa", role:null,             notes:null,                   in_event:true,  serving_cell:"ERB-11", serving_site: "ERB-11", serving_site_name: "ERB-11 Autódromo Sul", last_timestamp: new Date().toISOString(), rsrp:-88, rsrq:-9,  status:"ok",      rsrp_min:-110, rsrp_max:-40 },
     { id:"patricia-souza", name:"Patricia Souza", role:"Conv. Especial", notes:null,                   in_event:false, serving_cell:"SR-SPCNJ9_13", serving_site: null, serving_site_name: "SR-SPCNJ9", last_timestamp: new Date(Date.now() - 15 * 60000).toISOString(), rsrp:null,rsrq:null,status:"unknown", rsrp_min:-110, rsrp_max:-40 },
   ]),
-  get_kpi_series: (event_id, site_id, metric, minutes, cell_id=null, technology_family=null) => {
+  get_kpi_series: (event_id, site_id, metric, minutes, cell_id=null, technology=null,
+                    technology_family=null, scope=null, scope_id=null) => {
     const n = Math.floor(minutes) || 60;
     const labels = [];
     const now = Date.now();
@@ -285,6 +308,24 @@ const _mock = {
     const thresholds = { warning: 80, critical: 95 };
     const makeValues = (offset, speed=0.2) => labels.map((_, i) => +(offset + Math.sin(i * speed) * 12).toFixed(1));
     const family = technology_family === "4G" || technology_family === "5G" ? technology_family : null;
+
+    if (scope === "cluster") {
+      const cluster = MOCK_CLUSTERS.find(c => c.id === scope_id);
+      const memberSites = cluster ? MOCK_SITES.filter(s => cluster.site_ids.includes(s.id)) : [];
+      const availableFamilies = [...new Set(memberSites.flatMap(s => s.tech_families || []))];
+      const families = family
+        ? availableFamilies.filter(item => item === family)
+        : availableFamilies;
+      const techs = families.length ? families : (family ? [] : ["4G"]);
+      const series = techs.map((tech, i) => ({
+        technology: tech, labels, values: makeValues(35 + i * 15, 0.16 + i * 0.03),
+      }));
+      return {
+        ok: true, labels, values: series.length === 1 ? series[0].values : [],
+        series, cells_data: {}, gaps, thresholds,
+      };
+    }
+
     const site = MOCK_SITES.find(s => s.id === site_id);
     const siteCells = (site?.cells || []).filter(c => !family || !c.family || c.family === family);
 
@@ -513,8 +554,10 @@ const API = {
   endEvent:         (id)                     => API.call("end_event", id),
   getSites:         (eventId, timestamp=null, metric=null, technologyFamily=null) => API.call("get_sites", eventId, timestamp, metric, technologyFamily),
   getSiteCells:     (eventId, siteId, technologyFamily=null) => API.call("get_site_cells", eventId, siteId, technologyFamily),
-  getKpiSeries:     (eventId, siteId, m, w, cellId=null, technologyFamily=null) => API.call("get_kpi_series", eventId, siteId, m, w, cellId, null, technologyFamily),
+  getKpiSeries:     (eventId, siteId, m, w, cellId=null, technologyFamily=null, scope=null, scopeId=null) =>
+    API.call("get_kpi_series", eventId, siteId, m, w, cellId, null, technologyFamily, scope, scopeId),
   getKpiCatalog:    (eventId=null)           => API.call("get_kpi_catalog", eventId),
+  getClusters:      (eventId)                => API.call("get_clusters", eventId),
   getVips:          (eventId, timestamp=null) => API.call("get_vips", eventId, timestamp),
   refreshVips:      (eventId)                 => API.call("refresh_vips", eventId),
   getAlarms:        (eventId, timestamp=null) => API.call("get_alarms", eventId, timestamp),

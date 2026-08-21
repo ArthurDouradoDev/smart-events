@@ -11,6 +11,7 @@ let _map = null;
 let _markers = {};         // site_id → L.Marker
 let _badgeMarkers = {};    // site_id → L.Marker no pane acima dos sites
 let _polygon = null;
+let _clusterPolygon = null;
 let _showEventOnly = false;
 let _showPolygon = true;
 let _osmLayer = null;
@@ -124,6 +125,8 @@ export function initMap() {
   State.on("change:alarms", () => renderSites(State.sites || []));
   State.on("change:selectedSite", _onSiteSelected);
   State.on("change:techFilter", () => renderSites(State.sites || []));
+  State.on("change:clusterFilter", () => { _renderClusterPolygon(); _applyVisibility(); });
+  State.on("change:clusters", _renderClusterPolygon);
 
   _map.on("zoomend", () => {
     Object.keys(_markers).forEach(id => {
@@ -584,11 +587,45 @@ function _renderPolygon() {
   else _polygon.remove();
 }
 
+function _renderClusterPolygon() {
+  if (_clusterPolygon) { _clusterPolygon.remove(); _clusterPolygon = null; }
+  const filter = State.clusterFilter;
+  if (!filter || filter === "all") return;
+  if (filter === "compare") {
+    const polygons = (State.clusters || [])
+      .filter(cluster => cluster?.polygon?.length)
+      .map(cluster => L.polygon(cluster.polygon, {
+        color:       cluster.color || "#388BFD",
+        weight:      2,
+        dashArray:   "6 4",
+        fillColor:   cluster.color || "#388BFD",
+        fillOpacity: 0.06,
+      }));
+    if (polygons.length) _clusterPolygon = L.layerGroup(polygons).addTo(_map);
+    return;
+  }
+  const cluster = (State.clusters || []).find(c => c.id === filter);
+  if (!cluster?.polygon?.length) return;
+  _clusterPolygon = L.polygon(cluster.polygon, {
+    color:       cluster.color || "#388BFD",
+    weight:      2,
+    dashArray:   "6 4",
+    fillColor:   cluster.color || "#388BFD",
+    fillOpacity: 0.08,
+  }).addTo(_map);
+}
+
 function _applyVisibility() {
+  const clusterFilter = State.clusterFilter || "all";
   Object.entries(_markers).forEach(([id, marker]) => {
     const site = State.sites.find(s => s.id === id);
     if (!site) return;
-    const hide = _showEventOnly && !site.is_event_site;
+    const hideEventOnly = _showEventOnly && !site.is_event_site;
+    const clusterIds = site.cluster_ids || [];
+    const hideCluster = clusterFilter === "compare"
+      ? clusterIds.length === 0
+      : clusterFilter !== "all" && !clusterIds.includes(clusterFilter);
+    const hide = hideEventOnly || hideCluster;
     if (hide) {
       marker.remove();
       _removeBadge(id);

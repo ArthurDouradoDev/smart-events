@@ -323,3 +323,36 @@ problema no lugar errado. E antes de acusar mudança de código, comparar a data
 parou com a data do commit: aqui a coleta parou 4 dias antes do commit suspeito, e o outro
 OSS seguia coletando com o mesmo código.
 
+---
+
+## 2026-08-20 — Mock de `get_kpi_series` sempre lia `technology_family` como `null`
+
+**Como apareceu:** não em produção — achado ao estender `bridge.js` para o escopo de
+cluster (Fase 4), que precisava adicionar `scope`/`scope_id` no fim da lista de
+argumentos posicionais.
+
+**Causa raiz:** `API.getKpiSeries` monta a chamada real como
+`API.call("get_kpi_series", eventId, siteId, m, w, cellId, null, technologyFamily)` —
+os 7 argumentos posicionais batem exatamente com a assinatura Python
+`(event_id, site_id, metric, minutes, cell_id, technology, technology_family)`. Mas o
+`_mock.get_kpi_series` só declarava 6 parâmetros
+`(event_id, site_id, metric, minutes, cell_id=null, technology_family=null)` — faltava o
+parâmetro `technology` no meio. Isso deslocava tudo uma posição: `technology_family`
+no mock recebia sempre `args[5]`, que é o `null` fixo da chamada real (o campo
+`technology`, nunca usado por essa shortcut), e o valor de `technologyFamily` que o
+usuário realmente escolheu (`args[6]`) caía num parâmetro a mais, descartado.
+
+**Por que não quebrava nada visível:** o filtro de tecnologia em modo mock nunca
+recortava por família de verdade (sempre devolvia `family = null`), mas como o mock
+mistura 4G/5G nas mesmas séries mesmo sem filtro, nenhum teste dependia de ver o
+recorte aplicado — o sintoma (filtro sem efeito) nunca foi verificado, só o formato
+geral da resposta.
+
+**Correção:** o parâmetro que faltava foi inserido na posição certa
+(`technology=null` antes de `technology_family=null`), o que também deixou `scope`/
+`scope_id` (adicionados no fim para o escopo de cluster) nas posições corretas.
+
+**Regra:** ao adicionar uma função mock que espelha uma chamada posicional real, contar
+os argumentos da chamada de verdade um a um — um parâmetro nomeado errado no meio da
+lista não dá erro de sintaxe, só desloca silenciosamente todo argumento posterior.
+

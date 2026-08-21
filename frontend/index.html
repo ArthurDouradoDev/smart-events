@@ -14,7 +14,7 @@
   <script src="lib/chart.umd.min.js"></script>
   <script src="lib/chartjs-plugin-annotation.min.js"></script>
 
-  <link rel="stylesheet" href="css/main.css">
+  <link rel="stylesheet" href="css/main.css?v=20260820-cluster-compare-r2">
 </head>
 
 <body>
@@ -204,9 +204,14 @@
 
   <!-- ── KPI ZONE ───────────────────────────────────────────────── -->
   <div id="kpi-zone">
-
     <!-- Lista de sites -->
     <div id="site-panel">
+      <div id="cluster-filter-row" class="cluster-filter-row hidden">
+        <span class="panel-label">Cluster</span>
+        <select id="cluster-selector" class="cluster-select" title="Filtrar por cluster">
+          <option value="all">Todos os sites</option>
+        </select>
+      </div>
       <div class="panel-header">
         <span class="panel-label">Sites</span>
         <span id="site-metric-header" class="panel-meta-right">Utilização</span>
@@ -244,18 +249,9 @@
           <div class="tooltip-content">
             <div class="tooltip-header">Cálculo do Site Completo</div>
             <div class="tooltip-body">
-              <div class="tooltip-row">
-                <span class="tooltip-metric">Throughput:</span>
-                <span class="tooltip-explanation">SOMA de todas as células</span>
-              </div>
-              <div class="tooltip-row">
-                <span class="tooltip-metric">Sinal / Acessibilidade:</span>
-                <span class="tooltip-explanation">MÉDIA das células</span>
-              </div>
-              <div class="tooltip-row">
-                <span class="tooltip-metric">Utilização / Usuários:</span>
-                <span class="tooltip-explanation">MÁXIMO (pior caso)</span>
-              </div>
+              <div class="tooltip-row"><span class="tooltip-metric">Throughput:</span><span class="tooltip-explanation">SOMA de todas as células</span></div>
+              <div class="tooltip-row"><span class="tooltip-metric">Sinal / Acessibilidade:</span><span class="tooltip-explanation">MÉDIA das células</span></div>
+              <div class="tooltip-row"><span class="tooltip-metric">Utilização / Usuários:</span><span class="tooltip-explanation">MÁXIMO (pior caso)</span></div>
             </div>
           </div>
         </div>
@@ -265,13 +261,8 @@
           <button class="time-tab active" data-window="60">60 min</button>
           <button class="time-tab" data-window="0">Evento</button>
         </div>
-        <button id="expand-chart-btn" class="icon-btn" title="Expandir Gráfico">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-            <polyline points="15 3 21 3 21 9"></polyline>
-            <polyline points="9 21 3 21 3 15"></polyline>
-            <line x1="21" y1="3" x2="14" y2="10"></line>
-            <line x1="3" y1="21" x2="10" y2="14"></line>
-          </svg>
+        <button id="expand-chart-btn" class="icon-btn" title="Expandir gráfico">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7"/></svg>
         </button>
       </div>
       <div id="chart-container">
@@ -558,7 +549,7 @@
   </div>
 
   <!-- Scripts (ES Modules) -->
-  <script type="module" src="js/app.js"></script>
+  <script type="module" src="js/app.js?v=20260820-cluster-compare-r2"></script>
 </body>
 
 </html>

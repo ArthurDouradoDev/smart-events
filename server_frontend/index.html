@@ -441,6 +441,138 @@
       accent-color: var(--info);
     }
 
+    .hidden { display: none !important; }
+
+    #cluster-panel {
+      background: var(--bg-base);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-lg);
+      overflow: hidden;
+    }
+
+    .cluster-section-intro {
+      color: var(--text-secondary);
+      font-size: 12px;
+      line-height: 1.5;
+      margin: -5px 0 12px;
+    }
+
+    .cluster-workspace {
+      display: grid;
+      grid-template-columns: minmax(190px, 0.72fr) minmax(320px, 1.6fr);
+      min-height: 340px;
+    }
+
+    .cluster-list-pane {
+      padding: 12px;
+      border-right: 1px solid var(--border);
+      background: rgba(22, 27, 34, 0.72);
+    }
+
+    .cluster-list-header,
+    .cluster-editor-header,
+    .cluster-selection-toolbar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+    }
+
+    .cluster-editor-pane { padding: 14px; min-width: 0; }
+    .cluster-editor-header { margin-bottom: 12px; }
+    .cluster-editor-title { font-size: 14px; font-weight: 600; }
+    .cluster-editor-subtitle { color: var(--text-secondary); font-size: 11px; }
+
+    .cluster-selection-toolbar {
+      padding: 8px;
+      background: var(--bg-surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-md);
+      flex-wrap: wrap;
+    }
+
+    .cluster-selection-actions { display: flex; gap: 6px; flex-wrap: wrap; }
+    .cluster-selection-actions .btn { padding: 6px 9px; font-size: 11px; }
+    .cluster-selection-summary { color: var(--text-secondary); font-size: 11px; }
+
+    .cluster-tree-search { margin: 10px 0 8px; }
+    .cluster-tree {
+      max-height: 300px;
+      overflow: auto;
+      border: 1px solid var(--border);
+      border-radius: var(--radius-md);
+      background: var(--bg-surface);
+    }
+    .cluster-tree-empty { color: var(--text-muted); padding: 28px 14px; text-align: center; font-size: 12px; }
+    .cluster-tree-root { padding: 7px 10px; border-bottom: 1px solid var(--border); background: var(--bg-active); }
+    .cluster-tree-site { border-bottom: 1px solid var(--border-soft); }
+    .cluster-tree-site:last-child { border-bottom: none; }
+    .cluster-tree-site summary {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 7px 10px;
+      cursor: pointer;
+      list-style: none;
+    }
+    .cluster-tree-site summary::-webkit-details-marker { display: none; }
+    .cluster-tree-site summary::before { content: '›'; color: var(--text-muted); transition: transform var(--transition); }
+    .cluster-tree-site[open] summary::before { transform: rotate(90deg); }
+    .cluster-tree-site-name { font-size: 12px; font-weight: 500; flex: 1; }
+    .cluster-tree-count { color: var(--text-muted); font-size: 10px; }
+    .cluster-tree-cells { padding: 0 10px 7px 38px; }
+    .cluster-tree-cell { display: flex; align-items: center; gap: 8px; padding: 4px 0; color: var(--text-secondary); font-size: 11px; }
+    .cluster-tree input[type="checkbox"] { width: 14px; height: 14px; accent-color: var(--info); flex-shrink: 0; }
+    .cluster-tech-pill { font-size: 9px; padding: 1px 5px; border-radius: 8px; background: var(--bg-active); color: var(--text-muted); }
+
+    @media (max-width: 760px) {
+      .cluster-workspace { grid-template-columns: 1fr; }
+      .cluster-list-pane { border-right: none; border-bottom: 1px solid var(--border); }
+    }
+
+    .cluster-row {
+      display: grid;
+      grid-template-columns: auto minmax(0, 1fr) auto;
+      grid-template-rows: auto auto;
+      align-items: center;
+      gap: 8px;
+      padding: 8px;
+      border-radius: var(--radius-md);
+      cursor: pointer;
+      font-size: 12px;
+      transition: var(--transition);
+    }
+
+    .cluster-row:hover { background: var(--bg-hover); }
+    .cluster-row.active { background: var(--info-bg); border: 1px solid rgba(56, 139, 253, 0.35); }
+
+    .cluster-color-dot {
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+      flex-shrink: 0;
+    }
+
+    .cluster-color-dot { grid-row: 1 / 3; }
+    .cluster-name { font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .cluster-count { grid-column: 2; color: var(--text-secondary); font-size: 10px; white-space: nowrap; }
+
+    .cluster-rename-btn,
+    .cluster-delete-btn {
+      background: transparent;
+      border: none;
+      color: var(--text-secondary);
+      cursor: pointer;
+      padding: 2px 4px;
+      border-radius: 4px;
+    }
+    .cluster-delete-btn { grid-column: 3; grid-row: 1 / 3; }
+
+    .cluster-rename-btn:hover { color: var(--info); }
+    .cluster-delete-btn:hover { color: var(--danger); }
+
+    .cluster-suggestion:hover { background: var(--bg-hover); }
+
     /* Events & VIPs list containers */
     .events-container {
       display: flex;
@@ -711,6 +843,55 @@
               <input type="file" id="file-input" class="file-input" accept=".xlsx,.xls,.csv,.tsv,.txt">
             </div>
             <div id="sites-info-msg" style="font-size:12px; color:var(--text-secondary); margin-top:8px; display:none;"></div>
+          </div>
+
+          <!-- Clusters do Evento -->
+          <div class="form-section" id="event-clusters-section">
+            <div class="form-section-title">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <circle cx="6" cy="6" r="3"/><circle cx="18" cy="6" r="3"/><circle cx="12" cy="18" r="3"/>
+                <path d="M8.5 8 10.8 15M15.5 8 13.2 15M9 6h6"/>
+              </svg>
+              Clusters do Evento
+            </div>
+            <p class="cluster-section-intro">
+              Crie grupos para análise e marque o site inteiro ou apenas as células desejadas.
+              A árvore é a fonte principal da seleção; o mapa pode ser usado como atalho por área.
+            </p>
+            <div id="cluster-panel">
+              <div class="cluster-workspace">
+                <aside class="cluster-list-pane">
+                  <div class="cluster-list-header">
+                    <span style="font-size:12px; font-weight:600;">Clusters</span>
+                    <button type="button" id="btn-new-cluster" class="btn btn-secondary" style="padding:5px 9px; font-size:11px;">+ Novo</button>
+                  </div>
+                  <div id="cluster-list" style="margin-top:8px;"></div>
+                </aside>
+                <section id="cluster-active-tools" class="cluster-editor-pane hidden">
+                  <div class="cluster-editor-header">
+                    <div>
+                      <input type="text" id="cluster-name-input" class="cluster-editor-title" aria-label="Nome do cluster" value="Seleção do cluster" style="padding:6px 8px;">
+                      <div class="cluster-editor-subtitle">Sites podem pertencer a mais de um cluster.</div>
+                    </div>
+                    <input type="color" id="cluster-color-input" title="Cor do cluster" style="width:34px; height:30px; padding:2px;">
+                  </div>
+                  <div class="cluster-selection-toolbar">
+                    <span id="cluster-selection-summary" class="cluster-selection-summary">0 sites · 0 células</span>
+                    <div class="cluster-selection-actions">
+                      <button type="button" id="btn-cluster-map-pick" class="btn btn-secondary" title="Clique nos marcadores para marcar ou desmarcar o site inteiro">Selecionar no mapa</button>
+                      <button type="button" id="btn-cluster-lasso" class="btn btn-secondary">Desenhar área</button>
+                      <button type="button" id="btn-cluster-lasso-apply" class="btn btn-secondary" disabled>Aplicar área</button>
+                      <button type="button" id="btn-cluster-lasso-clear" class="btn btn-secondary">Limpar desenho</button>
+                    </div>
+                  </div>
+                  <input type="text" id="cluster-site-search" class="cluster-tree-search" placeholder="Filtrar sites ou células...">
+                  <div id="cluster-selection-tree" class="cluster-tree"></div>
+                </section>
+                <div id="cluster-empty-editor" class="cluster-tree-empty" style="align-self:center;">
+                  Crie ou selecione um cluster para escolher sites e células.
+                </div>
+              </div>
+            </div>
           </div>
 
           <!-- Configurações OSS -->
@@ -1064,6 +1245,7 @@
         <span>Modo: <strong id="polygon-mode-lbl" style="color:var(--info)">Automático</strong></span>
         <span>Vértices: <strong id="polygon-vertices-lbl" class="mono">0</strong></span>
       </div>
+
     </div>
 
   </main>
@@ -1082,6 +1264,16 @@
     let loadedEventsList = [];
     let loadedVipsList = [];
     let editingVipId = null;
+
+    // ── Clusters de sites (Fase 4) ──────────────────────────────
+    const CLUSTER_COLORS = ['#F85149', '#388BFD', '#3FB950', '#D29922', '#ab7df6', '#f692cc', '#00d2ff', '#FF7B00'];
+    let eventClusters = [];       // [{id, name, color, members:[{site_id,cell_ids}], polygon}]
+    let activeClusterId = null;
+    let clusterMode = false;
+    let clusterLassoActive = false;
+    let clusterLassoCoords = [];
+    let clusterLassoPolygon = null;
+    let siteMarkersById = {};
 
     // ── Constantes visuais de frequência ────────────────────────
     const FREQUENCY_RADII = {
@@ -1115,6 +1307,19 @@
     const paddingValue     = document.getElementById('padding-value');
     const polygonModeLbl   = document.getElementById('polygon-mode-lbl');
     const polygonVerticesLbl = document.getElementById('polygon-vertices-lbl');
+
+    const clusterActiveTools = document.getElementById('cluster-active-tools');
+    const clusterEmptyEditor = document.getElementById('cluster-empty-editor');
+    const btnNewCluster      = document.getElementById('btn-new-cluster');
+    const btnClusterMapPick  = document.getElementById('btn-cluster-map-pick');
+    const btnClusterLasso    = document.getElementById('btn-cluster-lasso');
+    const btnClusterLassoApply = document.getElementById('btn-cluster-lasso-apply');
+    const btnClusterLassoClear = document.getElementById('btn-cluster-lasso-clear');
+    const clusterSiteSearch  = document.getElementById('cluster-site-search');
+    const clusterSelectionTree = document.getElementById('cluster-selection-tree');
+    const clusterSelectionSummary = document.getElementById('cluster-selection-summary');
+    const clusterColorInput = document.getElementById('cluster-color-input');
+    const clusterNameInput = document.getElementById('cluster-name-input');
 
     const tabBtnEventos      = document.getElementById('tab-btn-eventos');
     const tabBtnVips         = document.getElementById('tab-btn-vips');
@@ -1166,12 +1371,59 @@
       document.getElementById('btn-add-regional').addEventListener('click', () => addRegionalRow());
       document.getElementById('btn-add-pm-task').addEventListener('click', () => addPmTaskRow());
       resetPmTaskList();
+      renderClusterList();
       btnClienteSubmit.addEventListener('click', submitCliente);
       clienteLogoInput.addEventListener('change', _previewLogo);
 
       btnNovoEvento.addEventListener('click', showEventForm);
       btnBackToList.addEventListener('click', () => { cancelEdit(); hideEventForm(); });
       document.getElementById('btn-cancel-edit').addEventListener('click', () => { cancelEdit(); hideEventForm(); });
+
+      btnNewCluster.addEventListener('click', addCluster);
+      btnClusterMapPick.addEventListener('click', () => {
+        clusterMode = !clusterMode;
+        btnClusterMapPick.classList.toggle('active', clusterMode);
+        btnClusterMapPick.textContent = clusterMode ? 'Concluir seleção no mapa' : 'Selecionar no mapa';
+        showFeedback(clusterMode
+          ? 'Clique em um marcador para marcar ou desmarcar todas as células daquele site.'
+          : 'Seleção pelo mapa concluída.', 'success');
+      });
+      btnClusterLasso.addEventListener('click', () => {
+        clusterLassoActive = !clusterLassoActive;
+        clusterMode = clusterLassoActive;
+        btnClusterLasso.classList.toggle('active', clusterLassoActive);
+        btnClusterMapPick.classList.remove('active');
+        btnClusterMapPick.textContent = 'Selecionar no mapa';
+        if (clusterLassoActive) {
+          showFeedback('Clique no mapa para desenhar a área. Ao aplicar, os sites dentro serão adicionados por inteiro.', 'success');
+        } else {
+          clearClusterLasso();
+        }
+      });
+      btnClusterLassoApply.addEventListener('click', applyClusterLasso);
+      btnClusterLassoClear.addEventListener('click', () => {
+        clusterLassoActive = false;
+        clusterMode = false;
+        btnClusterLasso.classList.remove('active');
+        clearClusterLasso();
+      });
+      clusterSiteSearch.addEventListener('input', (e) => {
+        renderClusterSelectionTree(e.target.value);
+      });
+      clusterColorInput.addEventListener('input', (e) => {
+        const cluster = activeCluster();
+        if (!cluster) return;
+        cluster.color = e.target.value;
+        renderClusterList();
+        refreshClusterRings();
+      });
+      clusterNameInput.addEventListener('input', (e) => {
+        const cluster = activeCluster();
+        if (!cluster) return;
+        const name = e.target.value.trim();
+        if (name) cluster.name = name;
+        renderClusterList();
+      });
 
       btnNovoVip.addEventListener('click', showVipForm);
       btnBackToVipsList.addEventListener('click', () => { cancelVipEdit(); hideVipForm(); });
@@ -1315,6 +1567,11 @@
       });
 
       map.on('click', (e) => {
+        if (clusterLassoActive) {
+          clusterLassoCoords.push([e.latlng.lat, e.latlng.lng]);
+          renderClusterLasso();
+          return;
+        }
         if (polygonMode === 'draw') {
           polygonCoordinates.push([e.latlng.lat, e.latlng.lng]);
           updatePolygonOnMap();
@@ -1358,6 +1615,22 @@
           sitesInfoMsg.style.color = 'var(--success)';
           plotSitesOnMap();
           if (polygonMode === 'auto') autoCalculatePolygon();
+
+          // Semente da coluna opcional de cluster da EP — só num evento novo, e só se
+          // o operador ainda não montou clusters na interface (que é a fonte de verdade).
+          if (Array.isArray(result.clusters) && result.clusters.length &&
+              editingEventId === null && eventClusters.length === 0) {
+            eventClusters = result.clusters.map((c, i) => ({
+              id: uniqueClusterId(c.id || slugify(c.name)),
+              name: c.name,
+              color: CLUSTER_COLORS[i % CLUSTER_COLORS.length],
+              site_ids: [...(c.site_ids || [])],
+              polygon: [],
+            }));
+            eventClusters.forEach(normalizeClusterMembers);
+            renderClusterList();
+          }
+          renderClusterSelectionTree(clusterSiteSearch.value);
         } else {
           sitesInfoMsg.textContent = `Erro: ${result.detail || 'Não foi possível ler o arquivo.'}`;
           sitesInfoMsg.style.color = 'var(--danger)';
@@ -1372,6 +1645,7 @@
     function plotSitesOnMap() {
       siteMarkers.forEach(m => map.removeLayer(m));
       siteMarkers = [];
+      siteMarkersById = {};
       if (parsedSites.length === 0) return;
       const points = [];
       parsedSites.forEach(site => {
@@ -1385,9 +1659,18 @@
             <div class="tooltip-desc">Lat: ${site.lat.toFixed(6)} / Lng: ${site.lng.toFixed(6)}</div>
             <div class="tooltip-desc" style="font-weight:600; margin-top:4px;">Células: ${site.cells.length}</div>
           </div>`, { className: 'site-popup' });
+        marker.on('click', () => {
+          if (clusterMode && activeClusterId) toggleSiteInActiveCluster(site.id);
+        });
+        marker._siteRef = site;
         siteMarkers.push(marker);
+        siteMarkersById[site.id] = marker;
       });
       map.fitBounds(L.latLngBounds(points), { padding: [50, 50] });
+    }
+
+    function refreshClusterRings() {
+      siteMarkers.forEach(m => { if (m._siteRef) m.setIcon(buildSiteSectorIcon(m._siteRef)); });
     }
 
     function getZoomScale(zoom) {
@@ -1403,7 +1686,11 @@
       cells.forEach(cell => { cell._radius = getCellRadius(cell.id, zoom) || defaultRadius; });
       const maxR = Math.max(...cells.map(c => c._radius), defaultRadius);
       const sweep = 100;
-      const size = (maxR + 2) * 2;
+
+      const activeCluster = eventClusters.find(c => c.id === activeClusterId);
+      const inActiveCluster = !!(activeCluster && clusterIncludesSite(activeCluster, site.id));
+      const highlightDist = inActiveCluster ? Math.max(4, 7 * scale) : 2;
+      const size = (maxR + highlightDist) * 2;
       const cx = size / 2;
       const cy = size / 2;
       const sortedCells = [...cells].sort((a, b) => b._radius - a._radius);
@@ -1416,7 +1703,15 @@
         return `<path d="${sectorPathSVG(cx, cy, r, az, sweep)}" fill="${color}" opacity="0.85" stroke="#0D1117" stroke-width="${strokeWidth}"/>`;
       });
       const circleRadius = Math.max(1.2, 4 * scale);
-      const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}" viewBox="0 0 ${size} ${size}">${paths.join("")}<circle cx="${cx}" cy="${cy}" r="${circleRadius}" fill="#8B949E" stroke="#0D1117" stroke-width="${centerStrokeWidth}"/></svg>`;
+
+      let ring = "";
+      if (inActiveCluster) {
+        const ringRadius = maxR + Math.max(1.5, 3.5 * scale);
+        const ringStroke = Math.max(1, 2 * scale);
+        ring = `<circle cx="${cx}" cy="${cy}" r="${ringRadius}" fill="none" stroke="${activeCluster.color}" stroke-width="${ringStroke}" stroke-dasharray="${4 * scale} ${3 * scale}" opacity="0.95"/>`;
+      }
+
+      const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}" viewBox="0 0 ${size} ${size}">${ring}${paths.join("")}<circle cx="${cx}" cy="${cy}" r="${circleRadius}" fill="#8B949E" stroke="#0D1117" stroke-width="${centerStrokeWidth}"/></svg>`;
       return L.divIcon({ html: svg, className: "", iconSize: [size, size], iconAnchor: [cx, cy], popupAnchor: [0, -(cy + 4)] });
     }
 
@@ -1530,6 +1825,347 @@
       activePolygon = L.polygon(polygonCoordinates, {
         color: '#388BFD', weight: 2, dashArray: '5 5', fillColor: '#388BFD', fillOpacity: 0.08
       }).addTo(map);
+    }
+
+    // ── Clusters de sites e células ──────────────────────────────
+    function uniqueClusterId(base) {
+      let candidate = base || 'cluster';
+      let n = 2;
+      while (eventClusters.some(c => c.id === candidate)) candidate = `${base}-${n++}`;
+      return candidate;
+    }
+    function addCluster() {
+      const name = `Cluster ${eventClusters.length + 1}`;
+      const id = uniqueClusterId(slugify(name));
+      const color = CLUSTER_COLORS[eventClusters.length % CLUSTER_COLORS.length];
+      eventClusters.push({ id, name, color, members: [], polygon: [] });
+      setActiveCluster(id);
+      requestAnimationFrame(() => { clusterNameInput.focus(); clusterNameInput.select(); });
+    }
+
+    function deleteCluster(id) {
+      const cluster = eventClusters.find(c => c.id === id);
+      if (!cluster) return;
+      if (!confirm(`Excluir o cluster "${cluster.name}"?`)) return;
+      eventClusters = eventClusters.filter(c => c.id !== id);
+      if (activeClusterId === id) {
+        activeClusterId = null;
+        clusterActiveTools.classList.add('hidden');
+        clusterEmptyEditor.classList.remove('hidden');
+      }
+      renderClusterList();
+      refreshClusterRings();
+    }
+
+    function activeCluster() {
+      return eventClusters.find(c => c.id === activeClusterId) || null;
+    }
+
+    function setActiveCluster(id) {
+      activeClusterId = id;
+      clusterActiveTools.classList.toggle('hidden', !id);
+      clusterEmptyEditor.classList.toggle('hidden', !!id);
+      const cluster = activeCluster();
+      if (cluster) {
+        clusterNameInput.value = cluster.name;
+        clusterColorInput.value = cluster.color;
+      }
+      renderClusterList();
+      renderClusterSelectionTree(clusterSiteSearch.value);
+      refreshClusterRings();
+    }
+
+    function siteCellIds(site) {
+      return (site?.cells || []).map(cell => String(typeof cell === 'string' ? cell : cell.id)).filter(Boolean);
+    }
+
+    function normalizeClusterMembers(cluster) {
+      if (Array.isArray(cluster.members)) {
+        cluster.members = cluster.members
+          .filter(member => member && member.site_id != null)
+          .map(member => ({
+            site_id: String(member.site_id),
+            cell_ids: [...new Set((member.cell_ids || []).map(String))],
+            ...(member.all_cells ? { all_cells: true } : {}),
+          }));
+        return cluster;
+      }
+      cluster.members = [];
+      (cluster.site_ids || []).forEach(storedId => {
+        const group = physicalSiteGroups().find(item =>
+          item.sites.some(site => String(site.id) === String(storedId)) ||
+          item.id === String(storedId) || normalizeSiteLabel(item.name) === normalizeSiteLabel(storedId));
+        if (group) {
+          group.sites.forEach(site => cluster.members.push({ site_id: String(site.id), cell_ids: siteCellIds(site) }));
+        } else {
+          cluster.members.push({ site_id: String(storedId), cell_ids: [], all_cells: true });
+        }
+      });
+      delete cluster.site_ids;
+      return cluster;
+    }
+
+    function memberForSite(cluster, siteId) {
+      normalizeClusterMembers(cluster);
+      return cluster.members.find(member => String(member.site_id) === String(siteId));
+    }
+
+    function selectedCellIds(cluster, site) {
+      const member = memberForSite(cluster, site.id);
+      if (!member) return [];
+      return member.all_cells ? siteCellIds(site) : member.cell_ids;
+    }
+
+    function setSiteSelected(cluster, site, selected) {
+      normalizeClusterMembers(cluster);
+      cluster.members = cluster.members.filter(member => String(member.site_id) !== String(site.id));
+      if (selected) cluster.members.push({ site_id: String(site.id), cell_ids: siteCellIds(site) });
+    }
+
+    function setCellSelected(cluster, site, cellId, selected) {
+      const chosen = new Set(selectedCellIds(cluster, site));
+      if (selected) chosen.add(String(cellId));
+      else chosen.delete(String(cellId));
+      cluster.members = cluster.members.filter(member => String(member.site_id) !== String(site.id));
+      if (chosen.size) cluster.members.push({ site_id: String(site.id), cell_ids: [...chosen] });
+    }
+
+    function clusterIncludesSite(cluster, siteId) {
+      const member = memberForSite(cluster, siteId);
+      return !!(member && (member.all_cells || member.cell_ids.length));
+    }
+
+    function toggleSiteInActiveCluster(siteId) {
+      const cluster = activeCluster();
+      if (!cluster) return;
+      const site = parsedSites.find(item => String(item.id) === String(siteId));
+      if (!site) return;
+      setSiteSelected(cluster, site, !clusterIncludesSite(cluster, site.id));
+      refreshClusterRings();
+      renderClusterList();
+      renderClusterSelectionTree(clusterSiteSearch.value);
+    }
+
+    function normalizeSiteLabel(value) {
+      return String(value || '').trim().toUpperCase().replace(/\s+/g, '');
+    }
+
+    function distanceMeters(a, b) {
+      const rad = value => value * Math.PI / 180;
+      const dLat = rad(Number(b.lat) - Number(a.lat));
+      const dLng = rad(Number(b.lng) - Number(a.lng));
+      const lat1 = rad(Number(a.lat));
+      const lat2 = rad(Number(b.lat));
+      const h = Math.sin(dLat / 2) ** 2 + Math.cos(lat1) * Math.cos(lat2) * Math.sin(dLng / 2) ** 2;
+      return 6371000 * 2 * Math.atan2(Math.sqrt(h), Math.sqrt(1 - h));
+    }
+
+    function physicalSiteGroups() {
+      const groups = [];
+      parsedSites.forEach(site => {
+        const nameKey = normalizeSiteLabel(site.name || site.id);
+        let group = groups.find(item => item.nameKey === nameKey && distanceMeters(item.sites[0], site) <= 50);
+        if (!group) {
+          group = { id: String(site.id), name: site.name || String(site.id), nameKey, sites: [] };
+          groups.push(group);
+        }
+        group.sites.push(site);
+      });
+      return groups;
+    }
+
+    function clusterSelectionStats(cluster) {
+      if (!cluster) return { sites: 0, cells: 0 };
+      let sites = 0;
+      let cells = 0;
+      physicalSiteGroups().forEach(group => {
+        let groupCells = 0;
+        group.sites.forEach(site => { groupCells += selectedCellIds(cluster, site).length; });
+        if (groupCells) sites++;
+        cells += groupCells;
+      });
+      return { sites, cells };
+    }
+
+    function renderClusterList() {
+      const list = document.getElementById('cluster-list');
+      if (!eventClusters.length) {
+        list.innerHTML = '<div class="empty-state" style="padding:16px 8px; font-size:11px;">Nenhum cluster criado.</div>';
+        return;
+      }
+      list.innerHTML = eventClusters.map(c => `
+        <div class="cluster-row${c.id === activeClusterId ? ' active' : ''}" data-id="${escapeHTML(c.id)}">
+          <span class="cluster-color-dot" style="background:${escapeHTML(c.color)}"></span>
+          <span class="cluster-name">${escapeHTML(c.name)}</span>
+          <span class="cluster-count">${clusterSelectionStats(c).sites} sites · ${clusterSelectionStats(c).cells} células</span>
+          <button type="button" class="cluster-delete-btn" title="Excluir">&#10005;</button>
+        </div>`).join('');
+      list.querySelectorAll('.cluster-row').forEach(row => {
+        row.addEventListener('click', (e) => {
+          if (e.target.closest('.cluster-delete-btn')) return;
+          setActiveCluster(row.dataset.id);
+        });
+        row.querySelector('.cluster-delete-btn').addEventListener('click', (e) => { e.stopPropagation(); deleteCluster(row.dataset.id); });
+      });
+    }
+
+    function renderClusterSelectionTree(query = '') {
+      const cluster = activeCluster();
+      if (!cluster) {
+        clusterSelectionTree.innerHTML = '';
+        return;
+      }
+      // A árvore é reconstruída para atualizar contagens/indeterminate. Preserve
+      // os sites abertos para que marcar uma célula não feche o seu grupo.
+      const expandedGroupKeys = new Set(
+        [...clusterSelectionTree.querySelectorAll('details[open][data-group-key]')]
+          .map(details => details.dataset.groupKey)
+      );
+      const q = String(query || '').toLowerCase().trim();
+      const groups = physicalSiteGroups().filter(group => {
+        const haystack = [group.name, ...group.sites.map(site => site.id),
+          ...group.sites.flatMap(site => siteCellIds(site))].join(' ').toLowerCase();
+        return !q || haystack.includes(q);
+      });
+      const stats = clusterSelectionStats(cluster);
+      clusterSelectionSummary.textContent = `${stats.sites} sites · ${stats.cells} células selecionadas`;
+      if (!parsedSites.length) {
+        clusterSelectionTree.innerHTML = '<div class="cluster-tree-empty">Importe a planilha de sites para montar o cluster.</div>';
+        return;
+      }
+      if (!groups.length) {
+        clusterSelectionTree.innerHTML = '<div class="cluster-tree-empty">Nenhum site ou célula encontrado.</div>';
+        return;
+      }
+      const allSites = groups.flatMap(group => group.sites);
+      const allCells = allSites.flatMap(site => siteCellIds(site));
+      const selectedTotal = allSites.reduce((sum, site) => sum + selectedCellIds(cluster, site).length, 0);
+      clusterSelectionTree.innerHTML = `
+        <label class="cluster-tree-root cluster-tree-cell">
+          <input type="checkbox" data-role="all" ${selectedTotal === allCells.length && allCells.length ? 'checked' : ''}>
+          <strong>Sites e células do evento</strong>
+          <span class="cluster-tree-count">${allCells.length} células</span>
+        </label>
+        ${groups.map((group, groupIndex) => {
+          const groupCells = group.sites.flatMap(site => siteCellIds(site));
+          const groupSelected = group.sites.reduce((sum, site) => sum + selectedCellIds(cluster, site).length, 0);
+          const families = [...new Set(groupCells.map(cell => resolveTechFreqFromId(cell).tech).filter(Boolean))];
+          const groupKey = group.sites.map(site => String(site.id)).sort().join('|');
+          return `<details class="cluster-tree-site" data-group="${groupIndex}" data-group-key="${escapeHTML(groupKey)}" ${q || expandedGroupKeys.has(groupKey) ? 'open' : ''}>
+            <summary>
+              <input type="checkbox" data-role="group" data-group="${groupIndex}" ${groupSelected === groupCells.length && groupCells.length ? 'checked' : ''}>
+              <span class="cluster-tree-site-name">${escapeHTML(group.name)}</span>
+              ${families.map(family => `<span class="cluster-tech-pill">${escapeHTML(family)}</span>`).join('')}
+              <span class="cluster-tree-count">${groupSelected}/${groupCells.length}</span>
+            </summary>
+            <div class="cluster-tree-cells">
+              ${group.sites.flatMap(site => siteCellIds(site).map(cellId => `
+                <label class="cluster-tree-cell">
+                  <input type="checkbox" data-role="cell" data-site-id="${escapeHTML(String(site.id))}" data-cell-id="${escapeHTML(cellId)}" ${selectedCellIds(cluster, site).includes(cellId) ? 'checked' : ''}>
+                  <span>${escapeHTML(cellId)}</span>
+                  <span class="cluster-tech-pill">${escapeHTML(resolveTechFreqFromId(cellId).tech || '—')}</span>
+                </label>`)).join('')}
+            </div>
+          </details>`;
+        }).join('')}`;
+
+      const allCheckbox = clusterSelectionTree.querySelector('[data-role="all"]');
+      allCheckbox.indeterminate = selectedTotal > 0 && selectedTotal < allCells.length;
+      allCheckbox.addEventListener('change', e => {
+        physicalSiteGroups().forEach(group => group.sites.forEach(site => setSiteSelected(cluster, site, e.target.checked)));
+        selectionChanged();
+      });
+      clusterSelectionTree.querySelectorAll('[data-role="group"]').forEach(checkbox => {
+        const group = groups[Number(checkbox.dataset.group)];
+        const total = group.sites.reduce((sum, site) => sum + siteCellIds(site).length, 0);
+        const selected = group.sites.reduce((sum, site) => sum + selectedCellIds(cluster, site).length, 0);
+        checkbox.indeterminate = selected > 0 && selected < total;
+        checkbox.addEventListener('click', e => e.stopPropagation());
+        checkbox.addEventListener('change', e => {
+          group.sites.forEach(site => setSiteSelected(cluster, site, e.target.checked));
+          selectionChanged();
+        });
+      });
+      clusterSelectionTree.querySelectorAll('[data-role="cell"]').forEach(checkbox => {
+        checkbox.addEventListener('change', e => {
+          const site = parsedSites.find(item => String(item.id) === e.target.dataset.siteId);
+          if (site) setCellSelected(cluster, site, e.target.dataset.cellId, e.target.checked);
+          selectionChanged();
+        });
+      });
+    }
+
+    function selectionChanged() {
+      renderClusterSelectionTree(clusterSiteSearch.value);
+      renderClusterList();
+      refreshClusterRings();
+    }
+
+    // Ray casting padrão: suficiente para o laço de seleção (não precisa de precisão
+    // geodésica — é ferramenta de seleção, nunca reavaliada depois de salvo, §1 do plano).
+    function pointInPolygon(point, vs) {
+      const x = point[0], y = point[1];
+      let inside = false;
+      for (let i = 0, j = vs.length - 1; i < vs.length; j = i++) {
+        const xi = vs[i][0], yi = vs[i][1];
+        const xj = vs[j][0], yj = vs[j][1];
+        const intersect = ((yi > y) !== (yj > y)) &&
+          (x < (xj - xi) * (y - yi) / (yj - yi) + xi);
+        if (intersect) inside = !inside;
+      }
+      return inside;
+    }
+
+    function renderClusterLasso() {
+      if (clusterLassoPolygon) { map.removeLayer(clusterLassoPolygon); clusterLassoPolygon = null; }
+      btnClusterLassoApply.disabled = clusterLassoCoords.length < 3;
+      if (clusterLassoCoords.length < 2) return;
+      const cluster = eventClusters.find(c => c.id === activeClusterId);
+      const color = cluster ? cluster.color : '#388BFD';
+      clusterLassoPolygon = L.polygon(clusterLassoCoords, {
+        color, weight: 2, dashArray: '4 4', fillColor: color, fillOpacity: 0.12
+      }).addTo(map);
+    }
+
+    function clearClusterLasso() {
+      clusterLassoCoords = [];
+      if (clusterLassoPolygon) { map.removeLayer(clusterLassoPolygon); clusterLassoPolygon = null; }
+      btnClusterLassoApply.disabled = true;
+    }
+
+    function applyClusterLasso() {
+      if (!activeClusterId || clusterLassoCoords.length < 3) return;
+      const cluster = eventClusters.find(c => c.id === activeClusterId);
+      if (!cluster) return;
+      let added = 0;
+      parsedSites.forEach(site => {
+        if (pointInPolygon([site.lat, site.lng], clusterLassoCoords) && !clusterIncludesSite(cluster, site.id)) {
+          setSiteSelected(cluster, site, true);
+          added++;
+        }
+      });
+      cluster.polygon = clusterLassoCoords.map(c => [...c]);
+      clusterLassoActive = false;
+      clusterMode = false;
+      btnClusterLasso.classList.remove('active');
+      clearClusterLasso();
+      selectionChanged();
+      showFeedback(`${added} site(s) adicionados ao cluster "${cluster.name}".`, 'success');
+    }
+
+    function resetClusterState() {
+      eventClusters = [];
+      activeClusterId = null;
+      clusterMode = false;
+      clusterLassoActive = false;
+      clearClusterLasso();
+      clusterActiveTools.classList.add('hidden');
+      clusterEmptyEditor.classList.remove('hidden');
+      btnClusterMapPick.classList.remove('active');
+      btnClusterMapPick.textContent = 'Selecionar no mapa';
+      btnClusterLasso.classList.remove('active');
+      renderClusterList();
+      renderClusterSelectionTree();
     }
 
     // ── CRUD Eventos ─────────────────────────────────────────────
@@ -1711,7 +2347,17 @@
           import_folder: document.getElementById('oss-folder').value.trim(),
           base_url:      document.getElementById('oss-url').value.trim()
         },
-        integration: { pm_tasks: pmTasks }
+        integration: { pm_tasks: pmTasks },
+        clusters: eventClusters.map(c => ({
+          id: c.id, name: c.name, color: c.color,
+          site_ids: [...new Set((c.members || []).map(member => String(member.site_id)))],
+          members: (c.members || []).map(member => ({
+            site_id: String(member.site_id),
+            cell_ids: [...(member.cell_ids || [])],
+            ...(member.all_cells ? { all_cells: true } : {}),
+          })),
+          polygon: c.polygon || [],
+        })),
       };
 
       btnSubmit.disabled = true;
@@ -1828,6 +2474,19 @@
       toolAutoPoly.classList.remove('active');
       polygonModeLbl.textContent = 'Carregado (Editável)';
       polygonModeLbl.style.color = 'var(--info)';
+
+      eventClusters = (event.clusters || []).map((c, i) => ({
+        id: c.id, name: c.name || c.id, color: c.color || CLUSTER_COLORS[i % CLUSTER_COLORS.length],
+        ...(Array.isArray(c.members)
+          ? { members: c.members.map(member => ({ ...member, cell_ids: [...(member.cell_ids || [])] })) }
+          : { site_ids: [...(c.site_ids || [])] }),
+        polygon: c.polygon || [],
+      }));
+      eventClusters.forEach(normalizeClusterMembers);
+      activeClusterId = null;
+      clusterActiveTools.classList.add('hidden');
+      clusterEmptyEditor.classList.remove('hidden');
+      renderClusterList();
     }
 
     function cancelEdit() {
@@ -1863,6 +2522,7 @@
       polygonCoordinates = [];
       siteMarkers.forEach(m => map.removeLayer(m));
       siteMarkers = [];
+      siteMarkersById = {};
       if (activePolygon) { map.removeLayer(activePolygon); activePolygon = null; }
       polygonVerticesLbl.textContent = '0';
       polygonMode = 'auto';
@@ -1871,6 +2531,8 @@
       polygonModeLbl.textContent = 'Automático';
       polygonModeLbl.style.color = 'var(--info)';
       map.setView([-23.55, -46.63], 11);
+
+      resetClusterState();
 
       feedbackMsg.className   = 'feedback';
       feedbackMsg.textContent = '';

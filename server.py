@@ -1,5 +1,6 @@
 import json
 import logging
+import re
 import sys
 from pathlib import Path
 from typing import Optional
@@ -14,6 +15,11 @@ from core.seed import seed_operator_data
 # Configure logging
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(name)s: %(message)s")
 logger = logging.getLogger("SmartEventsServer")
+
+
+def _slugify(text: str) -> str:
+    slug = re.sub(r"[^a-z0-9]+", "-", text.strip().lower()).strip("-")
+    return slug or "cluster"
 
 app = FastAPI(title="SmartEvents Central Server")
 
@@ -121,7 +127,8 @@ async def parse_sites(file: UploadFile = File(...)):
             'cellid': ['cellid', 'cell_id', 'cell', 'id_celula', 'id celula', 'célula', 'celula'],
             'nename': ['nename', 'ne_name', 'sitename', 'site_name', 'nome site', 'nome_site', 'estacao', 'estação'],
             'cellname': ['cellname', 'cell_name', 'nome celula', 'nome_celula', 'nome da celula'],
-            'azimuth': ['azimut', 'azimuth', 'azimute', 'direcao', 'direção']
+            'azimuth': ['azimut', 'azimuth', 'azimute', 'direcao', 'direção'],
+            'cluster': ['cluster', 'grupo', 'agrupamento', 'setor', 'area', 'área'],
         }
 
         # Rename columns if candidates match
@@ -140,6 +147,7 @@ async def parse_sites(file: UploadFile = File(...)):
 
         # Group by site (enodebid)
         sites_dict = {}
+        clusters_dict = {}  # nome do cluster -> set de site_ids (coluna opcional; §1 do plano)
         for _, row in df.iterrows():
             # Skip rows with missing required columns
             if pd.isna(row['enodebid']) or pd.isna(row['latitude']) or pd.isna(row['longitude']):
@@ -191,8 +199,22 @@ async def parse_sites(file: UploadFile = File(...)):
                     "beamwidth": 120.0
                 })
 
+            # Coluna opcional de cluster: valores separados por ";" atribuem o site
+            # a vários clusters de uma vez (N:N), preservado pela importação como semente.
+            cluster_val = row.get('cluster')
+            if not pd.isna(cluster_val):
+                for cluster_name in str(cluster_val).split(';'):
+                    cluster_name = cluster_name.strip()
+                    if not cluster_name:
+                        continue
+                    clusters_dict.setdefault(cluster_name, set()).add(site_id)
+
         sites_list = list(sites_dict.values())
-        return {"ok": True, "sites": sites_list}
+        clusters_list = [
+            {"id": _slugify(name), "name": name, "site_ids": sorted(site_ids)}
+            for name, site_ids in clusters_dict.items()
+        ]
+        return {"ok": True, "sites": sites_list, "clusters": clusters_list}
     except Exception as e:
         logger.error(f"Erro ao parsear arquivo de sites: {e}")
         raise HTTPException(status_code=400, detail=str(e))

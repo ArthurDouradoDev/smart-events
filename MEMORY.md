@@ -518,3 +518,65 @@ ambiguidade real (`task_id → technology` perderia uma em silêncio).
 
 Gate: `pytest tests/ -q --basetemp=.pytest-work/tmp` → **357 passed, 10 skipped, 0 failed**.
 
+---
+
+## 2026-08-20 — Fase 4: clusters de sites
+
+Plano: `docs/plans/2026-08-19-001-feat-site-merge-clusters-kpi-overview-plan.md`.
+
+Clusters são grupos de sites N:N (um site pode estar em vários clusters — caso do
+estádio com um site atendendo Sul e Oeste). Sem mudança de schema: `event.clusters =
+[{id, name, color, site_ids, polygon}]` dentro do `config_json` já existente.
+
+**Decisões travadas:**
+
+- **`site_ids` guarda o id como o operador o selecionou** (cru da EP no laço/clique do
+  cadastro, ou já fundido se veio de outro fluxo). A resolução para o id fundido 4G/5G
+  (Fase 1) acontece só na leitura, em `Api._cluster_merged_site_ids(cluster, merged)` —
+  usa `_find_merged_site`, então aceita as duas formas sem exigir migração.
+- **Pertencimento é só `site_ids`; `polygon` nunca é reavaliado na exibição.** Fica
+  salvo apenas para redesenhar o laço ao reabrir o cluster para edição. Mover um site
+  para fora do polígono salvo não o remove — testado em
+  `test_poligono_nao_altera_pertencimento_depois_de_salvo`.
+- **`get_kpi_series(scope="cluster", scope_id=...)`** expande cluster → sites fundidos
+  → `site_id` dos membros e reusa `_site_series_by_family` (que já combinava múltiplos
+  `member_ids` da fusão) — combinar entre SITES do cluster é o mesmo mecanismo que já
+  combinava entre MEMBROS 4G/5G de um site fundido. Lê só linhas `SITE` persistidas,
+  nunca `CELL` cru. Sem seleção de célula neste escopo (sempre agregado).
+  `get_sites` ganha `cluster_ids` por site (pré-computado uma vez por request, não por
+  site, para não repetir a expansão fundida N vezes).
+- **`server.py::parse_sites`** ganha a coluna opcional `cluster` (aceita `cluster`,
+  `grupo`, `agrupamento`, `setor`, `area`/`área`), fora da lista `required`. Valores
+  separados por `;` criam vários clusters para a mesma linha. A resposta ganha
+  `clusters: [{id, name, site_ids}]`; o cadastro só usa isso para **semear** um evento
+  novo (`editingEventId === null && eventClusters.length === 0`) — depois disso a
+  interface manda, reimportar a planilha num evento existente não sobrescreve clusters
+  já editados à mão.
+- **Cadastro (`server_frontend/index.html`):** terceiro modo na barra de ferramentas do
+  mapa (`tool-cluster-poly`), independente dos modos de polígono do evento
+  (auto/desenho) — um clique nele não desliga a ferramenta de polígono do evento, só
+  muda o painel visível. Três formas de montar um cluster, que se somam: laço
+  (ray casting simples, ~15 linhas, `pointInPolygon`), clique no marcador
+  (`toggleSiteInActiveCluster`, só ativo com `clusterMode` + cluster ativo) e busca por
+  nome (autocomplete simples). O anel do marcador usa o mesmo padrão de
+  `highlightDist`/`highlightRing` dos badges da Fase 2 — a maior extensão manda no
+  tamanho do SVG.
+- **App (`frontend/`):** `State.clusterFilter`; `#cluster-selector` no cabeçalho do
+  `#site-panel`, oculto quando o evento não tem clusters. Com um cluster ativo, a lista
+  de sites ganha uma linha sintética `cluster:<id>` no topo (o agregado, escopo do
+  gráfico) e o mapa esconde os sites fora do cluster + desenha o polígono salvo dele.
+  Selecionar a linha do cluster funciona como "Média" sempre (`selectedCell` fixo em
+  `__media__`, sem seletor de célula) — o mesmo dataset por família (`series[]`) que já
+  alimentava "Média" de um site fundido.
+
+**Verificação end-to-end (não é teste automatizado, script descartável):** Playwright
+dirigindo um `uvicorn server:app` real (dados isolados via `SMARTEVENTS_DATA_DIR`)
+provou o fluxo completo do cadastro — criar cluster, alternar site por clique,
+desenhar+aplicar laço, buscar por nome, salvar, recarregar a página, reabrir para
+edição e ver os clusters (nomes e contagens) devolvidos exatamente como salvos.
+
+Gate: `pytest tests/ -q --basetemp=.pytest-work/tmp` → **374 passed, 10 skipped, 0
+failed** (357 do baseline + 5 `TestClusters` em `test_api.py` + 3 em
+`test_server_parse_sites.py` + 7 em `test_server_frontend_clusters_ui.py` + 2 em
+`test_frontend_cluster_filter_ui.py`).
+

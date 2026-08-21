@@ -13,12 +13,14 @@ const State = {
   vips:           [],
   alerts:         [],
   alarms:         [],   // alarmes do iManager (filtrados por tipo)
+  clusters:       [],   // [{id, name, color, site_count}]
 
   // ── Seleção e UI ─────────────────────────────────────────────────
-  selectedSite:   null,   // site id
+  selectedSite:   null,   // site id, "cluster:<id>" ou "clusters:compare"
   selectedMetric: "utilization_dl",
   selectedCell:   "__media__", // "__all__" = site completo, "__media__" = média, ou cell_id específico
   techFilter:     "all",  // "all" | "4G" | "5G"
+  clusterFilter:  "all",  // "all" | "compare" | cluster id
   timeWindow:     60,     // minutos
 
   // ── Gravação ─────────────────────────────────────────────────────

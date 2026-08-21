@@ -5,9 +5,9 @@
 
 import API     from "./bridge.js";
 import State   from "./state.js";
-import { initMap, renderSites, renderEventPolygon, fitToEvent } from "./map.js";
+import { initMap, renderSites, renderEventPolygon, fitToEvent } from "./map.js?v=20260820-cluster-compare-r2";
 import { initVip }    from "./vip.js";
-import { initKpi, refreshChart }    from "./kpi.js";
+import { initKpi, refreshChart }    from "./kpi.js?v=20260820-cluster-compare-r2";
 import { initAlerts, injectAlerts } from "./alerts.js";
 import { initAlarms, injectAlarms } from "./alarms.js";
 import { initLogs } from "./logs.js";
@@ -25,6 +25,11 @@ let _syncTimer = null;
 let _lastSyncStatus = null;
 let _historicalTimestamps = [];
 let _historicalIndex = -1;
+
+function _isVirtualKpiScope(siteId) {
+  return typeof siteId === "string" &&
+    (siteId.startsWith("cluster:") || siteId === "clusters:compare");
+}
 
 // ── Bootstrap ─────────────────────────────────────────────────────
 
@@ -250,7 +255,9 @@ async function _poll() {
     // Atualiza seleção de site se ainda válida
     if (State.selectedSite) {
       const still = sites.find(s => s.id === State.selectedSite);
-      if (!still && sites.length) State.set("selectedSite", sites[0].id);
+      if (!still && !_isVirtualKpiScope(State.selectedSite) && sites.length) {
+        State.set("selectedSite", sites[0].id);
+      }
     } else if (sites.length) {
       State.set("selectedSite", sites[0].id);
     }
@@ -435,7 +442,9 @@ async function _updateHistoricalView(index) {
 
     if (State.selectedSite) {
       const still = sites.find(s => s.id === State.selectedSite);
-      if (!still && sites.length) State.set("selectedSite", sites[0].id);
+      if (!still && !_isVirtualKpiScope(State.selectedSite) && sites.length) {
+        State.set("selectedSite", sites[0].id);
+      }
     } else if (sites.length) {
       State.set("selectedSite", sites[0].id);
     }

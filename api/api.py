@@ -582,6 +582,122 @@ class Api:
                 return site
         return None
 
+    @classmethod
+    def _cluster_merged_site_ids(cls, cluster: dict, merged: list[dict]) -> list[str]:
+        """Resolve membros antigos e granulares para ids físicos fundidos únicos."""
+        seen: list[str] = []
+        stored_ids = list(cluster.get("site_ids") or [])
+        stored_ids.extend(
+            member.get("site_id")
+            for member in (cluster.get("members") or [])
+            if member.get("site_id")
+        )
+        for raw_id in stored_ids:
+            site = cls._find_merged_site(merged, raw_id)
+            merged_id = site["id"] if site else raw_id
+            if merged_id not in seen:
+                seen.append(merged_id)
+        return seen
+
+    @classmethod
+    def _cluster_raw_selections(
+            cls, cluster: dict, merged: list[dict], config: dict) -> list[dict]:
+        """Expande um cluster para sites crus e células selecionadas.
+
+        ``cell_ids=None`` significa site inteiro. Clusters legados, que possuem
+        somente ``site_ids``, continuam selecionando o site inteiro. O campo novo
+        ``members`` é autoritativo quando presente e permite seleção parcial.
+        """
+        raw_sites = {
+            str(site.get("id")): site
+            for site in (config or {}).get("sites") or []
+            if site.get("id") is not None
+        }
+        selections: dict[str, set[str] | None] = {}
+
+        def _add(raw_id, cell_ids=None, all_cells=False):
+            raw_id = str(raw_id)
+            if raw_id in selections and selections[raw_id] is None:
+                return
+            raw_site = raw_sites.get(raw_id)
+            known_cells = {
+                str(cell if isinstance(cell, str) else cell.get("id"))
+                for cell in (raw_site or {}).get("cells") or []
+                if (cell if isinstance(cell, str) else cell.get("id")) is not None
+            }
+            requested = {str(cell_id) for cell_id in (cell_ids or []) if cell_id is not None}
+            if all_cells or cell_ids is None or (known_cells and known_cells <= requested):
+                selections[raw_id] = None
+                return
+            if not requested:
+                return
+            current = selections.setdefault(raw_id, set())
+            if current is not None:
+                current.update(requested)
+
+        def _expand(stored_id, cell_ids=None, all_cells=False):
+            stored_id = str(stored_id)
+            if stored_id in raw_sites:
+                _add(stored_id, cell_ids, all_cells)
+                return
+            merged_site = cls._find_merged_site(merged, stored_id)
+            targets = list((merged_site or {}).get("members") or [])
+            if not targets:
+                _add(stored_id, cell_ids, all_cells)
+                return
+            if all_cells or cell_ids is None:
+                for target in targets:
+                    _add(target["site_id"], None, True)
+                return
+            remaining = {str(cell_id) for cell_id in cell_ids or []}
+            for target in targets:
+                raw_site = raw_sites.get(str(target["site_id"])) or {}
+                owned = {
+                    str(cell if isinstance(cell, str) else cell.get("id"))
+                    for cell in raw_site.get("cells") or []
+                    if (cell if isinstance(cell, str) else cell.get("id")) is not None
+                }
+                matched = remaining & owned
+                if matched:
+                    _add(target["site_id"], matched)
+                    remaining -= matched
+            if remaining and len(targets) == 1:
+                _add(targets[0]["site_id"], remaining)
+
+        if "members" in cluster:
+            for member in cluster.get("members") or []:
+                if member.get("site_id") is None:
+                    continue
+                all_cells = bool(member.get("all_cells"))
+                cell_ids = None if all_cells else member.get("cell_ids", [])
+                _expand(member["site_id"], cell_ids, all_cells)
+        else:
+            for site_id in cluster.get("site_ids") or []:
+                # Contrato legado da Fase 1: um id cru de qualquer gêmeo 4G/5G
+                # representava o site físico fundido inteiro.
+                merged_site = cls._find_merged_site(merged, str(site_id))
+                targets = list((merged_site or {}).get("members") or [])
+                if targets:
+                    for target in targets:
+                        _add(target["site_id"], None, True)
+                else:
+                    _expand(site_id, None, True)
+
+        return [
+            {"site_id": site_id,
+             "cell_ids": None if cell_ids is None else sorted(cell_ids)}
+            for site_id, cell_ids in selections.items()
+        ]
+
+    @staticmethod
+    def _find_cluster(config: dict, cluster_id: str) -> dict | None:
+        if not cluster_id:
+            return None
+        for cluster in (config or {}).get("clusters") or []:
+            if cluster.get("id") == cluster_id:
+                return cluster
+        return None
+
     @staticmethod
     def _combine_family_values(metric: str, values: list) -> float | None:
         vals = [value for value in values if value is not None]
@@ -693,6 +809,14 @@ class Api:
             warn = thresholds.get("utilization_warning", 80)
             crit = thresholds.get("utilization_critical", 95)
 
+            cluster_membership: dict[str, list[str]] = {}
+            for cluster in config.get("clusters") or []:
+                cluster_id = cluster.get("id")
+                if not cluster_id:
+                    continue
+                for merged_id in self._cluster_merged_site_ids(cluster, merged):
+                    cluster_membership.setdefault(merged_id, []).append(cluster_id)
+
             for site in merged:
                 visible_cells = self._filter_cells_for_family(
                     site.get("cells", []), cell_family)
@@ -725,6 +849,7 @@ class Api:
                         user_family, metric or "utilization_dl"),
                     "metric_is_share": False,
                     "is_event_site":   site.get("is_event_site", True),
+                    "cluster_ids":     cluster_membership.get(site["id"], []),
                 })
 
             self._sites_cache[event_id] = sites_out
@@ -746,6 +871,7 @@ class Api:
                         "utilization": None, "metric_value": None,
                         "metric_is_share": False,
                         "is_event_site": site.get("is_event_site", True),
+                        "cluster_ids": [],
                     })
                 self._sites_cache[event_id] = fallback
                 return fallback
@@ -788,6 +914,46 @@ class Api:
             return out
         except Exception as e:
             logger.error(f"get_site_cells error: {e}")
+            return []
+
+    def get_clusters(self, event_id: str) -> list:
+        """Lista os clusters do evento (cadastrados no servidor central) para o
+        dropdown do app, incluindo o recorte granular de células."""
+        try:
+            config = db.get_event(event_id) or _active_event
+            if not config:
+                return []
+            merged = self._merged_sites(config)
+            out = []
+            for cluster in config.get("clusters") or []:
+                if not cluster.get("id"):
+                    continue
+                selections = self._cluster_raw_selections(cluster, merged, config)
+                raw_sites = {
+                    str(site.get("id")): site for site in config.get("sites") or []
+                }
+                cell_count = 0
+                has_partial = False
+                for selection in selections:
+                    selected_cells = selection.get("cell_ids")
+                    available = (raw_sites.get(str(selection["site_id"])) or {}).get("cells") or []
+                    if selected_cells is None:
+                        cell_count += len(available)
+                    else:
+                        cell_count += len(selected_cells)
+                        has_partial = has_partial or len(selected_cells) < len(available)
+                out.append({
+                    "id":         cluster["id"],
+                    "name":       cluster.get("name") or cluster["id"],
+                    "color":      cluster.get("color"),
+                    "site_count": len(self._cluster_merged_site_ids(cluster, merged)),
+                    "cell_count": cell_count,
+                    "has_partial_selection": has_partial,
+                    "polygon":    cluster.get("polygon") or [],
+                })
+            return out
+        except Exception as e:
+            logger.error(f"get_clusters error: {e}")
             return []
 
     # ── KPI / gráfico ────────────────────────────────────────────────
@@ -887,6 +1053,61 @@ class Api:
                 "technology": None if family == "unknown" else family,
                 "labels": labels,
                 "values": values,
+            })
+        return series
+
+    def _cluster_series_by_family(
+            self, event_id: str, selections: list[dict], metric: str, minutes: int,
+            technology: str | None, technology_family: str | None) -> list[dict]:
+        """Monta séries de cluster respeitando sites inteiros e células parciais."""
+        by_family: dict[str, dict] = {}
+        for selection in selections:
+            site_id = selection["site_id"]
+            selected_cells = selection.get("cell_ids")
+            per_site: dict[str, dict] = {}
+            if selected_cells is None:
+                rows = db.get_kpi_site_series(
+                    event_id, site_id, metric, minutes, technology)
+                for row in rows:
+                    family = self._technology_family(row.get("technology"))
+                    if technology_family and family and family != technology_family:
+                        continue
+                    family = family or technology_family or "unknown"
+                    per_site.setdefault(family, {}).setdefault(
+                        row["timestamp"], []).append(row["value"])
+            else:
+                wanted = {str(cell_id) for cell_id in selected_cells}
+                rows = self._collect_cell_rows(event_id, [site_id], metric, minutes)
+                for row in rows:
+                    if str(row.get("cell_id")) not in wanted or row.get("value") is None:
+                        continue
+                    family = self._cell_technology_family(row.get("cell_id"))
+                    if technology_family and family and family != technology_family:
+                        continue
+                    family = family or technology_family or "unknown"
+                    per_site.setdefault(family, {}).setdefault(
+                        row["timestamp"], []).append(row["value"])
+
+            # Uma seleção parcial vira primeiro um agregado do seu próprio site;
+            # depois os sites são combinados com a mesma regra da série legada.
+            for family, timestamps in per_site.items():
+                target = by_family.setdefault(family, {})
+                for timestamp, values in timestamps.items():
+                    value = self._combine_family_values(metric, values)
+                    if value is not None:
+                        target.setdefault(timestamp, []).append(value)
+
+        series = []
+        for family in sorted(by_family, key=lambda item: (item == "unknown", item)):
+            timestamps = by_family[family]
+            labels = sorted(timestamps)
+            series.append({
+                "technology": None if family == "unknown" else family,
+                "labels": labels,
+                "values": [
+                    self._combine_family_values(metric, timestamps[timestamp])
+                    for timestamp in labels
+                ],
             })
         return series
 
@@ -1003,16 +1224,51 @@ class Api:
     def get_kpi_series(self, event_id: str, site_id: str, metric: str,
                        minutes: int = 60, cell_id: str = "__all__",
                        technology: str = None,
-                       technology_family: str = None) -> dict:
+                       technology_family: str = None,
+                       scope: str = None, scope_id: str = None) -> dict:
         """Retorna série temporal para o gráfico de KPIs.
 
         Aceita o id fundido: expande para os ``site_id`` dos membros e devolve
         ``series`` com uma entrada por família. Com uma família só, ``labels``/
         ``values`` continuam no formato antigo.
+
+        ``scope="cluster"`` combina linhas SITE para membros completos. Quando o
+        cluster contém uma seleção parcial, somente as linhas CELL explicitamente
+        escolhidas entram no agregado.
         """
         try:
             config = db.get_event(event_id) or _active_event
             merged = self._merged_sites(config) if config else []
+
+            if scope == "cluster":
+                family = technology_family if technology_family in ("4G", "5G") else None
+                thresholds = self._metric_thresholds(event_id, metric)
+                cluster = self._find_cluster(config, scope_id)
+                if not cluster:
+                    return {
+                        "ok": True, "labels": [], "values": [], "series": [],
+                        "cells_data": {}, "gaps": [], "thresholds": thresholds,
+                    }
+                selections = self._cluster_raw_selections(cluster, merged, config)
+                series = self._cluster_series_by_family(
+                    event_id, selections, metric, minutes, technology, family)
+                if not series:
+                    return {
+                        "ok": True, "labels": [], "values": [], "series": [],
+                        "cells_data": {}, "gaps": [], "thresholds": thresholds,
+                    }
+                aligned, common = self._align_kpi_series(series)
+                axis = aligned[0]["labels"] if len(aligned) == 1 else common
+                return {
+                    "ok": True,
+                    "labels": axis,
+                    "values": aligned[0]["values"] if len(aligned) == 1 else [],
+                    "series": aligned,
+                    "cells_data": {},
+                    "gaps": self._detect_gaps(axis, max_gap_seconds=90),
+                    "thresholds": thresholds,
+                }
+
             site = self._find_merged_site(merged, site_id)
             members = list((site or {}).get("members") or [{"site_id": site_id, "family": None}])
             family = technology_family if technology_family in ("4G", "5G") else None

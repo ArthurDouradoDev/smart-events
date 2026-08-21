@@ -155,13 +155,14 @@ O banco de campo tem **260 linhas CELL** de `throughput_dl` em `5G_NRDUCELL` com
   `get_sites`, `get_site_cells`, `get_alarms`, `get_vips` e `get_kpi_series`. Se um consumidor
   usar `config["sites"]` cru, ele devolve um `site_id` que nenhum marcador tem — falha silenciosa
   do mesmo formato das já registradas em `ERRORS.md`.
-- **Cluster é dono da lista de sites (N:N), não propriedade do site.** Um site pode servir a mais
-  de um cluster (o caso do estádio: um site atende Sul e Oeste).
+- **Cluster é dono da seleção de membros (N:N), não propriedade do site/célula.** Um site ou uma
+  célula pode servir a mais de um cluster (o caso do estádio: um site atende Sul e Oeste). Clusters
+  legados com `site_ids` seguem válidos; novos clusters usam `members[{site_id, cell_ids}]`.
 - **O polígono do cluster é ferramenta de seleção, não regra de pertencimento.** Fica guardado
   para redesenhar, mas **nunca é reavaliado na exibição**; a verdade é `site_ids`.
-- **O agregado de cluster se monta sobre as linhas `SITE` já persistidas dos membros**, nunca
-  sobre `CELL` cru — mantém o número do cluster consistente com o número de cada site por
-  construção, e é ordens de grandeza mais barato.
+- **O agregado usa linhas `SITE` para membros completos e `CELL` apenas para seleções parciais.**
+  A seleção parcial é primeiro agregada dentro do site e depois combinada entre sites pela mesma
+  regra da métrica. Assim, o caminho antigo continua barato e consistente, sem ignorar células.
 - **Uma task por POST** (§0.5). Unicidade passa a ser por `task_id`, não por tecnologia.
 - **Nenhuma fórmula é criada, apagada ou reescrita** em nenhuma fase.
 - **Grade de tempo comum** para os 9 gráficos, servida por um endpoint só (§0.6).
@@ -462,11 +463,11 @@ como o processo é feito manualmente e o único formato que o OSS foi observado 
 
 ### Explicação simples
 
-Clusters são grupos de sites criados pelo operador para analisar uma parte do evento — a
-arquibancada sul de um estádio, por exemplo. Um mesmo site pode estar em vários clusters, porque
-na prática ele atende mais de um setor. A montagem é feita no cadastro, de três formas que se
-somam: laço no mapa, clique no marcador e busca por nome. No app, um dropdown filtra a lista e o
-mapa pelo cluster escolhido.
+Clusters são grupos de sites ou células criados pelo operador para analisar uma parte do evento —
+a arquibancada sul de um estádio, por exemplo. Um mesmo site ou célula pode estar em vários
+clusters. A montagem fica em uma seção própria do formulário de Eventos, com árvore hierárquica
+site → células; seleção pelo mapa e laço são atalhos complementares. No app, um dropdown filtra a
+lista e o mapa pelo cluster escolhido.
 
 ### Escopo detalhado
 
@@ -475,13 +476,19 @@ mapa pelo cluster escolhido.
 ```jsonc
 event.clusters = [
   { "id": "sul", "name": "Arquibancada Sul", "color": "#F85149",
-    "site_ids": ["SPSMG7", "SPSMH1"],
+    "site_ids": ["725483", "725471"],                // compatibilidade/índice
+    "members": [
+      {"site_id": "725483", "cell_ids": ["4G-SPSMG7-0", "4G-SPSMG7-1"]},
+      {"site_id": "725471", "cell_ids": ["4G-SPSMH1-0", "4G-SPSMH1-1"]}
+    ],
     "polygon": [[lat,lng], …] }        // opcional, só para redesenhar
 ]
 ```
 
-`site_ids` guarda **ids fundidos** (Fase 1) — o operador seleciona "SPSMG7" e leva 4G e 5G junto,
-sem a chance de marcar um e esquecer o outro.
+`members` é autoritativo nos clusters novos e guarda o site cru dono de cada célula, eliminando
+ambiguidade entre os gêmeos 4G/5G. A árvore agrupa os gêmeos como um único site físico e marcar o
+nó pai seleciona todas as células das duas tecnologias. `site_ids` permanece no payload para
+compatibilidade; quando `members` não existe, continua significando site físico inteiro.
 
 **`server.py`**
 
@@ -493,17 +500,14 @@ sem a chance de marcar um e esquecer o outro.
 
 **`server_frontend/index.html`**
 
-- Terceiro modo na barra de ferramentas do mapa, **"Clusters"**, no padrão de
-  `toolAutoPoly`/`toolDrawPoly` ([:1488-1502](../../server_frontend/index.html#L1488)).
-- Painel de clusters: lista com nome, cor, contagem de sites, `+ Novo cluster`, renomear, excluir.
-- Com um cluster ativo, três formas **que se somam**:
-  1. **laço no mapa** — polígono desenhado; os sites dentro entram (ray casting, ~10 linhas,
-     §0.8). Dois laços que se cruzam produzem sites compartilhados sem tratamento especial;
-  2. **clique no marcador** — alterna dentro/fora. É a válvula do "não é estrito";
-  3. **busca por nome** — autocomplete para adicionar em lote (necessário em eventos com milhares
-     de sites, onde o laço não resolve sozinho).
-- Feedback visual: no modo Clusters, o marcador dos sites do cluster ativo ganha anel na cor dele
-  e o painel mostra `Sul · 14 sites`. Fora do modo, marcadores voltam ao normal.
+- Seção **"Clusters do Evento"** logo após a planilha EP, sempre visível no fluxo do formulário;
+  clusters deixam de ser um modo escondido na barra do mapa.
+- Workspace com lista de clusters, nome/cor editáveis, contagem `sites · células` e árvore com
+  checkboxes tri-state. Gêmeos 4G/5G são agrupados por nome + distância ≤ 50 m.
+- Busca filtra tanto nomes de site quanto IDs de célula. Marcar o pai inclui o site inteiro;
+  marcar filhos permite qualquer subconjunto de células.
+- O mapa permanece como atalho explícito: clique em marcador alterna o site inteiro e o laço soma
+  os sites contidos. O anel do cluster ativo permanece visível enquanto ele é editado.
 - Submit ([:1662](../../server_frontend/index.html#L1662)): `clusters` entra no payload ao lado
   de `integration`. `editEvent` repopula a partir de `event.clusters`.
 
@@ -511,9 +515,9 @@ sem a chance de marcar um e esquecer o outro.
 
 - `get_sites`: cada site fundido ganha `cluster_ids: [...]`, derivado de `event.clusters`.
 - `get_clusters(event_id)` — lista para o dropdown do app.
-- `get_kpi_series`: aceita `scope="cluster"` + `scope_id`. Expande cluster → sites fundidos →
-  `site_id` dos membros, lê as linhas **`SITE`** de cada um e combina entre sites com **a mesma
-  regra por métrica** já usada ([api.py:645-655](../../api/api.py#L645)). Não lê `CELL` cru.
+- `get_kpi_series`: aceita `scope="cluster"` + `scope_id`. Membros inteiros leem **`SITE`**;
+  membros parciais leem apenas as linhas **`CELL`** selecionadas, agregam primeiro por site e
+  depois entre sites com a mesma regra por métrica.
 
 **`frontend/`**
 
@@ -538,6 +542,8 @@ sem a chance de marcar um e esquecer o outro.
   bate com a combinação manual das séries `SITE` deles, pela regra da métrica.
 - `test_cluster_com_site_fundido_cobre_as_duas_tecnologias` — cluster com `SPSMG7` devolve série
   4G e 5G.
+- `test_cluster_parcial_agrega_somente_as_celulas_selecionadas` — célula não marcada não altera
+  o agregado e a API informa `cell_count`/seleção parcial.
 - Playwright: criar cluster por laço, adicionar site por clique, filtrar no app e conferir a lista.
 
 ### Como validar
@@ -548,16 +554,15 @@ sem a chance de marcar um e esquecer o outro.
 ```
 
 **Visualmente, no cadastro:**
-1. Entrar no modo Clusters, criar "Sul", desenhar um laço → os sites dentro ganham o anel e o
-   contador sobe.
-2. Criar "Oeste" com um laço que **cruza** o primeiro → o site da interseção fica nos dois
-   (conferir contagem nos dois painéis).
-3. Clicar num marcador fora do laço → entra; clicar de novo → sai.
-4. Salvar, reabrir o evento → clusters e polígonos voltam preenchidos.
+1. Na seção Clusters do Evento, criar "Sul" e marcar um site pai → todas as suas células entram.
+2. Desmarcar parte das células → checkbox do site fica intermediário e o contador de células cai.
+3. Usar "Selecionar no mapa" ou "Desenhar área" → os sites entram por inteiro e ganham o anel.
+4. Criar "Oeste" e repetir parte da seleção → os mesmos sites/células podem ficar nos dois.
+5. Salvar e reabrir o evento → membros granulares e polígonos voltam preenchidos.
 
 **No app:**
-5. O dropdown CLUSTER lista "Todos / Sul / Oeste"; escolher "Sul" recorta a lista e o mapa.
-6. Selecionar o cluster como escopo do gráfico → série agregada, com linha 4G e 5G.
+6. O dropdown CLUSTER lista "Todos / Sul / Oeste"; escolher "Sul" recorta a lista e o mapa.
+7. Selecionar o cluster como escopo do gráfico → série agregada apenas com as células escolhidas.
 
 ### Sugestão de commit
 

@@ -9,6 +9,7 @@ let _chart = null;
 let _popupChart = null;
 let _searchQuery = "";
 let _catalogRequestId = 0;
+let _chartRequestId = 0;
 
 const METRIC_LABELS = {
   utilization_dl:    "Utilização DL (%)",
@@ -72,15 +73,16 @@ export function initKpi() {
   _initChart();
   _initPopupChart();
   _loadKpiCatalog();
+  _loadClusters();
 
   // O bootstrap monta a tela antes de restaurar o evento. Recarregamos o
   // catálogo quando o contexto real chega (e também ao alternar eventos), para
   // que o dropdown reflita somente as tasks PM daquele evento.
   State.on("change:activeEvent", event => {
-    if (event?.id) _loadKpiCatalog(event.id);
+    if (event?.id) { _loadKpiCatalog(event.id); _loadClusters(event.id); }
   });
   State.on("change:historicalEvent", event => {
-    if (event?.id) _loadKpiCatalog(event.id);
+    if (event?.id) { _loadKpiCatalog(event.id); _loadClusters(event.id); }
   });
 
   const popupModal = document.getElementById("chart-popup-modal");
@@ -137,6 +139,24 @@ export function initKpi() {
       State.set("techFilter", e.target.value || "all");
     });
   }
+
+  const clusterSel = document.getElementById("cluster-selector");
+  if (clusterSel) {
+    clusterSel.addEventListener("change", e => {
+      const nextFilter = e.target.value || "all";
+      State.set("clusterFilter", nextFilter);
+      if (nextFilter === CLUSTER_COMPARE_FILTER) {
+        State.set("selectedSite", CLUSTER_COMPARE_SCOPE);
+      } else if (_isClusterCompareScope(State.selectedSite)) {
+        const nextSite = nextFilter === "all"
+          ? State.sites?.[0]?.id
+          : `${CLUSTER_SCOPE_PREFIX}${nextFilter}`;
+        State.set("selectedSite", nextSite || null);
+      }
+    });
+  }
+  State.on("change:clusters", _renderClusterSelector);
+  State.on("change:clusterFilter", () => _renderSiteList(State.sites || []));
 
   // Controla exibição do tooltip do site completo
   State.on("change:selectedCell", val => {
@@ -242,6 +262,33 @@ async function _loadKpiCatalog(eventId = State.eventId) {
   if (selector.value && selector.value !== State.selectedMetric) State.set("selectedMetric", selector.value);
 }
 
+async function _loadClusters(eventId = State.eventId) {
+  if (!eventId) return;
+  const clusters = await API.getClusters(eventId);
+  State.set("clusters", Array.isArray(clusters) ? clusters : []);
+}
+
+function _renderClusterSelector(clusters) {
+  const row = document.getElementById("cluster-filter-row");
+  const sel = document.getElementById("cluster-selector");
+  if (!sel) return;
+  const list = clusters || State.clusters || [];
+  row?.classList.toggle("hidden", list.length === 0);
+  document.getElementById("kpi-zone")?.classList.toggle("has-clusters", list.length > 0);
+  if (!list.length) {
+    if (State.clusterFilter !== "all") State.set("clusterFilter", "all");
+    return;
+  }
+  const current = State.clusterFilter || "all";
+  const compareOption = list.length > 1
+    ? `<option value="${CLUSTER_COMPARE_FILTER}">Comparar clusters</option>`
+    : "";
+  sel.innerHTML = '<option value="all">Todos os sites</option>' + compareOption + list.map(c =>
+    `<option value="${_esc(c.id)}">${_esc(c.name)} · ${c.site_count} sites</option>`).join("");
+  sel.value = [...sel.options].some(o => o.value === current) ? current : "all";
+  if (sel.value !== current) State.set("clusterFilter", sel.value);
+}
+
 function commonMetricTechnologies(metricId) {
   return [...new Set(KPI_CATALOG.filter(item => item.id === metricId)
     .map(item => _technologyFamily(item.technology)))].join("/");
@@ -269,17 +316,20 @@ function _effectiveTechFilter(site) {
   return State.techFilter || "all";
 }
 
-function _syncTechSelector(site) {
+function _syncTechSelector(site, forceVisible = false) {
   const sel = document.getElementById("tech-selector");
   if (!sel) return;
-  const show = _siteHasBothFamilies(site);
+  const show = forceVisible || _siteHasBothFamilies(site);
   sel.classList.toggle("hidden", !show);
   if (show) sel.value = State.techFilter || "all";
 }
 
 async function _onTechFilterChanged() {
   const { eventId, historicalTimestamp, mode, selectedSite } = State;
-  _syncTechSelector(State.sites.find(s => s.id === selectedSite));
+  _syncTechSelector(
+    State.sites.find(s => s.id === selectedSite),
+    _isClusterScope(selectedSite) || _isClusterCompareScope(selectedSite),
+  );
   if (eventId) {
     const ts = mode === "historical" ? historicalTimestamp : null;
     const sites = await API.getSites(eventId, ts, State.selectedMetric, _techFamilyParam());
@@ -311,6 +361,20 @@ function _renderSiteList(sites) {
   const counts = State.siteCounts;
   summary.textContent = `${counts.healthy} ok · ${counts.critical} críticos`;
 
+  const clusterFilter = State.clusterFilter || "all";
+  if (clusterFilter === CLUSTER_COMPARE_FILTER) {
+    const clusters = (State.clusters || []).filter(cluster => {
+      const name = (cluster.name || "").toLowerCase();
+      const id = (cluster.id || "").toLowerCase();
+      return name.includes(_searchQuery) || id.includes(_searchQuery);
+    });
+    if (colHeader) colHeader.textContent = "Escopo";
+    summary.textContent = `${clusters.length} clusters`;
+    el.innerHTML = "";
+    clusters.forEach(cluster => el.appendChild(_buildClusterScopeItem(cluster, true)));
+    return;
+  }
+
   // Ordena por volume (share decrescente) ou por status de alerta
   const sorted = [...sites].sort((a, b) => {
     if (isVolumeMetric) {
@@ -320,14 +384,22 @@ function _renderSiteList(sites) {
     return (order[a.status]??3) - (order[b.status]??3);
   });
 
-  // Filtra por busca (nome ou ID)
+  // Filtra por busca (nome ou ID) e pelo cluster ativo no dropdown
   const filtered = sorted.filter(site => {
     const name = (site.name || "").toLowerCase();
     const id = (site.id || "").toLowerCase();
-    return name.includes(_searchQuery) || id.includes(_searchQuery);
+    const matchesSearch = name.includes(_searchQuery) || id.includes(_searchQuery);
+    const matchesCluster = clusterFilter === "all" || (site.cluster_ids || []).includes(clusterFilter);
+    return matchesSearch && matchesCluster;
   });
 
   el.innerHTML = "";
+
+  if (clusterFilter !== "all") {
+    const cluster = (State.clusters || []).find(c => c.id === clusterFilter);
+    if (cluster) el.appendChild(_buildClusterScopeItem(cluster));
+  }
+
   filtered.forEach(site => {
     const item = document.createElement("div");
     item.className = `site-item ${site.status}`;
@@ -373,6 +445,46 @@ function _renderSiteList(sites) {
   });
 }
 
+const CLUSTER_SCOPE_PREFIX = "cluster:";
+const CLUSTER_COMPARE_FILTER = "compare";
+const CLUSTER_COMPARE_SCOPE = "clusters:compare";
+
+function _isClusterScope(id) {
+  return typeof id === "string" && id.startsWith(CLUSTER_SCOPE_PREFIX);
+}
+
+function _clusterIdFromScope(id) {
+  return id.slice(CLUSTER_SCOPE_PREFIX.length);
+}
+
+function _isClusterCompareScope(id) {
+  return id === CLUSTER_COMPARE_SCOPE;
+}
+
+function _buildClusterScopeItem(cluster, comparisonMode = false) {
+  const scopeId = `${CLUSTER_SCOPE_PREFIX}${cluster.id}`;
+  const item = document.createElement("div");
+  item.className = "site-item";
+  item.dataset.id = scopeId;
+  if (State.selectedSite === scopeId) item.classList.add("selected");
+  item.innerHTML = `
+    <span class="site-dot" style="background:${_esc(cluster.color || "#388BFD")}"></span>
+    <span class="site-name">${_esc(cluster.name)} <span class="site-tech">agregado${cluster.has_partial_selection ? " parcial" : ""}</span></span>
+    <span class="site-util" title="${cluster.cell_count ?? 0} células">${cluster.site_count} sites · ${cluster.cell_count ?? 0} cél.</span>`;
+  if (comparisonMode) {
+    item.title = `Ver somente o cluster ${cluster.name}`;
+    item.addEventListener("click", () => {
+      State.set("clusterFilter", cluster.id);
+      State.set("selectedSite", scopeId);
+      const selector = document.getElementById("cluster-selector");
+      if (selector) selector.value = cluster.id;
+    });
+  } else {
+    item.addEventListener("click", () => State.set("selectedSite", scopeId));
+  }
+  return item;
+}
+
 // Helper para sufixo de unidade
 function _getMetricSuffix(metric) {
   const meta = KPI_CATALOG.find(item => item.id === metric);
@@ -388,8 +500,26 @@ async function _populateCellSelector(siteId, preserveScope = false) {
   if (!sel) return;
 
   const { eventId } = State;
+  sel.disabled = false;
+  sel.title = "Selecionar célula";
   if (!siteId || !eventId) {
     sel.innerHTML = '<option value="__all__">Site completo</option>';
+    return;
+  }
+
+  if (_isClusterCompareScope(siteId)) {
+    sel.innerHTML = '<option value="__media__">Agregado por cluster</option>';
+    sel.value = "__media__";
+    sel.disabled = true;
+    sel.title = "Cada série representa o agregado de um cluster";
+    State.set("selectedCell", "__media__");
+    return;
+  }
+
+  if (_isClusterScope(siteId)) {
+    sel.innerHTML = '<option value="__media__">Agregado do cluster</option>';
+    sel.value = "__media__";
+    State.set("selectedCell", "__media__");
     return;
   }
 
@@ -430,6 +560,21 @@ async function _onSiteSelected(siteId) {
       el.scrollIntoView({ behavior: "smooth", block: "nearest" });
     }
   });
+
+  if (_isClusterCompareScope(siteId)) {
+    document.getElementById("chart-site-label").textContent = "Comparativo de clusters";
+    _syncTechSelector(null, true);
+    await _populateCellSelector(siteId);
+    return;
+  }
+
+  if (_isClusterScope(siteId)) {
+    const cluster = (State.clusters || []).find(c => c.id === _clusterIdFromScope(siteId));
+    document.getElementById("chart-site-label").textContent = cluster ? `Cluster: ${cluster.name}` : "—";
+    _syncTechSelector(null, true);
+    await _populateCellSelector(siteId);
+    return;
+  }
 
   const site = State.sites.find(s => s.id === siteId);
   document.getElementById("chart-site-label").textContent = site?.name ?? "—";
@@ -630,17 +775,82 @@ function _detectGapsJS(labels, maxGapSeconds = 90) {
   return gaps;
 }
 
+async function _loadClusterComparisonData(eventId, metric, minutes, technologyFamily) {
+  const clusters = State.clusters || [];
+  const responses = await Promise.all(clusters.map(async cluster => ({
+    cluster,
+    data: await API.getKpiSeries(
+      eventId, null, metric, minutes, "__media__", technologyFamily,
+      "cluster", cluster.id,
+    ),
+  })));
+
+  const allLabels = [...new Set(responses.flatMap(({ data }) => {
+    const series = Array.isArray(data?.series) && data.series.length
+      ? data.series
+      : [{ labels: data?.labels || [] }];
+    return series.flatMap(item => item.labels || []);
+  }))].sort();
+
+  const series = [];
+  responses.forEach(({ cluster, data }) => {
+    if (!data?.ok) return;
+    const sourceSeries = Array.isArray(data.series) && data.series.length
+      ? data.series
+      : ((data.labels || []).length && (data.values || []).length
+        ? [{ technology: null, labels: data.labels, values: data.values }]
+        : []);
+    sourceSeries.forEach(item => {
+      const adjusted = _applyGaps(item.values || [], data.gaps || []);
+      const valuesByTimestamp = new Map(
+        (item.labels || []).map((timestamp, index) => [timestamp, adjusted[index]]),
+      );
+      series.push({
+        clusterId: cluster.id,
+        clusterName: cluster.name,
+        clusterColor: cluster.color || "#388BFD",
+        technology: item.technology || null,
+        labels: allLabels,
+        values: allLabels.map(timestamp => valuesByTimestamp.get(timestamp) ?? null),
+      });
+    });
+  });
+
+  const firstValid = responses.find(({ data }) => data?.ok)?.data;
+  return {
+    ok: !!firstValid,
+    labels: allLabels,
+    values: [],
+    series,
+    cells_data: {},
+    gaps: [],
+    thresholds: firstValid?.thresholds || {},
+  };
+}
+
 async function _refreshChart(arg) {
   // fromPoll: atualização automática do ciclo de 30s — não deve reabrir o popup que o usuário fechou.
   const fromPoll = !!(arg && arg.fromPoll);
+  const requestId = ++_chartRequestId;
   if (!_chart) return;
   const { eventId, selectedSite, selectedMetric, selectedCell, timeWindow, mode, historicalTimestamp } = State;
   if (!eventId || !selectedSite) return;
 
-  const cellId = selectedCell || "__all__";
+  const isCluster = _isClusterScope(selectedSite);
+  const isClusterComparison = _isClusterCompareScope(selectedSite);
+  const isClusterAggregate = isCluster || isClusterComparison;
+  const cellId = isClusterAggregate ? "__media__" : (selectedCell || "__all__");
   const queryWindow = mode === "historical" ? 0 : (timeWindow || 0);
-  const data = await API.getKpiSeries(
-    eventId, selectedSite, selectedMetric, queryWindow, cellId, _techFamilyParam());
+  const data = isClusterComparison
+    ? await _loadClusterComparisonData(
+        eventId, selectedMetric, queryWindow, _techFamilyParam())
+    : isCluster
+    ? await API.getKpiSeries(
+        eventId, null, selectedMetric, queryWindow, cellId, _techFamilyParam(),
+        "cluster", _clusterIdFromScope(selectedSite))
+    : await API.getKpiSeries(
+        eventId, selectedSite, selectedMetric, queryWindow, cellId, _techFamilyParam());
+  if (requestId !== _chartRequestId) return;
   if (!data.ok) return;
 
   let labels = data.labels;
@@ -687,7 +897,9 @@ async function _refreshChart(arg) {
     gaps = _detectGapsJS(labels, 90);
   }
 
-  const cellLabel = cellId === "__all__"   ? "Site completo" :
+  const cellLabel = isClusterComparison ? "Agregado por cluster" :
+                    isCluster ? "Agregado do cluster" :
+                    cellId === "__all__"   ? "Site completo" :
                     cellId === "__media__" ? "Média das células" :
                     cellId;
 
@@ -695,7 +907,35 @@ async function _refreshChart(arg) {
   let legendDisplay = false;
   const useFamilyAverages = cellId === "__media__" && techSeries.length > 0;
 
-  if (useFamilyAverages) {
+  if (isClusterComparison) {
+    labels = techSeries[0]?.labels || labels;
+    const familiesPerCluster = techSeries.reduce((counts, item) => {
+      const key = item.clusterId;
+      if (!counts.has(key)) counts.set(key, new Set());
+      if (item.technology) counts.get(key).add(item.technology);
+      return counts;
+    }, new Map());
+    techSeries.forEach(item => {
+      const color = item.clusterColor || "#388BFD";
+      const showTechnology = (familiesPerCluster.get(item.clusterId)?.size || 0) > 1;
+      datasets.push({
+        label: showTechnology && item.technology
+          ? `${item.clusterName} · ${item.technology}`
+          : item.clusterName,
+        data: item.values || [],
+        borderColor: color,
+        backgroundColor: "transparent",
+        borderWidth: 2,
+        borderDash: item.technology === "5G" ? [7, 4] : [],
+        pointRadius: 0,
+        pointHoverRadius: 4,
+        tension: 0.3,
+        fill: false,
+        spanGaps: false,
+      });
+    });
+    legendDisplay = true;
+  } else if (useFamilyAverages) {
     labels = techSeries[0].labels || labels;
     techSeries.forEach(item => {
       const color = FAMILY_COLORS[item.technology] || "#388BFD";
@@ -790,8 +1030,13 @@ async function _refreshChart(arg) {
   const isPopupOpen = popupModal && !popupModal.classList.contains("hidden");
 
   if (popupModal) {
+    const clusterName = isCluster
+      ? (State.clusters || []).find(c => c.id === _clusterIdFromScope(selectedSite))?.name
+      : null;
     const site = State.sites?.find(s => s.id === selectedSite);
-    const siteName = site?.name ?? selectedSite;
+    const siteName = isClusterComparison
+      ? "Comparativo de clusters"
+      : (clusterName ? `Cluster: ${clusterName}` : (site?.name ?? selectedSite));
     const metricLabel = METRIC_LABELS[selectedMetric] || selectedMetric;
     const titleEl = document.getElementById("popup-chart-title");
     if (titleEl) {

@@ -651,3 +651,128 @@ class TestSiteMerge:
         assert len(cells_all) == 15
         assert {cell["family"] for cell in cells_5g} == {"5G"}
         assert {cell["family"] for cell in cells_4g} == {"4G"}
+
+
+def _event_with_clusters(sample_event, clusters, event_id="cluster-event", extra_sites=None):
+    sites = list(sample_event["sites"])
+    if extra_sites:
+        sites.extend(extra_sites)
+    return {**sample_event, "id": event_id, "sites": sites, "clusters": clusters}
+
+
+class TestClusters:
+    def test_cluster_aceita_o_mesmo_site_em_mais_de_um_grupo(self, api, sample_event):
+        extra_site = {
+            "id": "SR-EXTRA", "name": "SR-EXTRA", "lat": -23.59, "lng": -46.68,
+            "is_event_site": True, "cells": _cells("SR-EXTRA", 2),
+        }
+        clusters = [
+            {"id": "sul", "name": "Sul", "color": "#F85149",
+             "site_ids": ["SR-SPPNB2", "SR-EXTRA"]},
+            {"id": "oeste", "name": "Oeste", "color": "#388BFD",
+             "site_ids": ["SR-SPPNB2"]},
+        ]
+        event = _event_with_clusters(sample_event, clusters, extra_sites=[extra_site])
+        database.save_event(event)
+
+        sites = {site["id"]: site for site in api.get_sites(event["id"])}
+        assert set(sites["SR-SPPNB2"]["cluster_ids"]) == {"sul", "oeste"}
+        assert sites["SR-EXTRA"]["cluster_ids"] == ["sul"]
+
+    def test_poligono_nao_altera_pertencimento_depois_de_salvo(self, api, sample_event):
+        clusters = [{
+            "id": "sul", "name": "Sul", "color": "#F85149",
+            "site_ids": ["SR-SPPNB2"],
+            # Polígono deliberadamente longe do site — pertencimento é só site_ids (§1).
+            "polygon": [[10.0, 10.0], [10.0, 10.1], [10.1, 10.1], [10.1, 10.0]],
+        }]
+        event = _event_with_clusters(sample_event, clusters, event_id="cluster-polygon")
+        database.save_event(event)
+
+        sites = {site["id"]: site for site in api.get_sites(event["id"])}
+        assert sites["SR-SPPNB2"]["cluster_ids"] == ["sul"]
+        assert api.get_clusters(event["id"])[0]["site_count"] == 1
+
+    def test_cluster_com_site_fundido_cobre_as_duas_tecnologias(self, api, sample_event):
+        event = _twin_sites_event(sample_event, "cluster-merged")
+        event["clusters"] = [{
+            "id": "campo", "name": "Campo", "color": "#388BFD",
+            # id cru de um dos gêmeos — precisa resolver para o site fundido inteiro.
+            "site_ids": ["725483"],
+        }]
+        database.save_event(event)
+
+        sites = {site["id"]: site for site in api.get_sites(event["id"])}
+        assert sites["SPSMG7"]["cluster_ids"] == ["campo"]
+        assert api.get_clusters(event["id"])[0]["site_count"] == 1
+
+        _insert_site_kpi(event["id"], "725483", "4G", 10.0)
+        _insert_site_kpi(event["id"], "1774059", "5G_NRDUCELL", 40.0)
+
+        result = api.get_kpi_series(
+            event["id"], None, "utilization_dl", minutes=0,
+            scope="cluster", scope_id="campo")
+        by_tech = {item["technology"]: item for item in result["series"]}
+        assert set(by_tech) == {"4G", "5G"}
+        assert 10.0 in by_tech["4G"]["values"]
+        assert 40.0 in by_tech["5G"]["values"]
+
+    def test_serie_de_cluster_combina_linhas_site_dos_membros(self, api, sample_event):
+        extra_site = {
+            "id": "SR-EXTRA", "name": "SR-EXTRA", "lat": -23.59, "lng": -46.68,
+            "is_event_site": True, "cells": _cells("SR-EXTRA", 2),
+        }
+        clusters = [{"id": "sul", "name": "Sul", "color": "#F85149",
+                     "site_ids": ["SR-SPPNB2", "SR-EXTRA"]}]
+        event = _event_with_clusters(
+            sample_event, clusters, event_id="cluster-series", extra_sites=[extra_site])
+        database.save_event(event)
+
+        ts = "2026-08-19T12:00:00Z"
+        _insert_site_kpi(event["id"], "SR-SPPNB2", "4G", 10.0, ts)
+        _insert_site_kpi(event["id"], "SR-EXTRA", "4G", 20.0, ts)
+
+        result = api.get_kpi_series(
+            event["id"], None, "utilization_dl", minutes=0,
+            scope="cluster", scope_id="sul")
+
+        assert len(result["series"]) == 1
+        # utilization_dl combina por máximo (pior caso) entre os sites do cluster.
+        assert result["series"][0]["values"] == [20.0]
+
+    def test_cluster_parcial_agrega_somente_as_celulas_selecionadas(self, api, sample_event):
+        event = _twin_sites_event(sample_event, "cluster-partial-cells")
+        event["clusters"] = [{
+            "id": "setor-a", "name": "Setor A", "color": "#F85149",
+            "members": [{
+                "site_id": "725483",
+                "cell_ids": ["4G-SPSMG7-0", "4G-SPSMG7-1"],
+            }],
+        }]
+        database.save_event(event)
+        _insert_cell_kpi(event["id"], "725483", "4G-SPSMG7-0", "4G", 10.0)
+        _insert_cell_kpi(event["id"], "725483", "4G-SPSMG7-1", "4G", 80.0)
+        _insert_cell_kpi(event["id"], "725483", "4G-SPSMG7-2", "4G", 99.0)
+
+        result = api.get_kpi_series(
+            event["id"], None, "utilization_dl", minutes=0,
+            scope="cluster", scope_id="setor-a")
+
+        assert result["series"][0]["technology"] == "4G"
+        assert result["series"][0]["values"] == [80.0]
+        cluster = api.get_clusters(event["id"])[0]
+        assert cluster["site_count"] == 1
+        assert cluster["cell_count"] == 2
+        assert cluster["has_partial_selection"] is True
+
+    def test_get_clusters_retorna_contagem_cor_e_poligono(self, api, sample_event):
+        clusters = [{"id": "sul", "name": "Sul", "color": "#F85149",
+                     "site_ids": ["SR-SPPNB2"], "polygon": [[1.0, 2.0]]}]
+        event = _event_with_clusters(sample_event, clusters, event_id="cluster-get")
+        database.save_event(event)
+
+        assert api.get_clusters(event["id"]) == [{
+            "id": "sul", "name": "Sul", "color": "#F85149",
+            "site_count": 1, "cell_count": 3,
+            "has_partial_selection": False, "polygon": [[1.0, 2.0]],
+        }]
