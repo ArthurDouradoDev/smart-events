@@ -580,3 +580,43 @@ failed** (357 do baseline + 5 `TestClusters` em `test_api.py` + 3 em
 `test_server_parse_sites.py` + 7 em `test_server_frontend_clusters_ui.py` + 2 em
 `test_frontend_cluster_filter_ui.py`).
 
+---
+
+## 2026-08-21 — Fase 5: visão geral com nove gráficos sincronizados
+
+Plano: `docs/plans/2026-08-19-001-feat-site-merge-clusters-kpi-overview-plan.md`.
+
+O botão **Ver KPIs** abre um modal full-screen com abas 4G/5G, seletor unificado de
+site/cluster, janelas 15/30/60 min e Evento, e uma grade responsiva 3×3.
+
+**Decisões travadas:**
+
+- **Um endpoint, uma grade:** `Api.get_kpi_overview(event_id, scope, scope_id,
+  technology_family, minutes)` reutiliza `get_kpi_series` para não duplicar a
+  expansão de site fundido nem a agregação granular de cluster. Depois une todos
+  os timestamps e projeta cada métrica nessa grade; ausência de ponto vira `None`
+  no índice correto. Todas as listas de `metrics` têm sempre o comprimento de
+  `labels`.
+- **Composição explícita:** 4G tem os nove KPIs do bloco Monitoring, sem
+  `ran_rtt`/`terrestrial_rtt`. 5G cobre treze métricas em nove painéis: cinco
+  individuais e quatro pares (PRB, Throughput, Volume SA e Volume NSA).
+- **Pares 5G:** DL é linha no eixo esquerdo; UL é barra no eixo direito. Todas as
+  séries usam `spanGaps: false`.
+- **Sincronização:** o plugin `overviewCrosshair` mantém um único índice ativo e
+  desenha a linha vertical nos nove Chart.js. O tooltip externo HTML aparece só
+  no painel sob o mouse; os outros oito recebem apenas o crosshair. Painel sem
+  nenhum valor mantém o canvas sincronizado e sobrepõe “Sem dados no período”.
+- **Escopos independem do filtro atual:** ao abrir, a tela busca os sites sem
+  filtro de tecnologia e os clusters do evento. Assim, um filtro 4G aplicado no
+  dashboard não esconde sites 5G do seletor da aba 5G.
+- **Camada full-screen:** o modal usa `z-index: 11000`, acima do cabeçalho global
+  (`10000`). O primeiro Playwright detectou que o cabeçalho interceptava os
+  cliques da aba; o teste passou depois da correção.
+
+Verificação visual: capturas Playwright em 1440×900 confirmaram as duas abas, os
+nove painéis integralmente visíveis e os quatro pares 5G com escalas independentes.
+
+Gate completo: `pytest tests/ -q --basetemp=.pytest-work/phase5-full` → **388 passed,
+10 skipped, 0 failed**. Depois do ajuste exclusivamente visual de altura, os dois
+testes Playwright da Fase 5 passaram novamente (**2 passed**).
+

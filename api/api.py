@@ -28,6 +28,25 @@ _update_callback = None  # função JS chamada quando novos dados chegam
 _activation_lock = threading.RLock()
 
 
+# A composicao da visao geral e deliberadamente explicita. Ela representa os
+# nove KPIs do bloco Monitoring 4G e os treze KPIs 5G distribuidos em nove
+# paineis no frontend (quatro deles sao pares DL/UL).
+KPI_OVERVIEW_METRICS = {
+    "4G": (
+        "accessibility", "availability", "drop_rate", "utilization_dl",
+        "utilization_ul", "interference_ul", "throughput_dl",
+        "throughput_ul", "user_count",
+    ),
+    "5G": (
+        "accessibility", "drop_rate", "user_count", "availability",
+        "interference_ul", "utilization_dl", "utilization_ul",
+        "throughput_dl", "throughput_ul", "traffic_volume_dl_sa",
+        "traffic_volume_ul_sa", "traffic_volume_dl_nsa",
+        "traffic_volume_ul_nsa",
+    ),
+}
+
+
 class Api:
 
     # URL do servidor FastAPI local embutido (injetada por main.py no startup).
@@ -1359,6 +1378,101 @@ class Api:
         except Exception as e:
             logger.error(f"get_kpi_series error: {e}")
             return {"ok": False, "labels": [], "values": [], "series": [], "gaps": []}
+
+    def get_kpi_overview(self, event_id: str, scope: str, scope_id: str,
+                         technology_family: str, minutes: int = 60) -> dict:
+        """Retorna todos os KPIs da visao geral sobre uma unica grade temporal.
+
+        O endpoint reutiliza exatamente a mesma expansao de site fundido e a
+        mesma agregacao de cluster de :meth:`get_kpi_series`. A uniao dos
+        timestamps e feita somente depois de calcular todas as metricas; assim,
+        um ponto ausente vira ``None`` na posicao correta em vez de deslocar a
+        serie e quebrar a sincronizacao dos graficos.
+        """
+        family = technology_family if technology_family in KPI_OVERVIEW_METRICS else None
+        normalized_scope = scope if scope in ("site", "cluster") else None
+        if not family:
+            return {
+                "ok": False, "error": "technology_family deve ser 4G ou 5G",
+                "labels": [], "metrics": {}, "units": {}, "thresholds": {},
+            }
+        if not normalized_scope or not scope_id:
+            return {
+                "ok": False, "error": "scope deve ser site ou cluster e possuir scope_id",
+                "labels": [], "metrics": {}, "units": {}, "thresholds": {},
+            }
+
+        try:
+            metric_ids = KPI_OVERVIEW_METRICS[family]
+            raw_metrics: dict[str, dict] = {}
+            common_labels: set[str] = set()
+
+            for metric in metric_ids:
+                result = self.get_kpi_series(
+                    event_id,
+                    scope_id if normalized_scope == "site" else None,
+                    metric,
+                    minutes,
+                    "__all__",
+                    None,
+                    family,
+                    "cluster" if normalized_scope == "cluster" else None,
+                    scope_id if normalized_scope == "cluster" else None,
+                )
+                if not result.get("ok", False):
+                    raise RuntimeError(
+                        result.get("error") or f"falha ao consultar a metrica {metric}")
+
+                series = result.get("series") or []
+                selected = next(
+                    (item for item in series if item.get("technology") in (family, None)),
+                    series[0] if series else None,
+                )
+                labels = list((selected or {}).get("labels") or result.get("labels") or [])
+                values = list((selected or {}).get("values") or result.get("values") or [])
+                lookup = dict(zip(labels, values))
+                raw_metrics[metric] = lookup
+                common_labels.update(labels)
+
+            labels = sorted(common_labels)
+            metrics = {
+                metric: [raw_metrics[metric].get(timestamp) for timestamp in labels]
+                for metric in metric_ids
+            }
+
+            catalog = catalog_for_api()
+            family_catalog = [
+                item for item in catalog
+                if (item.get("technology") == "4G") == (family == "4G")
+            ]
+            units = {
+                metric: next(
+                    (item.get("unit") for item in family_catalog
+                     if item.get("id") == metric),
+                    "",
+                )
+                for metric in metric_ids
+            }
+            thresholds = {
+                metric: self._metric_thresholds(event_id, metric)
+                for metric in metric_ids
+            }
+            return {
+                "ok": True,
+                "scope": normalized_scope,
+                "scope_id": scope_id,
+                "technology_family": family,
+                "labels": labels,
+                "metrics": metrics,
+                "units": units,
+                "thresholds": thresholds,
+            }
+        except Exception as e:
+            logger.error(f"get_kpi_overview error: {e}")
+            return {
+                "ok": False, "error": str(e), "labels": [], "metrics": {},
+                "units": {}, "thresholds": {},
+            }
 
     def _metric_thresholds(self, event_id: str, metric: str) -> dict:
         config = db.get_event(event_id) or _active_event or {}

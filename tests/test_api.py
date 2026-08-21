@@ -776,3 +776,104 @@ class TestClusters:
             "site_count": 1, "cell_count": 3,
             "has_partial_selection": False, "polygon": [[1.0, 2.0]],
         }]
+
+
+class TestKpiOverview:
+    def test_overview_devolve_todas_as_metricas_na_mesma_grade(self, api, sample_event):
+        event = _twin_sites_event(sample_event, "overview-common-grid")
+        database.save_event(event)
+        first = "2026-08-19T12:00:00Z"
+        second = "2026-08-19T12:05:00Z"
+        _insert_site_kpi(
+            event["id"], "725483", "4G", 98.0, first, metric="accessibility")
+        _insert_site_kpi(
+            event["id"], "725483", "4G", 97.0, second, metric="availability")
+
+        result = api.get_kpi_overview(
+            event["id"], "site", "SPSMG7", "4G", minutes=0)
+
+        assert result["ok"] is True
+        assert result["labels"] == [first, second]
+        assert len(result["metrics"]) == 9
+        assert all(
+            len(values) == len(result["labels"])
+            for values in result["metrics"].values()
+        )
+        assert "ran_rtt" not in result["metrics"]
+        assert "terrestrial_rtt" not in result["metrics"]
+
+    def test_metrica_sem_ponto_vem_como_null_e_nao_desloca_a_grade(
+            self, api, sample_event):
+        event = _twin_sites_event(sample_event, "overview-null-gap")
+        database.save_event(event)
+        first = "2026-08-19T12:00:00Z"
+        second = "2026-08-19T12:05:00Z"
+        _insert_site_kpi(
+            event["id"], "725483", "4G", 91.0, first, metric="availability")
+        _insert_site_kpi(
+            event["id"], "725483", "4G", 93.0, second, metric="availability")
+        _insert_site_kpi(
+            event["id"], "725483", "4G", 2.5, second, metric="drop_rate")
+
+        result = api.get_kpi_overview(
+            event["id"], "site", "SPSMG7", "4G", minutes=0)
+
+        assert result["metrics"]["availability"] == [91.0, 93.0]
+        assert result["metrics"]["drop_rate"] == [None, 2.5]
+
+    def test_overview_por_cluster_expande_os_membros(self, api, sample_event):
+        extra_site = {
+            "id": "SR-EXTRA", "name": "SR-EXTRA", "lat": -23.59, "lng": -46.68,
+            "is_event_site": True, "cells": _cells("4G-SR-EXTRA", 2),
+        }
+        event = _event_with_clusters(
+            sample_event,
+            [{"id": "sul", "name": "Sul", "site_ids": ["SR-SPPNB2", "SR-EXTRA"]}],
+            event_id="overview-cluster",
+            extra_sites=[extra_site],
+        )
+        database.save_event(event)
+        timestamp = "2026-08-19T12:00:00Z"
+        _insert_site_kpi(
+            event["id"], "SR-SPPNB2", "4G", 10.0, timestamp,
+            metric="throughput_dl")
+        _insert_site_kpi(
+            event["id"], "SR-EXTRA", "4G", 20.0, timestamp,
+            metric="throughput_dl")
+
+        result = api.get_kpi_overview(
+            event["id"], "cluster", "sul", "4G", minutes=0)
+
+        assert result["ok"] is True
+        assert result["scope"] == "cluster"
+        assert result["metrics"]["throughput_dl"] == [30.0]
+
+    def test_grade_4g_tem_nove_paineis_sem_rtt(self, api, sample_event):
+        database.save_event(sample_event)
+
+        result = api.get_kpi_overview(
+            sample_event["id"], "site", "SR-SPPNB2", "4G", minutes=0)
+
+        assert list(result["metrics"]) == [
+            "accessibility", "availability", "drop_rate", "utilization_dl",
+            "utilization_ul", "interference_ul", "throughput_dl",
+            "throughput_ul", "user_count",
+        ]
+
+    def test_grade_5g_tem_nove_paineis_e_cobre_treze_metricas(
+            self, api, sample_event):
+        event = _twin_sites_event(sample_event, "overview-5g-composition")
+        database.save_event(event)
+
+        result = api.get_kpi_overview(
+            event["id"], "site", "SPSMG7", "5G", minutes=0)
+
+        assert result["ok"] is True
+        assert set(result["metrics"]) == {
+            "accessibility", "drop_rate", "user_count", "availability",
+            "interference_ul", "utilization_dl", "utilization_ul",
+            "throughput_dl", "throughput_ul", "traffic_volume_dl_sa",
+            "traffic_volume_ul_sa", "traffic_volume_dl_nsa",
+            "traffic_volume_ul_nsa",
+        }
+        assert len(result["metrics"]) == 13

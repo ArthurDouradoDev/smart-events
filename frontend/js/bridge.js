@@ -356,6 +356,42 @@ const _mock = {
 
     return { ok: true, labels, values: makeValues(40, 0.3), gaps, thresholds };
   },
+  get_kpi_overview: (event_id, scope, scope_id, technology_family, minutes=60) => {
+    const family = technology_family === "5G" ? "5G" : "4G";
+    const metricIds = family === "4G"
+      ? ["accessibility", "availability", "drop_rate", "utilization_dl", "utilization_ul",
+         "interference_ul", "throughput_dl", "throughput_ul", "user_count"]
+      : ["accessibility", "drop_rate", "user_count", "availability", "interference_ul",
+         "utilization_dl", "utilization_ul", "throughput_dl", "throughput_ul",
+         "traffic_volume_dl_sa", "traffic_volume_ul_sa",
+         "traffic_volume_dl_nsa", "traffic_volume_ul_nsa"];
+    const unitsByMetric = {
+      accessibility: "%", availability: "%", drop_rate: "%",
+      utilization_dl: "%", utilization_ul: "%", interference_ul: "dBm",
+      throughput_dl: "Mbit/s", throughput_ul: family === "5G" ? "unidade OSS pendente" : "Mbit/s",
+      user_count: "usuários", traffic_volume_dl_sa: "kbit", traffic_volume_ul_sa: "kbit",
+      traffic_volume_dl_nsa: "kbit", traffic_volume_ul_nsa: "kbit",
+    };
+    const count = minutes === 0 ? 73 : Math.max(16, Number(minutes) + 1);
+    const now = Date.now();
+    const labels = Array.from({ length: count }, (_, index) =>
+      new Date(now - (count - 1 - index) * 60000).toISOString());
+    const scopeOffset = scope === "cluster" ? 7 : (String(scope_id || "").length % 5);
+    const metrics = {};
+    metricIds.forEach((metric, metricIndex) => {
+      metrics[metric] = labels.map((_, index) => {
+        // Buracos deliberados provam que todas as métricas continuam na mesma grade.
+        if (metric === "availability" && index > 0 && index % 11 === 0) return null;
+        const base = metric.includes("interference") ? -102 : 22 + metricIndex * 5 + scopeOffset;
+        return +(base + Math.sin(index * (0.12 + metricIndex * 0.008)) * (metric.includes("interference") ? 4 : 9)).toFixed(2);
+      });
+    });
+    return {
+      ok: true, scope, scope_id, technology_family: family, labels, metrics,
+      units: Object.fromEntries(metricIds.map(metric => [metric, unitsByMetric[metric] || ""])),
+      thresholds: Object.fromEntries(metricIds.map(metric => [metric, { warning: 80, critical: 95 }])),
+    };
+  },
   get_alerts: (event_id, timestamp=null) => ([
     { id:1, severity:"CRITICAL", site_id:"ERB-07", cell_id:"ERB-07-A2", message:"Utilização crítica: 91% em ERB-07", timestamp:new Date().toISOString() },
     { id:2, severity:"WARNING",  site_id:"ERB-07", cell_id:"ERB-07",    message:"RSRP baixo para Ana Rodrigues: -97 dBm", timestamp:new Date().toISOString() },
@@ -556,6 +592,8 @@ const API = {
   getSiteCells:     (eventId, siteId, technologyFamily=null) => API.call("get_site_cells", eventId, siteId, technologyFamily),
   getKpiSeries:     (eventId, siteId, m, w, cellId=null, technologyFamily=null, scope=null, scopeId=null) =>
     API.call("get_kpi_series", eventId, siteId, m, w, cellId, null, technologyFamily, scope, scopeId),
+  getKpiOverview:   (eventId, scope, scopeId, technologyFamily, minutes=60) =>
+    API.call("get_kpi_overview", eventId, scope, scopeId, technologyFamily, minutes),
   getKpiCatalog:    (eventId=null)           => API.call("get_kpi_catalog", eventId),
   getClusters:      (eventId)                => API.call("get_clusters", eventId),
   getVips:          (eventId, timestamp=null) => API.call("get_vips", eventId, timestamp),

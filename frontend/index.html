@@ -14,7 +14,7 @@
   <script src="lib/chart.umd.min.js"></script>
   <script src="lib/chartjs-plugin-annotation.min.js"></script>
 
-  <link rel="stylesheet" href="css/main.css?v=20260820-cluster-compare-r2">
+  <link rel="stylesheet" href="css/main.css?v=20260821-kpi-overview-r1">
 </head>
 
 <body>
@@ -244,6 +244,7 @@
         <select id="cell-selector" title="Selecionar célula">
           <option value="__all__">Site completo</option>
         </select>
+        <button id="open-kpi-overview" class="btn btn-ghost btn-sm" type="button" title="Abrir visão geral de KPIs">Ver KPIs</button>
         <div id="cell-info-tooltip" class="tooltip-container hidden">
           <span class="tooltip-trigger">ℹ</span>
           <div class="tooltip-content">
@@ -548,8 +549,40 @@
     </div>
   </div>
 
+  <!-- ── VISÃO GERAL DE KPIs ────────────────────────────────────── -->
+  <div id="kpi-overview-modal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="kpi-overview-title">
+    <div class="kpi-overview-shell">
+      <div class="kpi-overview-header">
+        <div class="kpi-overview-heading">
+          <h2 id="kpi-overview-title">Visão geral de KPIs</h2>
+          <span id="kpi-overview-context">—</span>
+        </div>
+        <div id="kpi-overview-family-tabs" class="kpi-overview-tabs" aria-label="Tecnologia">
+          <button type="button" class="kpi-overview-tab active" data-family="4G">4G</button>
+          <button type="button" class="kpi-overview-tab" data-family="5G">5G</button>
+        </div>
+        <button id="kpi-overview-close" class="icon-btn" type="button" title="Fechar visão geral" aria-label="Fechar">&#10005;</button>
+      </div>
+      <div class="kpi-overview-toolbar">
+        <label for="kpi-overview-scope-selector">Escopo</label>
+        <select id="kpi-overview-scope-selector" title="Selecionar site ou cluster"></select>
+        <div id="kpi-overview-time-tabs" class="kpi-overview-time-tabs" aria-label="Janela de tempo">
+          <button type="button" class="time-tab" data-window="15">15 min</button>
+          <button type="button" class="time-tab" data-window="30">30 min</button>
+          <button type="button" class="time-tab active" data-window="60">60 min</button>
+          <button type="button" class="time-tab" data-window="0">Evento</button>
+        </div>
+      </div>
+      <div class="kpi-overview-body">
+        <div id="kpi-overview-grid" class="kpi-overview-grid"></div>
+        <div id="kpi-overview-loading" class="kpi-overview-state hidden">Carregando os nove painéis…</div>
+        <div id="kpi-overview-error" class="kpi-overview-state kpi-overview-error hidden"></div>
+      </div>
+    </div>
+  </div>
+
   <!-- Scripts (ES Modules) -->
-  <script type="module" src="js/app.js?v=20260820-cluster-compare-r2"></script>
+  <script type="module" src="js/app.js?v=20260821-kpi-overview-r1"></script>
 </body>
 
 </html>

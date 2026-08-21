@@ -390,3 +390,112 @@ def test_badges_reagem_a_mudanca_de_alarmes():
         if "Executable doesn't exist" in str(exc):
             pytest.skip("Chromium do Playwright não está instalado neste ambiente")
         raise
+
+
+# ── Fase 5: visão geral com nove gráficos sincronizados ─────────────
+
+def test_visao_geral_sincroniza_crosshair_e_exibe_um_tooltip():
+    sync_api = pytest.importorskip("playwright.sync_api")
+    try:
+        with _frontend_server() as url, sync_api.sync_playwright() as playwright:
+            browser = playwright.chromium.launch(headless=True)
+            page = browser.new_page(viewport={"width": 1440, "height": 900})
+            page.goto(f"{url}/index.html", wait_until="domcontentloaded")
+            page.locator(".site-item").first.wait_for(state="visible", timeout=8000)
+
+            page.locator("#open-kpi-overview").click()
+            page.locator("#kpi-overview-modal:not(.hidden)").wait_for(
+                state="visible", timeout=5000)
+            assert page.locator(".kpi-overview-card").count() == 9
+            page.wait_for_function(
+                """() => [...document.querySelectorAll('.kpi-overview-card canvas')]
+                    .every(canvas => !!Chart.getChart(canvas))""",
+                timeout=8000,
+            )
+
+            first_canvas = page.locator(".kpi-overview-card canvas").first
+            first_canvas.hover(position={"x": 120, "y": 70})
+            page.wait_for_function(
+                """() => {
+                  const cards = [...document.querySelectorAll('.kpi-overview-card')];
+                  return cards.length === 9
+                    && cards.every(card => card.dataset.crosshairIndex !== '')
+                    && document.querySelectorAll('.kpi-overview-tooltip:not(.hidden)').length === 1;
+                }""",
+                timeout=5000,
+            )
+
+            indices = page.locator(".kpi-overview-card").evaluate_all(
+                "cards => cards.map(card => card.dataset.crosshairIndex)"
+            )
+            assert len(set(indices)) == 1
+            assert page.locator(".kpi-overview-tooltip:not(.hidden)").count() == 1
+
+            # O mock possui buracos deliberados; eles precisam continuar nulos
+            # e todas as séries devem proibir a ligação visual sobre o gap.
+            availability = page.locator(
+                '.kpi-overview-card[data-panel-id="availability"] canvas'
+            )
+            chart_state = availability.evaluate(
+                """canvas => {
+                  const chart = Chart.getChart(canvas);
+                  return {
+                    hasNull: chart.data.datasets[0].data.some(value => value === null),
+                    spanGaps: chart.data.datasets.every(dataset => dataset.spanGaps === false),
+                  };
+                }"""
+            )
+            assert chart_state == {"hasNull": True, "spanGaps": True}
+            browser.close()
+    except Exception as exc:
+        if "Executable doesn't exist" in str(exc):
+            pytest.skip("Chromium do Playwright não está instalado neste ambiente")
+        raise
+
+
+def test_grade_5g_tem_nove_paineis_quatro_pares_e_eixo_duplo():
+    sync_api = pytest.importorskip("playwright.sync_api")
+    try:
+        with _frontend_server() as url, sync_api.sync_playwright() as playwright:
+            browser = playwright.chromium.launch(headless=True)
+            page = browser.new_page(viewport={"width": 1440, "height": 900})
+            page.goto(f"{url}/index.html", wait_until="domcontentloaded")
+            page.locator(".site-item").first.wait_for(state="visible", timeout=8000)
+            page.locator("#open-kpi-overview").click()
+            page.locator('#kpi-overview-family-tabs [data-family="5G"]').click()
+            page.wait_for_function(
+                """() => document.querySelectorAll('.kpi-overview-card').length === 9
+                  && [...document.querySelectorAll('.kpi-overview-card canvas')]
+                    .every(canvas => !!Chart.getChart(canvas))""",
+                timeout=8000,
+            )
+
+            cards = page.locator(".kpi-overview-card")
+            assert cards.count() == 9
+            paired = cards.filter(has=page.locator('canvas')).evaluate_all(
+                "cards => cards.filter(card => card.dataset.metrics.includes(',')).length"
+            )
+            assert paired == 4
+
+            pair_state = page.locator(
+                '.kpi-overview-card[data-panel-id="throughput"] canvas'
+            ).evaluate(
+                """canvas => {
+                  const chart = Chart.getChart(canvas);
+                  return {
+                    types: chart.data.datasets.map(dataset => dataset.type),
+                    axes: chart.data.datasets.map(dataset => dataset.yAxisID),
+                    rightVisible: chart.options.scales.yRight.display,
+                  };
+                }"""
+            )
+            assert pair_state == {
+                "types": ["line", "bar"],
+                "axes": ["yLeft", "yRight"],
+                "rightVisible": True,
+            }
+            browser.close()
+    except Exception as exc:
+        if "Executable doesn't exist" in str(exc):
+            pytest.skip("Chromium do Playwright não está instalado neste ambiente")
+        raise
