@@ -46,6 +46,11 @@ KPI_OVERVIEW_METRICS = {
     ),
 }
 
+# Teto de escopos comparados de uma vez na visao geral. Cada escopo custa uma
+# varredura completa das metricas do painel, e a paleta categorica do app tem
+# oito cores estaveis — acima disso as linhas deixam de ser distinguiveis.
+KPI_OVERVIEW_MAX_SCOPES = 8
+
 
 class Api:
 
@@ -1472,6 +1477,114 @@ class Api:
             return {
                 "ok": False, "error": str(e), "labels": [], "metrics": {},
                 "units": {}, "thresholds": {},
+            }
+
+    def get_kpi_overview_multi(self, event_id: str, scopes: list,
+                               technology_family: str, minutes: int = 60) -> dict:
+        """Compara varios escopos (clusters e/ou sites) na mesma grade temporal.
+
+        Cada escopo reutiliza :meth:`get_kpi_overview`, entao a expansao de site
+        fundido e a agregacao de cluster continuam saindo de um unico lugar. A
+        uniao dos timestamps so acontece depois que todos os escopos voltaram:
+        um escopo sem ponto num minuto vira ``None`` naquela posicao em vez de
+        deslocar a serie e quebrar a sincronizacao dos nove graficos.
+        """
+        family = technology_family if technology_family in KPI_OVERVIEW_METRICS else None
+        if not family:
+            return {
+                "ok": False, "error": "technology_family deve ser 4G ou 5G",
+                "labels": [], "series": [], "units": {}, "thresholds": {},
+            }
+
+        requested: list[tuple[str, str]] = []
+        seen: set[tuple[str, str]] = set()
+        for entry in scopes or []:
+            if not isinstance(entry, dict):
+                continue
+            scope = entry.get("scope")
+            scope_id = entry.get("scope_id") or entry.get("id")
+            if scope not in ("site", "cluster") or not scope_id:
+                continue
+            key = (scope, str(scope_id))
+            if key not in seen:
+                seen.add(key)
+                requested.append(key)
+
+        if not requested:
+            return {
+                "ok": False, "error": "informe ao menos um cluster ou site",
+                "labels": [], "series": [], "units": {}, "thresholds": {},
+            }
+        if len(requested) > KPI_OVERVIEW_MAX_SCOPES:
+            return {
+                "ok": False,
+                "error": (f"compare no maximo {KPI_OVERVIEW_MAX_SCOPES} escopos "
+                          f"por vez (foram pedidos {len(requested)})"),
+                "labels": [], "series": [], "units": {}, "thresholds": {},
+            }
+
+        try:
+            metric_ids = KPI_OVERVIEW_METRICS[family]
+            collected: list[dict] = []
+            failures: list[dict] = []
+            label_union: set[str] = set()
+            units: dict = {}
+            thresholds: dict = {}
+
+            for scope, scope_id in requested:
+                result = self.get_kpi_overview(
+                    event_id, scope, scope_id, family, minutes)
+                if not result.get("ok"):
+                    failures.append({
+                        "scope": scope, "scope_id": scope_id,
+                        "error": result.get("error") or "falha ao consultar o escopo",
+                    })
+                    continue
+                labels = list(result.get("labels") or [])
+                result_metrics = result.get("metrics") or {}
+                collected.append({
+                    "scope": scope,
+                    "scope_id": scope_id,
+                    "lookup": {
+                        metric: dict(zip(labels, result_metrics.get(metric) or []))
+                        for metric in metric_ids
+                    },
+                })
+                label_union.update(labels)
+                units = units or result.get("units") or {}
+                thresholds = thresholds or result.get("thresholds") or {}
+
+            if not collected:
+                return {
+                    "ok": False,
+                    "error": failures[0]["error"] if failures else "sem dados no periodo",
+                    "labels": [], "series": [], "units": {}, "thresholds": {},
+                    "failures": failures,
+                }
+
+            labels = sorted(label_union)
+            series = [{
+                "scope": item["scope"],
+                "scope_id": item["scope_id"],
+                "metrics": {
+                    metric: [item["lookup"][metric].get(timestamp) for timestamp in labels]
+                    for metric in metric_ids
+                },
+            } for item in collected]
+            return {
+                "ok": True,
+                "technology_family": family,
+                "labels": labels,
+                "series": series,
+                "units": units,
+                "thresholds": thresholds,
+                "failures": failures,
+            }
+        except Exception as e:
+            logger.error(f"get_kpi_overview_multi error: {e}")
+            return {
+                "ok": False, "error": str(e),
+                "labels": [], "series": [], "units": {}, "thresholds": {},
             }
 
     def _metric_thresholds(self, event_id: str, metric: str) -> dict:

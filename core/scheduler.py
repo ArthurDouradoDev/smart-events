@@ -80,6 +80,7 @@ class Scheduler:
             "state": "idle", "last_attempt_at": None, "last_cycle_ok_at": None,
             "last_data_at": None, "last_success": None,  # compatibilidade com clientes antigos
             "last_count": 0, "received": 0, "calculated": 0, "invalid": 0,
+            "not_applicable": 0,
             "duplicate": 0, "inserted": 0, "coverage": {}, "diagnostics": [],
             "duration_s": None, "error": None, "cause": None, "interval_s": interval_s,
         }
@@ -429,6 +430,9 @@ class Scheduler:
         crit = t.get("utilization_critical", 95)
         warn = t.get("utilization_warning", 80)
         avail_crit = t.get("availability_critical", 95)
+        # B7 — acessibilidade calculada sobre pouquíssimas tentativas é ruído, não
+        # degradação: 1 de 2 vira 50,0% e disparava CRITICAL. Só alarma com amostra.
+        min_samples = t.get("alert_min_samples", 20)
 
         seen = {}
         for m in measurements:
@@ -468,6 +472,9 @@ class Scheduler:
                         })
                         seen[key] = True
             elif metric == "accessibility":
+                samples = m.get("sample_size")
+                if samples is not None and samples < min_samples:
+                    continue
                 if val < avail_crit:
                     key = f"avail_crit_{cell_id}"
                     if not db.is_silenced(key) and key not in seen:

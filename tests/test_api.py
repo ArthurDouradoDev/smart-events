@@ -877,3 +877,130 @@ class TestKpiOverview:
             "traffic_volume_ul_nsa",
         }
         assert len(result["metrics"]) == 13
+
+
+class TestKpiOverviewMulti:
+    """Comparação de vários escopos (clusters e/ou sites) na visão geral."""
+
+    def test_dois_clusters_saem_na_mesma_grade_temporal(self, api, sample_event):
+        extra_site = {
+            "id": "SR-EXTRA", "name": "SR-EXTRA", "lat": -23.59, "lng": -46.68,
+            "is_event_site": True, "cells": _cells("4G-SR-EXTRA", 2),
+        }
+        event = _event_with_clusters(
+            sample_event,
+            [
+                {"id": "sul", "name": "Sul", "site_ids": ["SR-SPPNB2"]},
+                {"id": "oeste", "name": "Oeste", "site_ids": ["SR-EXTRA"]},
+            ],
+            event_id="overview-multi-clusters",
+            extra_sites=[extra_site],
+        )
+        database.save_event(event)
+        first = "2026-08-19T12:00:00Z"
+        second = "2026-08-19T12:05:00Z"
+        # Cada cluster tem ponto em um minuto diferente: a grade tem de unir os
+        # dois e preencher o buraco com None, não deslocar a série do vizinho.
+        _insert_site_kpi(
+            event["id"], "SR-SPPNB2", "4G", 10.0, first, metric="throughput_dl")
+        _insert_site_kpi(
+            event["id"], "SR-EXTRA", "4G", 20.0, second, metric="throughput_dl")
+
+        result = api.get_kpi_overview_multi(
+            event["id"],
+            [{"scope": "cluster", "scope_id": "sul"},
+             {"scope": "cluster", "scope_id": "oeste"}],
+            "4G",
+            minutes=0,
+        )
+
+        assert result["ok"] is True
+        assert result["labels"] == [first, second]
+        assert [item["scope_id"] for item in result["series"]] == ["sul", "oeste"]
+        assert result["series"][0]["metrics"]["throughput_dl"] == [10.0, None]
+        assert result["series"][1]["metrics"]["throughput_dl"] == [None, 20.0]
+
+    def test_mistura_cluster_e_site_preservando_a_ordem_pedida(self, api, sample_event):
+        event = _event_with_clusters(
+            sample_event,
+            [{"id": "sul", "name": "Sul", "site_ids": ["SR-SPPNB2"]}],
+            event_id="overview-multi-mixed",
+        )
+        database.save_event(event)
+
+        result = api.get_kpi_overview_multi(
+            event["id"],
+            [{"scope": "site", "scope_id": "SR-SPPNB2"},
+             {"scope": "cluster", "scope_id": "sul"}],
+            "4G",
+            minutes=0,
+        )
+
+        assert result["ok"] is True
+        assert [(item["scope"], item["scope_id"]) for item in result["series"]] == [
+            ("site", "SR-SPPNB2"), ("cluster", "sul"),
+        ]
+
+    def test_todas_as_series_cobrem_as_mesmas_metricas_do_painel(
+            self, api, sample_event):
+        event = _twin_sites_event(sample_event, "overview-multi-5g")
+        database.save_event(event)
+
+        result = api.get_kpi_overview_multi(
+            event["id"],
+            [{"scope": "site", "scope_id": "SPSMG7"},
+             {"scope": "site", "scope_id": "SPSMH1"}],
+            "5G",
+            minutes=0,
+        )
+
+        assert result["ok"] is True
+        for item in result["series"]:
+            assert set(item["metrics"]) == set(api_module.KPI_OVERVIEW_METRICS["5G"])
+            assert all(
+                len(values) == len(result["labels"])
+                for values in item["metrics"].values()
+            )
+
+    def test_escopo_repetido_conta_uma_vez_so(self, api, sample_event):
+        database.save_event(sample_event)
+
+        result = api.get_kpi_overview_multi(
+            sample_event["id"],
+            [{"scope": "site", "scope_id": "SR-SPPNB2"},
+             {"scope": "site", "scope_id": "SR-SPPNB2"}],
+            "4G",
+            minutes=0,
+        )
+
+        assert result["ok"] is True
+        assert len(result["series"]) == 1
+
+    def test_recusa_lista_vazia_e_escopo_invalido(self, api, sample_event):
+        database.save_event(sample_event)
+
+        assert api.get_kpi_overview_multi(sample_event["id"], [], "4G")["ok"] is False
+        assert api.get_kpi_overview_multi(
+            sample_event["id"], [{"scope": "celula", "scope_id": "x"}], "4G",
+        )["ok"] is False
+
+    def test_recusa_mais_escopos_que_o_teto_da_paleta(self, api, sample_event):
+        database.save_event(sample_event)
+        excesso = [
+            {"scope": "site", "scope_id": f"SITE-{index}"}
+            for index in range(api_module.KPI_OVERVIEW_MAX_SCOPES + 1)
+        ]
+
+        result = api.get_kpi_overview_multi(sample_event["id"], excesso, "4G")
+
+        assert result["ok"] is False
+        assert str(api_module.KPI_OVERVIEW_MAX_SCOPES) in result["error"]
+
+    def test_familia_invalida_nao_chega_a_consultar(self, api, sample_event):
+        database.save_event(sample_event)
+
+        result = api.get_kpi_overview_multi(
+            sample_event["id"], [{"scope": "site", "scope_id": "SR-SPPNB2"}], "6G")
+
+        assert result["ok"] is False
+        assert result["series"] == []

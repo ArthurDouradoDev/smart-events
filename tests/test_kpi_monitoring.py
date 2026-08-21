@@ -487,9 +487,11 @@ def test_task_748_real_mapeia_celulas_e_calcula_so_kpis_nrducell(tmp_db, monkeyp
         "traffic_volume_dl_sa", "traffic_volume_dl_nsa",
         "traffic_volume_ul_sa", "traffic_volume_ul_nsa",
     }
-    formula_errors = [item for item in parsed["diagnostics"] if item.code == "invalid_formula"]
-    assert formula_errors
-    assert {item.details["metric"] for item in formula_errors} == {"throughput_dl"}
+    # Os contadores de DL não vêm nesta task: é ausência legítima, não defeito.
+    absent = [item for item in parsed["diagnostics"] if item.code == "not_applicable"]
+    assert absent
+    assert {item.details["metric"] for item in absent} == {"throughput_dl"}
+    assert not [item for item in parsed["diagnostics"] if item.code == "invalid_formula"]
 
 
 def test_configured_pm_tasks_preserva_os_tipos_de_objeto_5g(tmp_db, monkeypatch):
@@ -503,9 +505,9 @@ def test_configured_pm_tasks_preserva_os_tipos_de_objeto_5g(tmp_db, monkeypatch)
     collector = HttpCollector(event, "https://10.220.50.9:31943")
 
     assert collector._configured_pm_tasks({}) == [
-        {"task_id": 747, "technology": "4G"},
-        {"task_id": 749, "technology": "5G_NRCELL"},
-        {"task_id": 748, "technology": "5G_NRDUCELL"},
+        {"task_id": 747, "technology": "4G", "period_seconds": 60},
+        {"task_id": 749, "technology": "5G_NRCELL", "period_seconds": 60},
+        {"task_id": 748, "technology": "5G_NRDUCELL", "period_seconds": 60},
     ]
 
 
@@ -614,9 +616,9 @@ def test_duas_tasks_da_mesma_tecnologia_sao_aceitas(tmp_db, monkeypatch):
     collector = HttpCollector(_event_multi_4g(), "https://oss.example")
 
     assert collector._configured_pm_tasks({}) == [
-        {"task_id": 747, "technology": "4G"},
-        {"task_id": 752, "technology": "4G"},
-        {"task_id": 749, "technology": "5G_NRCELL"},
+        {"task_id": 747, "technology": "4G", "period_seconds": 60},
+        {"task_id": 752, "technology": "4G", "period_seconds": 60},
+        {"task_id": 749, "technology": "5G_NRCELL", "period_seconds": 60},
     ]
 
 
@@ -730,7 +732,7 @@ def test_diagnosticos_sao_deduplicados_por_metrica_e_codigo(tmp_db, monkeypatch)
         {"100": "4G"},
     )
 
-    formula = [item for item in parsed["diagnostics"] if item.code == "invalid_formula"]
+    formula = [item for item in parsed["diagnostics"] if item.code == "not_applicable"]
     by_metric = [item.details["metric"] for item in formula]
     assert by_metric
     assert len(by_metric) == len(set(by_metric))
@@ -763,3 +765,191 @@ def test_cursores_de_tasks_distintas_nao_se_misturam(tmp_db, monkeypatch):
     assert result.cursors["752:70"]["cursor"] == 222
     assert result.cursors["747:70"]["task_id"] == 747
     assert result.cursors["752:70"]["task_id"] == 752
+
+
+# ── Fase 1: período configurado, "não aplicável" e aviso de PRB ──────────
+
+def _availability_response(task_id, cell_name, avail_dur, period_na_resposta=5):
+    return {"data": [{"taskId": task_id, "execTime": 1_700_000_000_000, "results": [{
+        "execTime": 1_700_000_000_000, "period": period_na_resposta,
+        "objRes": [_item(1, cell_name, {"N.Cell.Avail.Dur": avail_dur})],
+    }]}]}
+
+
+def _event_5g_nrcell(task_id=20, period_seconds=None):
+    task = {"task_id": task_id, "tech": "NRCELL"}
+    if period_seconds is not None:
+        task["period_seconds"] = period_seconds
+    return {
+        "id": "monitoring-period", "oss": {"region": "SP"},
+        "integration": {"pm_tasks": [task]},
+        "sites": [{"id": "SITE", "name": "SITE",
+                   "cells": [{"id": "5G-CELL", "tech": "5G", "obj_no": 1}]}],
+    }
+
+
+def test_period_comes_from_task_config_not_response(tmp_db, monkeypatch):
+    """O ``period=5`` da resposta não é o Granularity Period: com ele, uma célula
+    disponível o minuto inteiro (``N.Cell.Avail.Dur=60``) saía com 20%."""
+    monkeypatch.setattr(db, "get_event_vips", lambda *_: [])
+    collector = HttpCollector(_event_5g_nrcell(period_seconds=60), "https://oss.example")
+
+    parsed = collector._parse_monitoring_response(
+        _availability_response(20, "5G-CELL", 60), {"20": "5G_NRCELL"}, {"20": 60})
+
+    availability = [row for row in parsed["rows"]
+                    if row["metric"] == "availability" and row["scope"] == "CELL"]
+    assert availability and availability[0]["value"] == pytest.approx(100.0)
+
+
+def test_task_period_of_15_minutes_changes_availability(tmp_db, monkeypatch):
+    monkeypatch.setattr(db, "get_event_vips", lambda *_: [])
+    collector = HttpCollector(_event_5g_nrcell(period_seconds=900), "https://oss.example")
+
+    assert collector._configured_pm_tasks({}) == [
+        {"task_id": 20, "technology": "5G_NRCELL", "period_seconds": 900}]
+
+    parsed = collector._parse_monitoring_response(
+        _availability_response(20, "5G-CELL", 900), {"20": "5G_NRCELL"}, {"20": 900})
+    availability = [row for row in parsed["rows"]
+                    if row["metric"] == "availability" and row["scope"] == "CELL"]
+    assert availability[0]["value"] == pytest.approx(100.0)
+
+
+def test_task_without_period_defaults_to_60_seconds(tmp_db, monkeypatch):
+    monkeypatch.setattr(db, "get_event_vips", lambda *_: [])
+    collector = HttpCollector(_event_5g_nrcell(), "https://oss.example")
+
+    assert collector._configured_pm_tasks({}) == [
+        {"task_id": 20, "technology": "5G_NRCELL", "period_seconds": 60}]
+
+    # Sem o mapa de períodos, o parser assume o mesmo default.
+    parsed = collector._parse_monitoring_response(
+        _availability_response(20, "5G-CELL", 60), {"20": "5G_NRCELL"})
+    availability = [row for row in parsed["rows"] if row["metric"] == "availability"]
+    assert availability[0]["value"] == pytest.approx(100.0)
+
+
+def test_response_period_divergence_only_warns(tmp_db, monkeypatch, caplog):
+    monkeypatch.setattr(db, "get_event_vips", lambda *_: [])
+    collector = HttpCollector(_event_5g_nrcell(), "https://oss.example")
+
+    with caplog.at_level(logging.WARNING):
+        collector._parse_monitoring_response(
+            _availability_response(20, "5G-CELL", 60, period_na_resposta=5),
+            {"20": "5G_NRCELL"}, {"20": 60})
+
+    avisos = [record for record in caplog.records if "period=5" in record.getMessage()]
+    assert len(avisos) == 1
+
+
+def test_missing_counter_is_not_applicable_not_invalid(tmp_db, monkeypatch):
+    """Contador fora da task não é defeito: o ciclo 4G saudável deixava de fechar
+    "Com dados" só porque availability e drop não estavam na task."""
+    monkeypatch.setattr(db, "get_event_vips", lambda *_: [])
+    collector = HttpCollector(_event_com_celula("4G-CELL-A", tech="4G"), "https://oss.example")
+
+    parsed = collector._parse_monitoring_response(_resposta(1, "4G-CELL-A"), {"100": "4G"})
+
+    assert parsed["invalid"] == 0
+    assert parsed["not_applicable"] > 0
+    assert all(item.code != "invalid_formula" for item in parsed["diagnostics"])
+
+
+def test_zero_denominator_is_not_applicable(tmp_db, monkeypatch):
+    monkeypatch.setattr(db, "get_event_vips", lambda *_: [])
+    collector = HttpCollector(_event_com_celula("4G-CELL-A", tech="4G"), "https://oss.example")
+    sem_tentativas = {name: 0 for name in _COUNTERS_4G}
+
+    parsed = collector._parse_monitoring_response(
+        _resposta(1, "4G-CELL-A", sem_tentativas), {"100": "4G"})
+
+    assert parsed["invalid"] == 0
+    accessibility = [item for item in parsed["diagnostics"]
+                     if item.details.get("metric") == "accessibility"]
+    assert accessibility and accessibility[0].code == "not_applicable"
+
+
+def test_non_standard_prb_avail_logs_warning(tmp_db, monkeypatch, caplog):
+    """A3 — 150/225 PRBs não existem no LTE. Nenhuma fórmula muda; o aviso
+    existe para a próxima ocorrência não passar nove dias despercebida."""
+    monkeypatch.setattr(db, "get_event_vips", lambda *_: [])
+    collector = HttpCollector(_event_com_celula("4G-SPSMH1-18-DA", tech="4G"),
+                              "https://oss.example")
+    counters = {**_COUNTERS_4G, "L.ChMeas.PRB.DL.Avail": 225,
+                "L.ChMeas.PRB.UL.Avail": 225, "L.ChMeas.PRB.DL.Used.Avg": 10,
+                "L.ChMeas.PRB.UL.Used.Avg": 10}
+
+    with caplog.at_level(logging.WARNING):
+        collector._parse_monitoring_response(
+            _resposta(1, "4G-SPSMH1-18-DA", counters), {"100": "4G"})
+        # Segunda passagem: o aviso é uma vez por célula por sessão.
+        collector._parse_monitoring_response(
+            _resposta(1, "4G-SPSMH1-18-DA", counters), {"100": "4G"})
+
+    avisos = [record for record in caplog.records if "PRB.Avail" in record.getMessage()]
+    assert len(avisos) == 1
+    assert "4G-SPSMH1-18-DA" in avisos[0].getMessage()
+
+
+def test_standard_prb_avail_is_silent(tmp_db, monkeypatch, caplog):
+    monkeypatch.setattr(db, "get_event_vips", lambda *_: [])
+    collector = HttpCollector(_event_com_celula("4G-CELL-A", tech="4G"), "https://oss.example")
+    counters = {**_COUNTERS_4G, "L.ChMeas.PRB.DL.Avail": 75, "L.ChMeas.PRB.UL.Avail": 75}
+
+    with caplog.at_level(logging.WARNING):
+        collector._parse_monitoring_response(
+            _resposta(1, "4G-CELL-A", counters), {"100": "4G"})
+
+    assert not [record for record in caplog.records if "PRB.Avail" in record.getMessage()]
+
+
+def test_measurements_carry_the_sample_size_for_the_alert_floor(tmp_db, monkeypatch):
+    monkeypatch.setattr(db, "get_event_vips", lambda *_: [])
+    collector = HttpCollector(_event_com_celula("4G-CELL-A", tech="4G"), "https://oss.example")
+    poucas_tentativas = {**_COUNTERS_4G, "L.RRC.ConnReq.Att": 2, "L.RRC.ConnReq.Succ": 1}
+
+    parsed = collector._parse_monitoring_response(
+        _resposta(1, "4G-CELL-A", poucas_tentativas), {"100": "4G"})
+
+    accessibility = [row for row in parsed["rows"]
+                     if row["metric"] == "accessibility" and row["scope"] == "CELL"]
+    assert accessibility[0]["sample_size"] == 2.0
+
+
+def test_sample_size_is_not_persisted(tmp_db, monkeypatch):
+    monkeypatch.setattr(db, "get_event_vips", lambda *_: [])
+    collector = HttpCollector(_event_com_celula("4G-CELL-A", tech="4G"), "https://oss.example")
+    parsed = collector._parse_monitoring_response(_resposta(1, "4G-CELL-A"), {"100": "4G"})
+
+    inserted = db.insert_kpi_batch(parsed["rows"])
+
+    assert inserted["inserted"] == len(parsed["rows"])
+
+
+def test_site_throughput_is_recalculated_not_summed(tmp_db, monkeypatch):
+    """B9 — duas células com a mesma taxa dão a taxa, não o dobro dela."""
+    monkeypatch.setattr(db, "get_event_vips", lambda *_: [])
+    event = {
+        "id": "site-throughput", "oss": {"region": "SP"},
+        "integration": {"pm_tasks": [{"task_id": 100, "tech": "4G"}]},
+        "sites": [{"id": "SITE", "name": "SITE", "cells": [
+            {"id": "4G-CELL-A", "tech": "4G", "obj_no": 1},
+            {"id": "4G-CELL-B", "tech": "4G", "obj_no": 2},
+        ]}],
+    }
+    collector = HttpCollector(event, "https://oss.example")
+    thrp = {"L.Thrp.bits.DL": 4_000_000, "L.Thrp.bits.DL.LastTTI": 1_000_000,
+            "L.Thrp.Time.DL.RmvLastTTI": 100}
+    response = {"data": [{"taskId": 100, "execTime": 1_700_000_000_000, "results": [{
+        "execTime": 1_700_000_000_000, "period": 5, "objRes": [
+            _item(1, "4G-CELL-A", thrp), _item(2, "4G-CELL-B", thrp)]}]}]}
+
+    parsed = collector._parse_monitoring_response(response, {"100": "4G"}, {"100": 60})
+
+    cell = [row for row in parsed["rows"]
+            if row["metric"] == "throughput_dl" and row["scope"] == "CELL"]
+    site = [row for row in parsed["rows"]
+            if row["metric"] == "throughput_dl" and row["scope"] == "SITE"]
+    assert len(cell) == 2 and len(site) == 1
+    assert site[0]["value"] == pytest.approx(cell[0]["value"])

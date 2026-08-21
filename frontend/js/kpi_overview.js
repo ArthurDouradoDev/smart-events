@@ -1,5 +1,10 @@
 /**
  * kpi_overview.js — Visão geral full-screen com nove gráficos sincronizados.
+ *
+ * O escopo é uma comparação: dois seletores múltiplos independentes (Clusters e
+ * Sites) alimentam uma única consulta multi-escopo. Cada escopo vira uma cor
+ * estável; nos painéis pareados o DL é linha contínua e o UL é a mesma cor
+ * tracejada, sobre um único eixo — os dois lados compartilham a unidade.
  */
 
 import State from "./state.js";
@@ -30,8 +35,20 @@ const PANELS = {
   ],
 };
 
-const LINE_COLOR = "#388BFD";
-const BAR_COLOR = "#AB7DF6";
+/**
+ * Paleta categórica do app reordenada para a superfície escura dos cards.
+ * A ordem é o mecanismo de segurança para daltonismo (pares adjacentes com
+ * ΔE CVD ≥ 8), não enfeite: não reordene sem revalidar. A cor segue a
+ * entidade — cluster usa a cor cadastrada, site usa o índice estável dele na
+ * lista do evento —, de modo que mudar a seleção nunca repinta quem ficou.
+ */
+const SERIES_COLORS = [
+  "#388BFD", "#F85149", "#ab7df6", "#3FB950",
+  "#00d2ff", "#D29922", "#f692cc", "#FF7B00",
+];
+const MAX_SCOPES = SERIES_COLORS.length;
+const UL_DASH = [6, 4];
+
 let _family = "4G";
 let _minutes = 60;
 let _requestId = 0;
@@ -39,7 +56,13 @@ let _activeIndex = null;
 let _hoveredPanelId = null;
 let _scopeSites = [];
 let _scopeClusters = [];
+const _selection = { cluster: new Set(), site: new Set() };
+const _hiddenScopes = new Set();
 const _charts = new Map();
+let _scopeMeta = new Map();
+// A visão pode abrir antes de o app terminar de carregar sites/clusters; nesse
+// caso a semente de seleção é reaplicada quando os dados chegam.
+let _pendingSeed = false;
 
 const _crosshairPlugin = {
   id: "overviewCrosshair",
@@ -74,7 +97,10 @@ export function initKpiOverview() {
     if (event.target === modal) _close();
   });
   document.addEventListener("keydown", event => {
-    if (event.key === "Escape" && !modal.classList.contains("hidden")) _close();
+    if (event.key === "Escape" && !modal.classList.contains("hidden")) {
+      if (_closeOpenPicker()) return;
+      _close();
+    }
   });
 
   document.querySelectorAll("#kpi-overview-family-tabs [data-family]").forEach(button => {
@@ -95,10 +121,7 @@ export function initKpiOverview() {
     });
   });
 
-  document.getElementById("kpi-overview-scope-selector")?.addEventListener("change", () => {
-    _syncContextLabel();
-    void _load();
-  });
+  _initPickers();
 
   State.on("change:sites", sites => {
     if (!_isOpen()) _scopeSites = sites || [];
@@ -106,7 +129,6 @@ export function initKpiOverview() {
   State.on("change:clusters", clusters => {
     if (!_isOpen()) _scopeClusters = clusters || [];
   });
-  State.on("change:selectedSite", () => _refreshScopeOptions(false));
   State.on("change:activeEvent", () => { if (_isOpen()) void _refreshScopeData(); });
   State.on("change:historicalEvent", () => { if (_isOpen()) void _refreshScopeData(); });
 }
@@ -123,10 +145,13 @@ function _open() {
   _minutes = [0, 15, 30, 60].includes(Number(State.timeWindow)) ? Number(State.timeWindow) : 60;
   _scopeSites = State.sites || [];
   _scopeClusters = State.clusters || [];
+  _hiddenScopes.clear();
+  _pendingSeed = true;
+  _applyPreferredSelection();
   modal.classList.remove("hidden");
   _syncFamilyTabs();
   _syncTimeTabs();
-  _refreshScopeOptions(true);
+  _renderPickers();
   _renderPanelShells();
   void _load();
   void _refreshScopeData();
@@ -134,6 +159,7 @@ function _open() {
 
 function _close() {
   document.getElementById("kpi-overview-modal")?.classList.add("hidden");
+  _closeOpenPicker();
   _requestId += 1;
   _clearHover();
 }
@@ -150,54 +176,323 @@ function _syncTimeTabs() {
   });
 }
 
-function _preferredScopeKey() {
-  if (typeof State.selectedSite === "string" && State.selectedSite.startsWith("cluster:")) {
-    return State.selectedSite;
+// ── Seleção de escopos ─────────────────────────────────────────────
+
+/** Herda o recorte que o usuário já tinha no dashboard ao abrir a visão geral. */
+function _applyPreferredSelection() {
+  _selection.cluster.clear();
+  _selection.site.clear();
+  const clusterIds = new Set(_scopeClusters.map(cluster => cluster.id));
+  const siteIds = new Set(_scopeSites.map(site => site.id));
+
+  if (State.selectedSite === "clusters:compare") {
+    _scopeClusters.slice(0, MAX_SCOPES).forEach(cluster => _selection.cluster.add(cluster.id));
+  } else if (typeof State.selectedSite === "string" && State.selectedSite.startsWith("cluster:")) {
+    const id = State.selectedSite.slice("cluster:".length);
+    if (clusterIds.has(id)) _selection.cluster.add(id);
+  } else if (siteIds.has(State.selectedSite)) {
+    _selection.site.add(State.selectedSite);
   }
-  if (_scopeSites.some(site => site.id === State.selectedSite)) {
-    return `site:${State.selectedSite}`;
+
+  if (!_selectionSize() && clusterIds.has(State.clusterFilter)) {
+    _selection.cluster.add(State.clusterFilter);
   }
-  if (State.clusterFilter && !["all", "compare"].includes(State.clusterFilter)) {
-    return `cluster:${State.clusterFilter}`;
+  if (!_selectionSize()) {
+    if (_scopeClusters[0]) _selection.cluster.add(_scopeClusters[0].id);
+    else if (_scopeSites[0]) _selection.site.add(_scopeSites[0].id);
   }
-  return _scopeSites[0]?.id
-    ? `site:${_scopeSites[0].id}`
-    : (_scopeClusters[0]?.id ? `cluster:${_scopeClusters[0].id}` : "");
 }
 
-function _appendScopeGroup(selector, label, entries, prefix) {
-  if (!entries.length) return;
-  const group = document.createElement("optgroup");
-  group.label = label;
-  entries.forEach(entry => {
-    const option = document.createElement("option");
-    option.value = `${prefix}:${entry.id}`;
-    option.textContent = entry.name || entry.id;
-    group.appendChild(option);
+function _plural(count, singular) {
+  return `${count} ${singular}${count === 1 ? "" : "s"}`;
+}
+
+function _selectionSize() {
+  return _selection.cluster.size + _selection.site.size;
+}
+
+/** Assinatura estável da seleção — usada para decidir se vale recarregar. */
+function _selectionKey() {
+  return _selectedScopes().map(scope => scope.key).join("|");
+}
+
+/** Cor-base do site: índice estável dele na lista do evento, não na seleção. */
+function _siteBaseColors() {
+  const ordered = _scopeSites.map(site => String(site.id)).sort();
+  return new Map(ordered.map((id, index) => [
+    id, SERIES_COLORS[index % SERIES_COLORS.length],
+  ]));
+}
+
+function _clusterColor(cluster, index) {
+  return cluster.color || SERIES_COLORS[index % SERIES_COLORS.length];
+}
+
+/**
+ * Escopos selecionados, na ordem de exibição: clusters primeiro, depois sites.
+ *
+ * O cluster nunca muda de cor — é a cor cadastrada dele, a mesma do polígono no
+ * mapa. O site tem uma cor-base estável (índice dele na lista do evento) e só
+ * cede o lugar quando ela já foi tomada: duas séries da mesma cor no mesmo
+ * gráfico seriam ilegíveis, e é o site que não tem cor própria a defender.
+ */
+function _selectedScopes() {
+  const scopes = [];
+  const taken = new Set();
+  _scopeClusters.forEach((cluster, index) => {
+    if (!_selection.cluster.has(cluster.id)) return;
+    const color = _clusterColor(cluster, index);
+    taken.add(color.toLowerCase());
+    scopes.push({
+      key: `cluster:${cluster.id}`,
+      scope: "cluster",
+      scopeId: cluster.id,
+      name: cluster.name || cluster.id,
+      color,
+    });
   });
-  selector.appendChild(group);
+  const baseColors = _siteBaseColors();
+  _scopeSites.forEach(site => {
+    if (!_selection.site.has(site.id)) return;
+    const base = baseColors.get(String(site.id)) || SERIES_COLORS[0];
+    const color = taken.has(base.toLowerCase())
+      ? (SERIES_COLORS.find(candidate => !taken.has(candidate.toLowerCase())) || base)
+      : base;
+    taken.add(color.toLowerCase());
+    scopes.push({
+      key: `site:${site.id}`,
+      scope: "site",
+      scopeId: site.id,
+      name: site.name || site.id,
+      color,
+    });
+  });
+  return scopes;
 }
 
-function _refreshScopeOptions(preferState) {
-  const selector = document.getElementById("kpi-overview-scope-selector");
-  if (!selector) return;
-  const previous = selector.value;
-  selector.innerHTML = "";
-  _appendScopeGroup(selector, "Clusters", _scopeClusters, "cluster");
-  _appendScopeGroup(selector, "Sites", _scopeSites, "site");
-  const preferred = preferState ? _preferredScopeKey() : previous;
-  const values = [...selector.options].map(option => option.value);
-  selector.value = values.includes(preferred)
-    ? preferred
-    : (values.includes(_preferredScopeKey()) ? _preferredScopeKey() : values[0] || "");
-  selector.disabled = values.length === 0;
+function _initPickers() {
+  document.querySelectorAll("#kpi-overview-modal .scope-picker").forEach(picker => {
+    picker.querySelector(".scope-picker-trigger")?.addEventListener("click", event => {
+      event.stopPropagation();
+      const willOpen = !picker.classList.contains("open");
+      _closeOpenPicker();
+      if (willOpen) _openPicker(picker);
+    });
+    picker.querySelector(".scope-picker-menu")?.addEventListener("click", event => {
+      event.stopPropagation();
+    });
+  });
+  document.getElementById("kpi-overview-modal")?.addEventListener("click", () => _closeOpenPicker());
+}
+
+function _openPicker(picker) {
+  picker.classList.add("open");
+  picker.querySelector(".scope-picker-trigger")?.setAttribute("aria-expanded", "true");
+  picker.querySelector(".scope-picker-menu")?.classList.remove("hidden");
+  picker.querySelector(".scope-picker-search")?.focus();
+}
+
+function _closeOpenPicker() {
+  const open = document.querySelector("#kpi-overview-modal .scope-picker.open");
+  if (!open) return false;
+  open.classList.remove("open");
+  open.querySelector(".scope-picker-trigger")?.setAttribute("aria-expanded", "false");
+  open.querySelector(".scope-picker-menu")?.classList.add("hidden");
+  return true;
+}
+
+function _renderPickers() {
+  _renderClusterPicker();
+  _renderSitePicker();
+  _syncPickerSummaries();
+}
+
+function _optionRow({ checked, blocked, color, name, meta, onToggle }) {
+  const label = document.createElement("label");
+  label.className = `scope-picker-option${blocked ? " is-blocked" : ""}`;
+  label.setAttribute("role", "option");
+  label.setAttribute("aria-selected", String(checked));
+  label.innerHTML = `
+    <input type="checkbox" ${checked ? "checked" : ""} ${blocked ? "disabled" : ""}>
+    ${color ? `<span class="scope-picker-swatch" style="background:${_safeColor(color)}"></span>` : ""}
+    <span class="scope-picker-option-name">${_esc(name)}</span>
+    ${meta ? `<span class="scope-picker-option-meta">${_esc(meta)}</span>` : ""}`;
+  label.querySelector("input").addEventListener("change", event => onToggle(event.target.checked));
+  return label;
+}
+
+function _renderClusterPicker() {
+  const menu = document.querySelector("#kpi-overview-cluster-picker .scope-picker-menu");
+  if (!menu) return;
+  menu.innerHTML = "";
+  if (!_scopeClusters.length) {
+    menu.innerHTML = `<div class="scope-picker-empty">Nenhum cluster cadastrado neste evento.</div>`;
+    return;
+  }
+
+  const options = document.createElement("div");
+  options.className = "scope-picker-options";
+  const allSelected = _scopeClusters.every(cluster => _selection.cluster.has(cluster.id));
+  const fitsAll = _scopeClusters.length + _selection.site.size <= MAX_SCOPES;
+  options.appendChild(_optionRow({
+    checked: allSelected,
+    blocked: !allSelected && !fitsAll,
+    name: "Todos os clusters",
+    meta: _plural(_scopeClusters.length, "cluster"),
+    onToggle: checked => {
+      _selection.cluster.clear();
+      if (checked) _scopeClusters.forEach(cluster => _selection.cluster.add(cluster.id));
+      _onSelectionChanged();
+    },
+  }));
+  const divider = document.createElement("div");
+  divider.className = "scope-picker-divider";
+  options.appendChild(divider);
+
+  _scopeClusters.forEach((cluster, index) => {
+    const checked = _selection.cluster.has(cluster.id);
+    options.appendChild(_optionRow({
+      checked,
+      blocked: !checked && _selectionSize() >= MAX_SCOPES,
+      color: _clusterColor(cluster, index),
+      name: cluster.name || cluster.id,
+      meta: _plural(cluster.site_count, "site"),
+      onToggle: enabled => {
+        if (enabled) _selection.cluster.add(cluster.id);
+        else _selection.cluster.delete(cluster.id);
+        _onSelectionChanged();
+      },
+    }));
+  });
+  menu.appendChild(options);
+}
+
+/** Monta a casca do seletor de sites uma vez; a busca só repinta as opções. */
+function _renderSitePicker() {
+  const menu = document.querySelector("#kpi-overview-site-picker .scope-picker-menu");
+  if (!menu) return;
+  menu.innerHTML = "";
+
+  const search = document.createElement("input");
+  search.type = "search";
+  search.className = "scope-picker-search";
+  search.placeholder = "Buscar site…";
+  search.addEventListener("input", () => _renderSiteOptions());
+  menu.appendChild(search);
+
+  const options = document.createElement("div");
+  options.className = "scope-picker-options";
+  menu.appendChild(options);
+  _renderSiteOptions();
+}
+
+function _renderSiteOptions() {
+  const menu = document.querySelector("#kpi-overview-site-picker .scope-picker-menu");
+  const options = menu?.querySelector(".scope-picker-options");
+  if (!options) return;
+  const term = (menu.querySelector(".scope-picker-search")?.value || "").trim().toLowerCase();
+  const matches = _scopeSites.filter(site =>
+    !term || `${site.name || ""} ${site.id}`.toLowerCase().includes(term));
+
+  options.innerHTML = "";
+  if (!matches.length) {
+    const empty = document.createElement("div");
+    empty.className = "scope-picker-empty";
+    empty.textContent = _scopeSites.length ? "Nenhum site encontrado." : "Nenhum site no evento.";
+    options.appendChild(empty);
+    return;
+  }
+  const baseColors = _siteBaseColors();
+  matches.forEach(site => {
+    const checked = _selection.site.has(site.id);
+    options.appendChild(_optionRow({
+      checked,
+      blocked: !checked && _selectionSize() >= MAX_SCOPES,
+      color: baseColors.get(String(site.id)),
+      name: site.name || site.id,
+      meta: (site.tech_families || []).join("/"),
+      onToggle: enabled => {
+        if (enabled) _selection.site.add(site.id);
+        else _selection.site.delete(site.id);
+        _onSelectionChanged();
+      },
+    }));
+  });
+}
+
+function _onSelectionChanged() {
+  _pendingSeed = false;
+  _hiddenScopes.clear();
+  _renderClusterPicker();
+  _renderSiteOptions();
+  _syncPickerSummaries();
+  void _load();
+}
+
+function _summaryText(kind, entries) {
+  const selected = entries.filter(entry => _selection[kind].has(entry.id));
+  if (!entries.length) return kind === "cluster" ? "Nenhum cadastrado" : "Nenhum no evento";
+  if (!selected.length) return "Nenhum";
+  if (kind === "cluster" && selected.length === entries.length && entries.length > 1) return "Todos";
+  if (selected.length === 1) return selected[0].name || selected[0].id;
+  return `${selected.length} selecionados`;
+}
+
+function _syncPickerSummaries() {
+  const clusterValue = document.querySelector("#kpi-overview-cluster-picker .scope-picker-value");
+  const siteValue = document.querySelector("#kpi-overview-site-picker .scope-picker-value");
+  if (clusterValue) clusterValue.textContent = _summaryText("cluster", _scopeClusters);
+  if (siteValue) siteValue.textContent = _summaryText("site", _scopeSites);
+
+  const hint = document.getElementById("kpi-overview-scope-hint");
+  if (hint) {
+    hint.textContent = _selectionSize() >= MAX_SCOPES
+      ? `Limite de ${MAX_SCOPES} escopos atingido`
+      : "";
+  }
   _syncContextLabel();
+}
+
+/**
+ * Legenda única no cabeçalho, em vez de nove legendas iguais espremidas dentro
+ * dos cards. Clicar num escopo o oculta nos nove painéis de uma vez.
+ */
+function _syncContextLabel() {
+  const context = document.getElementById("kpi-overview-context");
+  if (!context) return;
+  const scopes = _selectedScopes();
+  context.innerHTML = "";
+  if (!scopes.length) {
+    context.textContent = "Nenhum escopo selecionado";
+    return;
+  }
+  scopes.forEach(scope => {
+    const hidden = _hiddenScopes.has(scope.key);
+    const chip = document.createElement("button");
+    chip.type = "button";
+    chip.className = `kpi-overview-chip${hidden ? " is-off" : ""}`;
+    chip.dataset.scopeKey = scope.key;
+    chip.setAttribute("aria-pressed", String(!hidden));
+    chip.title = hidden ? `Mostrar ${scope.name}` : `Ocultar ${scope.name}`;
+    chip.innerHTML = `<i style="background:${_safeColor(scope.color)}"></i>${_esc(scope.name)}`;
+    chip.addEventListener("click", () => _toggleScopeVisibility(scope.key));
+    context.appendChild(chip);
+  });
+}
+
+function _toggleScopeVisibility(scopeKey) {
+  const scopes = _selectedScopes();
+  const visible = scopes.filter(scope => !_hiddenScopes.has(scope.key));
+  // Ocultar o último visível deixaria os nove painéis vazios sem explicação.
+  if (visible.length === 1 && visible[0].key === scopeKey) return;
+  if (_hiddenScopes.has(scopeKey)) _hiddenScopes.delete(scopeKey);
+  else _hiddenScopes.add(scopeKey);
+  _syncContextLabel();
+  _applyScopeVisibility();
 }
 
 async function _refreshScopeData() {
   if (!State.eventId || !_isOpen()) return;
-  const selector = document.getElementById("kpi-overview-scope-selector");
-  const previous = selector?.value || "";
   try {
     const timestamp = State.mode === "historical" ? State.historicalTimestamp : null;
     const [sites, clusters] = await Promise.all([
@@ -207,26 +502,28 @@ async function _refreshScopeData() {
     if (!_isOpen()) return;
     _scopeSites = Array.isArray(sites) ? sites : _scopeSites;
     _scopeClusters = Array.isArray(clusters) ? clusters : _scopeClusters;
-    _refreshScopeOptions(false);
-    if (selector?.value && selector.value !== previous) void _load();
+    const before = _selectionKey();
+    // Escopos que sumiram do evento não podem continuar na comparação.
+    const clusterIds = new Set(_scopeClusters.map(cluster => cluster.id));
+    const siteIds = new Set(_scopeSites.map(site => site.id));
+    [..._selection.cluster].forEach(id => {
+      if (!clusterIds.has(id)) _selection.cluster.delete(id);
+    });
+    [..._selection.site].forEach(id => {
+      if (!siteIds.has(id)) _selection.site.delete(id);
+    });
+    if (_pendingSeed || !_selectionSize()) {
+      _pendingSeed = false;
+      _applyPreferredSelection();
+    }
+    _renderPickers();
+    if (_selectionKey() !== before) void _load();
   } catch (error) {
     console.error("Erro ao atualizar escopos da visão geral:", error);
   }
 }
 
-function _selectedScope() {
-  const value = document.getElementById("kpi-overview-scope-selector")?.value || "";
-  const splitAt = value.indexOf(":");
-  return splitAt > 0
-    ? { scope: value.slice(0, splitAt), scopeId: value.slice(splitAt + 1) }
-    : { scope: "", scopeId: "" };
-}
-
-function _syncContextLabel() {
-  const selector = document.getElementById("kpi-overview-scope-selector");
-  const context = document.getElementById("kpi-overview-context");
-  if (context) context.textContent = selector?.selectedOptions?.[0]?.textContent || "Nenhum escopo disponível";
-}
+// ── Gráficos ───────────────────────────────────────────────────────
 
 function _destroyCharts() {
   _charts.forEach(chart => chart.destroy());
@@ -242,13 +539,14 @@ function _renderPanelShells() {
   grid.innerHTML = "";
   PANELS[_family].forEach(panel => {
     const article = document.createElement("article");
-    article.className = "kpi-overview-card";
+    article.className = `kpi-overview-card${panel.paired ? " is-paired" : ""}`;
     article.dataset.panelId = panel.id;
     article.dataset.metrics = panel.metrics.join(",");
     article.dataset.crosshairIndex = "";
     article.innerHTML = `
       <div class="kpi-overview-card-header">
         <h3>${_esc(panel.title)}</h3>
+        <span class="kpi-overview-dash-hint"><i></i>DL<i class="dashed"></i>UL</span>
         <span class="kpi-overview-card-unit"></span>
       </div>
       <div class="kpi-overview-chart-wrap">
@@ -269,18 +567,25 @@ function _showState(state, message="") {
 
 async function _load() {
   if (!_isOpen()) return;
-  const { scope, scopeId } = _selectedScope();
-  if (!State.eventId || !scopeId) {
-    _showState("error", "Selecione um site ou cluster para visualizar os KPIs.");
+  const scopes = _selectedScopes();
+  if (!State.eventId || !scopes.length) {
+    _renderPanelShells();
+    _showState("error", "Selecione ao menos um cluster ou site para visualizar os KPIs.");
     return;
   }
   const requestId = ++_requestId;
   _showState("loading");
   try {
-    const response = await API.getKpiOverview(State.eventId, scope, scopeId, _family, _minutes);
+    const response = await API.getKpiOverviewMulti(
+      State.eventId,
+      scopes.map(scope => ({ scope: scope.scope, scope_id: scope.scopeId })),
+      _family,
+      _minutes,
+    );
     if (requestId !== _requestId || !_isOpen()) return;
     if (!response?.ok) throw new Error(response?.error || "Resposta inválida da API");
     _showState("ready");
+    _scopeMeta = new Map(scopes.map(scope => [scope.key, scope]));
     _renderCharts(response);
   } catch (error) {
     if (requestId !== _requestId) return;
@@ -292,17 +597,18 @@ async function _load() {
 function _renderCharts(response) {
   _destroyCharts();
   const labels = response.labels || [];
+  const scopeCount = (response.series || []).length;
   PANELS[_family].forEach(panel => {
     const card = document.querySelector(`.kpi-overview-card[data-panel-id="${panel.id}"]`);
     const canvas = card?.querySelector("canvas");
     if (!card || !canvas) return;
-    const datasets = panel.metrics.map((metric, index) => _datasetFor(metric, index, panel, response));
+    const datasets = _datasetsFor(panel, response, scopeCount);
     const hasData = datasets.some(dataset => dataset.data.some(value => value != null));
     card.classList.toggle("is-empty", !hasData);
     card.querySelector(".kpi-overview-no-data")?.classList.toggle("hidden", hasData);
     const units = [...new Set(panel.metrics.map(metric => response.units?.[metric]).filter(Boolean))];
-    const unitLabel = units.length === 1 ? units[0] : "DL / UL";
-    card.querySelector(".kpi-overview-card-unit").textContent = unitLabel;
+    card.querySelector(".kpi-overview-card-unit").textContent =
+      units.length === 1 ? units[0] : units.join(" / ");
 
     let chartRef = null;
     canvas.addEventListener("mousemove", event => {
@@ -325,26 +631,48 @@ function _renderCharts(response) {
   });
 }
 
-function _datasetFor(metric, index, panel, response) {
-  const isUl = panel.paired && index === 1;
-  return {
-    label: panel.paired ? (isUl ? "UL" : "DL") : panel.title,
-    metric,
-    unit: response.units?.[metric] || "",
-    data: response.metrics?.[metric] || response.labels.map(() => null),
-    type: isUl ? "bar" : "line",
-    yAxisID: isUl ? "yRight" : "yLeft",
-    borderColor: isUl ? BAR_COLOR : LINE_COLOR,
-    backgroundColor: isUl ? "rgba(171, 125, 246, 0.30)" : "rgba(56, 139, 253, 0.08)",
-    borderWidth: isUl ? 1 : 1.6,
-    pointRadius: 0,
-    pointHoverRadius: 3,
-    tension: 0.25,
-    fill: !panel.paired,
-    spanGaps: false,
-    barPercentage: 0.8,
-    categoryPercentage: 0.9,
-  };
+/**
+ * Um dataset por (escopo × métrica do painel). Nos painéis pareados, o segundo
+ * traço é o UL: mesma cor do escopo, mesmo eixo, linha tracejada.
+ */
+function _datasetsFor(panel, response, scopeCount) {
+  const datasets = [];
+  (response.series || []).forEach(series => {
+    const key = `${series.scope}:${series.scope_id}`;
+    const meta = _scopeMeta.get(key) || { name: series.scope_id, color: SERIES_COLORS[0] };
+    panel.metrics.forEach((metric, index) => {
+      const isUl = !!panel.paired && index === 1;
+      const values = series.metrics?.[metric];
+      datasets.push({
+        label: _datasetLabel(panel, meta, isUl, scopeCount),
+        scopeKey: key,
+        scopeName: meta.name,
+        metric,
+        unit: response.units?.[metric] || "",
+        data: Array.isArray(values) ? values : (response.labels || []).map(() => null),
+        yAxisID: "yLeft",
+        borderColor: meta.color,
+        backgroundColor: _hexToRgba(meta.color, 0.08),
+        borderWidth: 2,
+        borderDash: isUl ? UL_DASH : [],
+        pointRadius: 0,
+        pointHoverRadius: 3,
+        tension: 0.25,
+        // Área só quando existe um único traço — com dois ou mais, o
+        // preenchimento embaralha as cores em vez de ajudar a leitura.
+        fill: scopeCount === 1 && panel.metrics.length === 1,
+        spanGaps: false,
+        hidden: _hiddenScopes.has(key),
+      });
+    });
+  });
+  return datasets;
+}
+
+function _datasetLabel(panel, meta, isUl, scopeCount) {
+  const side = isUl ? "UL" : "DL";
+  if (scopeCount > 1) return panel.paired ? `${meta.name} · ${side}` : meta.name;
+  return panel.paired ? side : panel.title;
 }
 
 function _chartOptions(panel, response) {
@@ -364,12 +692,9 @@ function _chartOptions(panel, response) {
     normalized: true,
     interaction: { mode: "index", intersect: false },
     plugins: {
-      legend: {
-        display: !!panel.paired,
-        position: "top",
-        align: "end",
-        labels: { boxWidth: 8, boxHeight: 8, color: "#8B949E", font: { size: 9 }, padding: 8 },
-      },
+      // A identidade dos escopos fica na legenda única do cabeçalho; nove
+      // legendas iguais só roubariam área de plotagem dos cards.
+      legend: { display: false },
       tooltip: {
         enabled: false,
         external: context => _renderTooltip(context, panel),
@@ -384,19 +709,25 @@ function _chartOptions(panel, response) {
           callback: (_, index) => _formatTime(response.labels?.[index]),
         },
       },
+      // Eixo único: DL e UL do mesmo painel compartilham a unidade, e um
+      // segundo eixo faria escalas diferentes parecerem a mesma curva.
       yLeft: {
         position: "left",
         grid: { color: "#21262D" },
         ticks: { color: "#8B949E", font: { size: 9 }, maxTicksLimit: 4, callback: _formatNumber },
       },
-      yRight: {
-        display: !!panel.paired,
-        position: "right",
-        grid: { drawOnChartArea: false },
-        ticks: { color: BAR_COLOR, font: { size: 9 }, maxTicksLimit: 4, callback: _formatNumber },
-      },
     },
   };
+}
+
+/** Ocultar um escopo pela legenda vale para os nove painéis de uma vez. */
+function _applyScopeVisibility() {
+  _charts.forEach(chart => {
+    chart.data.datasets.forEach((dataset, index) => {
+      chart.setDatasetVisibility(index, !_hiddenScopes.has(dataset.scopeKey));
+    });
+    chart.update();
+  });
 }
 
 function _thresholdAnnotation(value, color) {
@@ -409,7 +740,7 @@ function _syncCrosshairs(index) {
   document.querySelectorAll(".kpi-overview-card").forEach(card => {
     card.dataset.crosshairIndex = index == null ? "" : String(index);
   });
-  _charts.forEach(chart => chart.draw());
+  _charts.forEach(chart => chart.render());
 }
 
 function _clearHover() {
@@ -417,7 +748,7 @@ function _clearHover() {
   _activeIndex = null;
   document.querySelectorAll(".kpi-overview-card").forEach(card => { card.dataset.crosshairIndex = ""; });
   _hideTooltips();
-  _charts.forEach(chart => chart.draw());
+  _charts.forEach(chart => chart.render());
 }
 
 function _hideTooltips(exceptPanelId=null) {
@@ -438,17 +769,39 @@ function _renderTooltip(context, panel) {
   }
   const index = model.dataPoints[0].dataIndex;
   const timestamp = context.chart.data.labels[index];
-  const rows = context.chart.data.datasets.map(dataset => {
+  const visible = context.chart.data.datasets
+    .map((dataset, position) => ({ dataset, position }))
+    .filter(({ position }) => context.chart.isDatasetVisible(position));
+  const rows = visible.map(({ dataset }) => {
     const value = dataset.data[index];
-    return `<div class="kpi-overview-tooltip-row"><span>${_esc(dataset.label)}</span><strong>${value == null ? "—" : `${_formatNumber(value)} ${_esc(dataset.unit)}`}</strong></div>`;
+    return `<div class="kpi-overview-tooltip-row">
+      <span><i class="kpi-overview-tooltip-swatch" style="background:${_safeColor(dataset.borderColor)}"></i><em>${_esc(dataset.label)}</em></span>
+      <strong>${value == null ? "—" : `${_formatNumber(value)} ${_esc(dataset.unit)}`}</strong>
+    </div>`;
   }).join("");
-  tooltip.innerHTML = `<div class="kpi-overview-tooltip-time">${_esc(_formatDateTime(timestamp))}</div>${rows}`;
+  tooltip.classList.toggle("is-dense", visible.length > 4);
+  tooltip.innerHTML = `<div class="kpi-overview-tooltip-time">${_esc(_formatDateTime(timestamp))}</div><div class="kpi-overview-tooltip-rows">${rows}</div>`;
   tooltip.classList.remove("hidden");
   const wrap = card.querySelector(".kpi-overview-chart-wrap");
   let left = model.caretX + 12;
   if (wrap && left + tooltip.offsetWidth + 6 > wrap.clientWidth) left = model.caretX - tooltip.offsetWidth - 12;
   tooltip.style.left = `${Math.max(2, left)}px`;
-  tooltip.style.top = `${Math.max(2, model.caretY - 8)}px`;
+  // Comparando vários escopos o tooltip fica alto: prende dentro do card em vez
+  // de deixá-lo vazar por baixo do gráfico.
+  const maxTop = (wrap?.clientHeight || 0) - tooltip.offsetHeight - 4;
+  tooltip.style.top = `${Math.min(Math.max(2, model.caretY - 8), Math.max(2, maxTop))}px`;
+}
+
+/** Cor validada como hex — vai para dentro de um atributo style. */
+function _safeColor(value) {
+  return /^#[\da-f]{3,8}$/i.test(String(value || "")) ? String(value) : SERIES_COLORS[0];
+}
+
+function _hexToRgba(hex, alpha) {
+  const match = /^#?([\da-f]{6})$/i.exec(String(hex || ""));
+  if (!match) return `rgba(56, 139, 253, ${alpha})`;
+  const value = parseInt(match[1], 16);
+  return `rgba(${(value >> 16) & 255}, ${(value >> 8) & 255}, ${value & 255}, ${alpha})`;
 }
 
 function _formatNumber(value) {

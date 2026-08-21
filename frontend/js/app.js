@@ -8,7 +8,7 @@ import State   from "./state.js";
 import { initMap, renderSites, renderEventPolygon, fitToEvent } from "./map.js?v=20260820-cluster-compare-r2";
 import { initVip }    from "./vip.js";
 import { initKpi, refreshChart }    from "./kpi.js?v=20260820-cluster-compare-r2";
-import { initKpiOverview } from "./kpi_overview.js?v=20260821-kpi-overview-r1";
+import { initKpiOverview } from "./kpi_overview.js?v=20260821-kpi-overview-r2";
 import { initAlerts, injectAlerts } from "./alerts.js";
 import { initAlarms, injectAlarms } from "./alarms.js";
 import { initLogs } from "./logs.js";

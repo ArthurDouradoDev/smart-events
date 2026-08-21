@@ -47,6 +47,9 @@ class CollectionResult:
     received: int = 0
     calculated: int = 0
     invalid: int = 0
+    # Fórmula que não se aplica ao minuto (contador fora da task, nenhuma
+    # tentativa no período) não é defeito e não torna o ciclo parcial.
+    not_applicable: int = 0
     duplicate: int = 0
     inserted: int = 0
     coverage: dict[str, Any] = field(default_factory=dict)
@@ -57,7 +60,8 @@ class CollectionResult:
     def __post_init__(self) -> None:
         if self.state not in {"data", "empty", "partial", "error", "auth_required"}:
             raise ValueError(f"Estado de coleta inválido: {self.state}")
-        if self.received < 0 or self.calculated < 0 or self.invalid < 0:
+        if (self.received < 0 or self.calculated < 0 or self.invalid < 0
+                or self.not_applicable < 0):
             raise ValueError("Contadores de coleta não podem ser negativos")
         if self.state == "data" and not self.measurements:
             raise ValueError("Resultado 'data' exige ao menos uma medição")
@@ -99,6 +103,7 @@ class CollectionResult:
             "received": self.received,
             "calculated": self.calculated,
             "invalid": self.invalid,
+            "not_applicable": self.not_applicable,
             "duplicate": self.duplicate,
             "inserted": self.inserted,
             "coverage": dict(self.coverage),

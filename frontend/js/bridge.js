@@ -373,10 +373,13 @@ const _mock = {
       traffic_volume_dl_nsa: "kbit", traffic_volume_ul_nsa: "kbit",
     };
     const count = minutes === 0 ? 73 : Math.max(16, Number(minutes) + 1);
-    const now = Date.now();
+    const now = Math.floor(Date.now() / 60000) * 60000;
     const labels = Array.from({ length: count }, (_, index) =>
       new Date(now - (count - 1 - index) * 60000).toISOString());
-    const scopeOffset = scope === "cluster" ? 7 : (String(scope_id || "").length % 5);
+    // Deslocamento derivado do id: dois clusters comparados lado a lado precisam
+    // render seres visivelmente diferentes no modo mock.
+    const scopeSeed = [...String(scope_id || "")].reduce((acc, ch) => acc + ch.charCodeAt(0), 0);
+    const scopeOffset = (scope === "cluster" ? 7 : 0) + (scopeSeed % 11);
     const metrics = {};
     metricIds.forEach((metric, metricIndex) => {
       metrics[metric] = labels.map((_, index) => {
@@ -390,6 +393,42 @@ const _mock = {
       ok: true, scope, scope_id, technology_family: family, labels, metrics,
       units: Object.fromEntries(metricIds.map(metric => [metric, unitsByMetric[metric] || ""])),
       thresholds: Object.fromEntries(metricIds.map(metric => [metric, { warning: 80, critical: 95 }])),
+    };
+  },
+  get_kpi_overview_multi: (event_id, scopes, technology_family, minutes=60) => {
+    const entries = [];
+    const seen = new Set();
+    (scopes || []).forEach(entry => {
+      const scope = entry?.scope;
+      const scopeId = entry?.scope_id ?? entry?.id;
+      const key = `${scope}:${scopeId}`;
+      if (!["site", "cluster"].includes(scope) || !scopeId || seen.has(key)) return;
+      seen.add(key);
+      entries.push({ scope, scope_id: String(scopeId) });
+    });
+    if (!entries.length) {
+      return { ok: false, error: "informe ao menos um cluster ou site", labels: [], series: [], units: {}, thresholds: {} };
+    }
+    const responses = entries.map(entry => ({
+      entry,
+      data: _mock.get_kpi_overview(event_id, entry.scope, entry.scope_id, technology_family, minutes),
+    }));
+    const labels = [...new Set(responses.flatMap(({ data }) => data.labels))].sort();
+    const series = responses.map(({ entry, data }) => {
+      const byTimestamp = Object.fromEntries(Object.entries(data.metrics).map(([metric, values]) => [
+        metric, new Map(data.labels.map((timestamp, index) => [timestamp, values[index]])),
+      ]));
+      return {
+        scope: entry.scope,
+        scope_id: entry.scope_id,
+        metrics: Object.fromEntries(Object.keys(data.metrics).map(metric => [
+          metric, labels.map(timestamp => byTimestamp[metric].get(timestamp) ?? null),
+        ])),
+      };
+    });
+    return {
+      ok: true, technology_family: responses[0].data.technology_family, labels, series,
+      units: responses[0].data.units, thresholds: responses[0].data.thresholds, failures: [],
     };
   },
   get_alerts: (event_id, timestamp=null) => ([
@@ -594,6 +633,8 @@ const API = {
     API.call("get_kpi_series", eventId, siteId, m, w, cellId, null, technologyFamily, scope, scopeId),
   getKpiOverview:   (eventId, scope, scopeId, technologyFamily, minutes=60) =>
     API.call("get_kpi_overview", eventId, scope, scopeId, technologyFamily, minutes),
+  getKpiOverviewMulti: (eventId, scopes, technologyFamily, minutes=60) =>
+    API.call("get_kpi_overview_multi", eventId, scopes, technologyFamily, minutes),
   getKpiCatalog:    (eventId=null)           => API.call("get_kpi_catalog", eventId),
   getClusters:      (eventId)                => API.call("get_clusters", eventId),
   getVips:          (eventId, timestamp=null) => API.call("get_vips", eventId, timestamp),

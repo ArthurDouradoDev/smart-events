@@ -453,7 +453,7 @@ def test_visao_geral_sincroniza_crosshair_e_exibe_um_tooltip():
         raise
 
 
-def test_grade_5g_tem_nove_paineis_quatro_pares_e_eixo_duplo():
+def test_grade_5g_tem_nove_paineis_e_quatro_pares_dl_ul_em_eixo_unico():
     sync_api = pytest.importorskip("playwright.sync_api")
     try:
         with _frontend_server() as url, sync_api.sync_playwright() as playwright:
@@ -477,22 +477,28 @@ def test_grade_5g_tem_nove_paineis_quatro_pares_e_eixo_duplo():
             )
             assert paired == 4
 
+            # DL e UL do mesmo painel têm a mesma unidade: duas linhas (a de UL
+            # tracejada) sobre um eixo só, no lugar da barra em eixo secundário.
             pair_state = page.locator(
                 '.kpi-overview-card[data-panel-id="throughput"] canvas'
             ).evaluate(
                 """canvas => {
                   const chart = Chart.getChart(canvas);
                   return {
-                    types: chart.data.datasets.map(dataset => dataset.type),
+                    types: chart.data.datasets.map(
+                      dataset => dataset.type || chart.config.type),
                     axes: chart.data.datasets.map(dataset => dataset.yAxisID),
-                    rightVisible: chart.options.scales.yRight.display,
+                    dashed: chart.data.datasets.map(
+                      dataset => (dataset.borderDash || []).length > 0),
+                    scales: Object.keys(chart.options.scales),
                   };
                 }"""
             )
             assert pair_state == {
-                "types": ["line", "bar"],
-                "axes": ["yLeft", "yRight"],
-                "rightVisible": True,
+                "types": ["line", "line"],
+                "axes": ["yLeft", "yLeft"],
+                "dashed": [False, True],
+                "scales": ["x", "yLeft"],
             }
             browser.close()
     except Exception as exc:

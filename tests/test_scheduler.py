@@ -217,3 +217,53 @@ class TestSchedulerState:
         assert new_context.collector.cancel_event is new_context.stop_event
         assert old_context.collector.calls == 1
         scheduler.stop()
+
+
+class TestKpiAlertSampleFloor:
+    """B7 — acessibilidade sobre pouquíssimas tentativas não é degradação.
+
+    Um único sucesso em duas tentativas dá 50,0% e disparava CRITICAL; 454 dos
+    alertas do evento tinham essa assinatura (50,0%, 66,7%, 80,0%).
+    """
+
+    @staticmethod
+    def _context(thresholds=None):
+        event = {"id": "event", "oss": {"region": "SP"}, "thresholds": thresholds or {}}
+        return CollectionContext(
+            generation=1, event_id="event", oss="SP", collector=object(),
+            event_config=event, stop_event=threading.Event(),
+        )
+
+    @staticmethod
+    def _measurement(sample_size, value=50.0):
+        row = {"metric": "accessibility", "site_id": "SITE", "cell_id": "4G-CELL",
+               "value": value, "timestamp": "2026-08-21T11:10:00Z"}
+        if sample_size is not None:
+            row["sample_size"] = sample_size
+        return row
+
+    def _alerts_for(self, scheduler, monkeypatch, measurement, thresholds=None):
+        alerts = []
+        monkeypatch.setattr(db, "is_silenced", lambda *_: False)
+        monkeypatch.setattr(db, "insert_alert", lambda row: alerts.append(row))
+        scheduler._evaluate_kpi_alerts([measurement], self._context(thresholds))
+        return alerts
+
+    def test_accessibility_alert_requires_minimum_sample(self, scheduler, monkeypatch):
+        assert self._alerts_for(scheduler, monkeypatch, self._measurement(2)) == []
+        assert len(self._alerts_for(scheduler, monkeypatch, self._measurement(40))) == 1
+
+    def test_minimum_sample_is_configurable(self, scheduler, monkeypatch):
+        alerts = self._alerts_for(scheduler, monkeypatch, self._measurement(2),
+                                  thresholds={"alert_min_samples": 2})
+        assert len(alerts) == 1
+
+    def test_measurement_without_sample_size_still_alerts(self, scheduler, monkeypatch):
+        """Séries antigas e coletores que não informam a amostra não emudecem."""
+        alerts = self._alerts_for(scheduler, monkeypatch, self._measurement(None))
+        assert len(alerts) == 1
+
+    def test_healthy_accessibility_never_alerts(self, scheduler, monkeypatch):
+        alerts = self._alerts_for(scheduler, monkeypatch,
+                                  self._measurement(500, value=99.9))
+        assert alerts == []

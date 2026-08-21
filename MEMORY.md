@@ -620,3 +620,117 @@ Gate completo: `pytest tests/ -q --basetemp=.pytest-work/phase5-full` → **388 
 10 skipped, 0 failed**. Depois do ajuste exclusivamente visual de altura, os dois
 testes Playwright da Fase 5 passaram novamente (**2 passed**).
 
+---
+
+## 2026-08-21 — Fase 1: período, unidade de throughput 5G e amostra dos alarmes
+
+Plano: `docs/plans/2026-08-21-001-fix-kpi-monitoring-unidades-e-escala-plan.md`.
+Backend puro; nenhuma tela mudou.
+
+**Decisões travadas:**
+
+- **O `period` da resposta do Monitoring NÃO é o Granularity Period.** O OSS devolve
+  `period=5` para tasks de 1 minuto. O GP verdadeiro é configuração da task: o CSV traz
+  `Period(minute)=1` e `N.Cell.Avail.Dur=60` no mesmo minuto. `_configured_pm_tasks`
+  passou a carregar `period_seconds` por task (default `DEFAULT_PM_PERIOD_SECONDS = 60`)
+  e `_parse_monitoring_response` usa esse valor. O `period` da resposta continua sendo
+  lido apenas para um aviso de divergência, uma vez por task por sessão. Efeito: a
+  availability 5G sai de 20% para 100%.
+- **`N.ThpTime.*` está em microssegundo** — medido, não documentado. O OSS devolve o
+  contador com `unit` vazio; os 95 valores do export são múltiplos de 500 (slot de
+  0,5 ms @30 kHz) e qualquer outra hipótese viola o piso volume/período. A constante
+  `THP_TIME_TO_SECONDS = 1e-6` em `core/kpi_formulas.py` é o **único** ponto a mudar se
+  a documentação Huawei disser outra coisa. `throughput_ul` do 5G deixou de ser
+  `production_ready=False`: DL e UL usam a mesma unidade, e agora as duas são `Mbit/s`.
+- **Trava aritmética em vez de fé na unidade.** `check_throughput_floor` confere, a cada
+  cálculo, se o throughput é ≥ `(volume − descontado)/período`. Violação **não** descarta
+  a linha: vira diagnóstico `unit_suspect`. O piso usa o **mesmo numerador da fórmula**,
+  não o volume bruto que o plano sugeria — medido nos 173 throughputs do export, o volume
+  bruto acusa 1 falso positivo (célula que concentrou a transmissão no último slot) e o
+  numerador líquido acusa zero, mantendo a detecção de erro de 1000×.
+- **"Não aplicável" ≠ "inválido".** Nova exceção `NotApplicable(InvalidKpi)`, levantada
+  por `_need` (contador fora da task) e `_ratio` (denominador zero). O parser conta
+  `not_applicable` separado de `invalid`, e o cálculo de `partial` só olha `invalid` —
+  um ciclo 4G saudável passa a fechar "Com dados" em vez de "Parcial" permanente.
+  **Exceção deliberada:** contador que chegou defeituoso (não confiável ou não numérico)
+  continua contando como `invalid`, porque a ausência tem causa conhecida.
+- **Throughput de site é recalculado, não somado.** `site_aggregation` de
+  `throughput_dl`/`throughput_ul` nas duas tecnologias passou de `sum` para
+  `recalculate` — somar taxas dava 658 Mbit/s num site 4G. **Descontinuidade conhecida
+  e aceita:** as linhas SITE gravadas antes desta data são somas; as novas são
+  recálculos. Conforme o B1, o histórico não é migrado.
+- **Alarme de acessibilidade exige amostra.** `sample_size(definition, counters)` expõe o
+  menor denominador da fórmula (só para `accessibility` e `drop_rate`); o parser o anexa a
+  cada medição em memória (`m["sample_size"]`, não persistido) e `_evaluate_kpi_alerts`
+  ignora acessibilidade com amostra abaixo de `thresholds.alert_min_samples` (default 20).
+  Os 454 CRITICAL do evento tinham a assinatura de denominadores 2, 3 e 5.
+  **Efeito colateral aceito:** com GP de 1 minuto o 5G deixa de gerar alarme de
+  acessibilidade (maior denominador observado por célula-minuto = 4). A agregação por
+  janela (B6) devolve o alarme e está fora deste plano.
+- **RTT 4G sai do catálogo.** `ran_rtt` e `terrestrial_rtt` receberam
+  `monitoring_available=False`: o OSS aceita no máximo 25 contadores por task e os quatro
+  contadores de RTT ficaram de fora. Reativar exige antes uma task PM dedicada.
+- **`PRB.Avail` fora do padrão LTE é anotado, não corrigido.** Valor fora de
+  `{6,15,25,50,75,100}` gera um WARNING por célula por sessão. As duas hipóteses (SFN com
+  PRBs somados vs. denominador inflado) não são decidíveis com o que a task coleta, e
+  dividir por um valor arbitrado criaria alarme falso — ver "Encaminhamentos" do plano.
+
+**Ferramenta nova — `tools/kpi_crosscheck.py`.** Recalcula os KPIs a partir dos CSVs de
+`csvs_reference/` e compara com o banco do evento, célula a célula e minuto a minuto. É a
+rede de segurança das Fases 3 e 4, que mexem em unidade e não podem alterar valor.
+
+    python tools/kpi_crosscheck.py --event testesantoamaro --csv-dir csvs_reference
+
+Rodado contra o banco **anterior** à Fase 1, ele isola exatamente os quatro defeitos:
+`availability` 5G com razão 0,200 em 95/95 amostras (período), `throughput_dl`/`_ul` 5G com
+0,001 em 173/173 (unidade de tempo), `traffic_volume_dl_sa` com 94/95 em 1,000 e uma amostra
+negativa (bug do export do OSS, agora fixada em 0). As outras 20 métricas dão 1,000. Como o
+histórico não é migrado, as linhas antigas continuam erradas no banco; a razão 1,000 nessas
+quatro só aparece em dado coletado a partir de agora.
+
+Gate: `pytest tests/ -q --basetemp=.pytest-work/fase1` → **423 passed, 10 skipped, 0 failed**
+(baseline anterior: 388 passed / 10 skipped).
+
+---
+
+## 2026-08-21 — Visão geral de KPIs: comparação multi-escopo e traço DL/UL
+
+**Escopo virou comparação, não seleção única.** O `<select>` de escopo saiu; entraram dois
+seletores múltiplos independentes na toolbar — **Clusters** (com "Todos os clusters") e
+**Sites** (com busca). A união dos dois é a lista comparada. Teto de **8 escopos**
+(`KPI_OVERVIEW_MAX_SCOPES` em `api/api.py` e `MAX_SCOPES` em `kpi_overview.js`), que é o
+tamanho da paleta categórica: acima disso as linhas deixam de ser distinguíveis, então o
+backend recusa em vez de truncar em silêncio.
+
+**API nova: `Api.get_kpi_overview_multi(event_id, scopes, family, minutes)`.** Recebe
+`[{"scope": "cluster"|"site", "scope_id": ...}]` e devolve `series[]`, cada uma com o bloco
+`metrics` completo. Ela **chama `get_kpi_overview` uma vez por escopo** — a expansão de site
+fundido e a agregação de cluster continuam num lugar só — e **une os timestamps depois** de
+todos voltarem, para que um escopo sem ponto num minuto vire `None` naquela posição em vez
+de deslocar a série do vizinho. `get_kpi_overview` continua existindo e não mudou.
+
+**Painéis pareados: DL linha contínua, UL linha tracejada, mesmo eixo.** As barras de UL e o
+eixo `yRight` foram removidos. Os dois lados de um painel pareado (PRB, Throughput, Traffic
+Volume SA/NSA) **têm a mesma unidade**, então eixo duplo faria escalas diferentes parecerem
+a mesma curva — e com N clusters na tela viraria ilegível. A convenção de traço fica escrita
+no cabeçalho de cada card pareado (`— DL  ┄ UL`).
+
+**Cor segue a entidade, nunca a ordem.** Cluster usa a cor cadastrada dele (a mesma do
+polígono no mapa). Site usa o índice estável dele na lista do evento sobre
+`SERIES_COLORS`. Só há uma exceção: se a cor-base de um site já foi tomada por um cluster
+selecionado, o **site** cede e pega a próxima livre — duas séries da mesma cor no mesmo
+gráfico seriam ilegíveis, e é o site que não tem cor própria a defender.
+
+**`SERIES_COLORS` é a paleta do app reordenada, e a ordem é mecanismo de segurança.**
+`#388BFD, #F85149, #ab7df6, #3FB950, #00d2ff, #D29922, #f692cc, #FF7B00`. Na ordem original
+(a do `CLUSTER_COLORS` do servidor) o par adjacente `#D29922 ↔ #3FB950` dá ΔE CVD 5,1 —
+indistinguível para protanopia. Reordenado, o pior par adjacente vai a ΔE 17,4 (deutan),
+com visão normal 19,2 e contraste ≥ 3:1 sobre `#161B22`. **Não reordenar sem revalidar**
+(`test_paleta_de_series_nao_e_reordenada_sem_revalidar` trava os valores). Os hexes em si
+continuam fora da banda de luminosidade recomendada — são tokens do app, compartilhados com
+marcadores do mapa e cores de status, e re-escalá-los está fora do escopo desta mudança.
+
+**Uma legenda só, no cabeçalho.** As nove legendas por card foram substituídas por chips
+clicáveis em `#kpi-overview-context`: clicar oculta o escopo **nos nove painéis de uma vez**,
+e o último escopo visível não pode ser desligado. Dentro do card ficaram apenas o crosshair
+sincronizado e o tooltip (2 colunas acima de 4 séries, preso dentro do card).

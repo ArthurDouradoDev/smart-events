@@ -356,3 +356,99 @@ geral da resposta.
 os argumentos da chamada de verdade um a um — um parâmetro nomeado errado no meio da
 lista não dá erro de sintaxe, só desloca silenciosamente todo argumento posterior.
 
+---
+
+## 2026-08-21 — `results[].period` do Monitoring tratado como Granularity Period
+
+**Como apareceu:** o painel 5G exibia `Availability` como uma linha reta em 20%, abaixo do
+threshold, por nove dias. Nenhum erro, nenhum log, nenhum ciclo em falha — o número estava
+lá, redondo e plausível o bastante para ninguém conferir.
+
+**Causa raiz:** `_parse_monitoring_response` lia `result.get("period")` e passava esse valor
+às fórmulas como o Granularity Period em minutos. O campo tem nome plausível e tipo
+plausível, mas o OSS devolve `5` para tasks cujo GP é de 1 minuto. `N.Cell.Avail.Dur = 60`
+dividido por `5 × 60 = 300` dá exatamente 20%. O 4G não denunciou o erro porque sua fórmula
+é `1 − indisponível/período`: com `Unavail.Dur = 0`, qualquer período dá 100%.
+
+**O que havia para conferir e não foi conferido:** o export CSV da mesma task traz a coluna
+`Period(minute) = 1`, o `execTime` avança de 60 em 60 segundos e `N.Cell.Avail.Dur` satura
+em 60. Três contadores independentes contradiziam o campo, e o teste existente
+(`test_availability_requires_the_period_returned_by_oss`) **fixava o comportamento errado no
+próprio nome**.
+
+**Correção:** o GP passou a vir da configuração da task (`period_seconds`, default 60). O
+`period` da resposta continua sendo lido, mas só para um aviso de divergência.
+
+**Regra:** campo do OSS com nome plausível não é contrato. Antes de usá-lo em fórmula,
+validar contra um contador que o denuncie — um que sature ou que tenha unidade conhecida.
+E teste cujo nome afirma um comportamento externo ("o período que o OSS devolve") está
+documentando uma suposição, não travando um requisito.
+
+---
+
+## 2026-08-21 — `N.ThpTime.*` recebeu unidade por suposição e o throughput 5G saiu 1000× menor
+
+**Como apareceu:** o painel de Throughput 5G marcava picos de ~1,0 onde o 4G, com menos
+tráfego, marcava 6,8. `throughput_ul` chegou a ficar com `production_ready=False` e
+`unit="unidade OSS pendente"` — a dúvida foi registrada e depois esquecida em produção.
+
+**Causa raiz:** o OSS devolve `N.ThpTime.DL.RmvLastSlot` com `unit` vazio. A fórmula
+assumiu que a divisão `kbit/tempo` já saía em Mbit/s, o que só valeria se o contador
+estivesse em milissegundos. Ele está em **microssegundos**: `36.079.000` num período de
+60 s são 36,1 s de tempo escalonado (plausível), enquanto em ms seriam 10 horas e em
+segundos, 417 dias.
+
+**Correção:** `THP_TIME_TO_SECONDS = 1e-6`, nomeada e comentada com a evidência, mais
+`check_throughput_floor` — o resultado é conferido contra `(volume − descontado)/período` a
+cada cálculo, e a violação vira o diagnóstico `unit_suspect` em vez de número publicado em
+silêncio.
+
+**Regra:** contador sem unidade declarada não pode receber unidade por suposição. Quando a
+unidade só puder ser inferida, transformar a inferência em constante nomeada **e** instalar
+uma trava aritmética que a verifique em cada cálculo — o piso vem de uma invariante do
+próprio dado (aqui: tempo escalonado ≤ período), não de um valor esperado. Uma dúvida
+anotada num campo de metadado (`production_ready=False`) não impede o número errado de
+chegar à tela.
+
+---
+
+## 2026-08-21 — `chart.draw()` apagava as séries dos nove painéis da visão geral
+
+**Como apareceu:** ao tirar o primeiro screenshot da visão geral com vários clusters, os nove
+cards mostravam grade, eixos e as linhas de threshold — e **nenhuma série**. Os dados estavam
+todos lá: `chart.data.datasets[n].data` com 61 pontos, `isDatasetVisible` true, os elementos
+posicionados dentro de `chartArea`. Só não apareciam depois que o mouse saía de um canvas.
+
+**Causa raiz:** `_syncCrosshairs` e `_clearHover` repintavam com `chart.draw()`. No Chart.js
+4.4 `draw()` limpa o canvas e repinta apenas as camadas pendentes; usado sozinho, fora do
+ciclo de render, deixa o canvas com tudo menos os datasets. O método que repinta o gráfico
+inteiro é `chart.render()` — com `animation: false` ele é igualmente imediato. O defeito era
+anterior a esta mudança e passava despercebido porque nenhum teste olhava o pixel.
+
+**Regra:** para repintar um Chart.js fora do ciclo dele, use `render()`, não `draw()`. E
+gráfico não se dá por pronto com asserção sobre `chart.data` — o estado do modelo pode estar
+perfeito com o canvas vazio. Olhar o desenho (screenshot) é parte do teste.
+
+---
+
+## 2026-08-21 — Mock do bridge dava uma grade de tempo por escopo e fragmentava as linhas
+
+**Como apareceu:** logo depois do defeito acima, comparando dois clusters, as linhas
+continuavam invisíveis. O elemento de linha tinha `segments: 61` para 61 pontos — ou seja,
+61 segmentos de comprimento zero.
+
+**Causa raiz:** a comparação faz **uma chamada por escopo**, e o mock
+`get_kpi_overview` montava os labels a partir de `Date.now()` **cru**. Duas chamadas
+separadas por poucos milissegundos produziam timestamps diferentes; a união virava 122
+labels e cada série ficava com valor sim, valor não. Com `spanGaps: false` — correto — a
+linha virava pó.
+
+**Correção:** o mock passou a alinhar a grade ao minuto
+(`Math.floor(Date.now() / 60000) * 60000`). O backend real já é alinhado pelo ciclo de
+coleta. O teste `test_comparar_todos_os_clusters_gera_uma_serie_por_cluster` agora exige
+zero `null` nas séries do mock.
+
+**Regra:** dado sintético que alimenta uma **união de escopos** precisa da mesma âncora
+temporal em todas as chamadas. Mock com relógio livre não é "aproximadamente igual" ao
+real — ele fabrica um modo de falha que o real não tem, e some com a evidência do bug
+verdadeiro.

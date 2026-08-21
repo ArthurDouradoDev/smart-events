@@ -47,7 +47,10 @@ import urllib3
 from core import database as db
 from core import credentials
 from core.collection_result import CollectionDiagnostic, CollectionResult
-from core.kpi_formulas import InvalidKpi, calculate as calculate_kpi, definitions_for
+from core.kpi_formulas import (
+    InvalidKpi, NotApplicable, calculate as calculate_kpi, check_throughput_floor,
+    definitions_for, sample_size as kpi_sample_size,
+)
 from core.rrc_decode import decode_meas_report
 from core.session_renew import (
     EXIT_SUCCESS,
@@ -69,6 +72,14 @@ _DEFAULT_BASE_URL = "https://10.220.50.9:31943"  # fallback = SP
 
 # Quantos corpos de Monitoring sem medição são gravados automaticamente por processo.
 MONITORING_AUTO_DUMPS = 3
+
+# Granularity Period assumido quando a task PM não o declara. Todas as tasks dos
+# eventos atuais são de 1 minuto; a Fase 2 do plano dá o campo ao operador.
+DEFAULT_PM_PERIOD_SECONDS = 60
+
+# PRBs disponíveis nas larguras de banda LTE (1,4 a 20 MHz). Valor fora desta
+# lista costuma indicar célula SFN ou configuração atípica — ver A3 do plano.
+_LTE_PRB_AVAIL = {6, 15, 25, 50, 75, 100}
 
 # O inventário conhece somente a família da célula, mas cada task 5G consulta
 # um tipo de objeto distinto e, portanto, um catálogo de contadores distinto.
@@ -344,6 +355,28 @@ class BaseCollector(ABC):
     def _normalized_name(value) -> str:
         return re.sub(r"[^A-Z0-9]", "", str(value or "").upper())
 
+    @staticmethod
+    def _task_period_seconds(item: dict) -> int:
+        """Granularity Period da task, em segundos.
+
+        O ``period`` que vem no resultado do Monitoring **não** é o GP: o OSS
+        devolve 5 para tasks de 1 minuto, o que fazia a availability sair em 20%.
+        O GP é configuração da task e só o operador o conhece.
+        """
+        raw = item.get("period_seconds")
+        if raw is None:
+            return DEFAULT_PM_PERIOD_SECONDS
+        try:
+            seconds = int(raw)
+        except (TypeError, ValueError):
+            seconds = 0
+        if seconds <= 0:
+            logger.warning(
+                "[monitoring] period_seconds inválido (%r) na task PM %r; assumindo %ss.",
+                raw, item.get("task_id"), DEFAULT_PM_PERIOD_SECONDS)
+            return DEFAULT_PM_PERIOD_SECONDS
+        return seconds
+
     def _configured_pm_tasks(self, session_data: dict) -> list[dict]:
         """Resolve tasks por tecnologia, sem trocar silenciosamente 4G por 5G."""
         integration = self.event.get("integration", {}) or {}
@@ -356,7 +389,8 @@ class BaseCollector(ABC):
                 continue
             tech = self._normalize_task_technology(item.get("tech"))
             if tech:
-                tasks.append({"task_id": int(item["task_id"]), "technology": tech})
+                tasks.append({"task_id": int(item["task_id"]), "technology": tech,
+                              "period_seconds": self._task_period_seconds(item)})
             else:
                 logger.warning(
                     "[monitoring] tecnologia de task PM desconhecida: %r (task_id=%r); task ignorada.",
@@ -365,7 +399,8 @@ class BaseCollector(ABC):
         if not tasks:
             fallback = integration.get("pm_task_id") or session_data.get("monitoring", {}).get("task_id")
             if fallback is not None:
-                tasks.append({"task_id": int(fallback), "technology": "4G"})
+                tasks.append({"task_id": int(fallback), "technology": "4G",
+                              "period_seconds": DEFAULT_PM_PERIOD_SECONDS})
         # Várias tasks da mesma tecnologia são o caso normal (teto de 300 células).
         # O mesmo task_id duas vezes é a ambiguidade real: o mapa task→tecnologia
         # ficaria com uma só e a outra sumiria em silêncio.
@@ -498,9 +533,11 @@ class BaseCollector(ABC):
                 else f"{len((payload_item or {}).get('objNoExecTimes') or [])}obj")
         http = status_code if status_code is not None else "erro"
         logger.info(
-            "[monitoring] task=%s/%s HTTP=%s recebidos=%s mapeados=%s nao_mapeados=%s invalidos=%s",
+            "[monitoring] task=%s/%s HTTP=%s recebidos=%s mapeados=%s nao_mapeados=%s "
+            "invalidos=%s nao_aplicaveis=%s",
             task_id, mode, http, parsed["received"],
             parsed["received"] - parsed["unmapped"], parsed["unmapped"], parsed["invalid"],
+            parsed["not_applicable"],
         )
         if parsed["rows"] or self._auto_dumps_monitoring >= MONITORING_AUTO_DUMPS:
             return
@@ -513,10 +550,11 @@ class BaseCollector(ABC):
                                     failed_count: int, elapsed_s: float) -> None:
         logger.info(
             "[monitoring] ciclo tasks=%s falhas=%s recebidos=%s mapeados=%s nao_mapeados=%s "
-            "invalidos=%s linhas=%s cursores=%s duracao=%.1fs",
+            "invalidos=%s nao_aplicaveis=%s linhas=%s cursores=%s duracao=%.1fs",
             task_count, failed_count, parsed["received"],
             parsed["received"] - parsed["unmapped"], parsed["unmapped"],
-            parsed["invalid"], len(parsed["rows"]), len(parsed["cursors"]), elapsed_s,
+            parsed["invalid"], parsed["not_applicable"], len(parsed["rows"]),
+            len(parsed["cursors"]), elapsed_s,
         )
 
     def _query_monitoring_task(self, url: str, payload: list[dict],
@@ -540,7 +578,7 @@ class BaseCollector(ABC):
 
     def _empty_monitoring_parse(self) -> dict:
         return {
-            "rows": [], "received": 0, "invalid": 0, "unmapped": 0,
+            "rows": [], "received": 0, "invalid": 0, "not_applicable": 0, "unmapped": 0,
             "unmapped_cells": [], "diagnostics": [], "cursors": {},
             "latest_data_at": None, "idle_tasks": [],
         }
@@ -563,6 +601,7 @@ class BaseCollector(ABC):
         expected_cell_ids = self._expected_pm_cell_ids(tasks)
         url = f"{self.base_url}/rest/oss/access/pm/v1/monitor/task/result"
         tech_by_task = {str(task["task_id"]): task["technology"] for task in tasks}
+        period_by_task = {str(task["task_id"]): task["period_seconds"] for task in tasks}
         renewed = False
         combined_data = []
         discovery_tasks: set[str] = set()
@@ -582,7 +621,8 @@ class BaseCollector(ABC):
                 body = response.json()
                 self._dump_raw(body, "monitoring")
                 task_parsed = self._parse_monitoring_response(
-                    body, {str(task["task_id"]): task["technology"]})
+                    body, {str(task["task_id"]): task["technology"]},
+                    {str(task["task_id"]): task["period_seconds"]})
                 self._log_monitoring_task(
                     task["task_id"], response.status_code, payload_item,
                     discovery_tasks, task_parsed, body)
@@ -644,7 +684,8 @@ class BaseCollector(ABC):
             ]
             return CollectionResult.error(cause, stage=stage, code=code, diagnostics=diagnostics)
 
-        parsed = self._parse_monitoring_response({"data": combined_data}, tech_by_task)
+        parsed = self._parse_monitoring_response({"data": combined_data}, tech_by_task,
+                                                 period_by_task)
         for task_id in empty_discovery:
             parsed["cursors"].pop(f"{task_id}:", None)
         if task_failures:
@@ -665,11 +706,14 @@ class BaseCollector(ABC):
             "event_cells": sorted(expected_cell_ids)[:5],
         }
         self._log_unmapped(parsed)
+        # ``not_applicable`` fica de fora de propósito: fórmula sem denominador no
+        # minuto é ausência legítima, e contá-la aqui deixava todo ciclo 4G "Parcial".
         partial = bool(parsed["unmapped"] or parsed["invalid"]
                        or mapped_cells < len(expected_cell_ids)
                        or task_failures)
         kwargs = dict(cursors=parsed["cursors"], received=parsed["received"],
                       calculated=len(parsed["rows"]), invalid=parsed["invalid"],
+                      not_applicable=parsed["not_applicable"],
                       diagnostics=parsed["diagnostics"], coverage=coverage,
                       latest_data_at=parsed["latest_data_at"])
         idle_cause = (self._describe_idle_tasks(parsed["idle_tasks"])
@@ -925,6 +969,9 @@ class HttpCollector(BaseCollector):
         self._cell_to_site = {}
         self._cell_metadata = {}
         self._discovered_pm_tasks: set[str] = set()
+        # Avisos que valem uma vez por sessão — repetidos a cada minuto viram ruído.
+        self._prb_avail_warned: set[str] = set()
+        self._period_divergence_warned: set = set()
         for site in event_config.get("sites", []):
             for cell in site.get("cells", []):
                 c_id = cell if isinstance(cell, str) else cell.get("id")
@@ -1732,13 +1779,49 @@ class HttpCollector(BaseCollector):
             unique.append(item)
         return unique
 
-    def _parse_monitoring_response(self, response_json: dict, task_technologies: dict[str, str]) -> dict:
+    def _warn_non_standard_prb(self, cell_id: str, counters: dict[str, float]) -> None:
+        """A3 — PRB.Avail fora do padrão LTE é anotado, não corrigido.
+
+        As duas hipóteses (SFN com PRBs somados vs. denominador inflado) não são
+        decidíveis com o que a task coleta, e dividir por um valor arbitrado
+        criaria alarme falso. O aviso existe para a próxima ocorrência aparecer.
+        """
+        values = {name: counters[name] for name in
+                  ("L.ChMeas.PRB.DL.Avail", "L.ChMeas.PRB.UL.Avail") if name in counters}
+        if not values or all(value in _LTE_PRB_AVAIL for value in values.values()):
+            return
+        if cell_id in self._prb_avail_warned:
+            return
+        self._prb_avail_warned.add(cell_id)
+        logger.warning(
+            "[monitoring] PRB.Avail fora do padrão LTE em %s: DL=%s UL=%s "
+            "(esperado 6/15/25/50/75/100) — utilização pode estar subestimada",
+            cell_id, values.get("L.ChMeas.PRB.DL.Avail"), values.get("L.ChMeas.PRB.UL.Avail"))
+
+    def _warn_period_divergence(self, task_id, reported, period_seconds: int) -> None:
+        """O ``period`` da resposta é dado do OSS, não contrato: só vira aviso."""
+        if reported is None or task_id in self._period_divergence_warned:
+            return
+        try:
+            reported_seconds = float(reported) * 60.0
+        except (TypeError, ValueError):
+            return
+        if abs(reported_seconds - period_seconds) < 1:
+            return
+        self._period_divergence_warned.add(task_id)
+        logger.warning(
+            "[monitoring] task %s: o OSS devolveu period=%s (%.0fs), mas a task está "
+            "configurada com %ss. O cálculo usa a configuração.",
+            task_id, reported, reported_seconds, period_seconds)
+
+    def _parse_monitoring_response(self, response_json: dict, task_technologies: dict[str, str],
+                                   task_periods: dict[str, int] | None = None) -> dict:
         rows, source, diagnostics = [], [], []
         idle_tasks = []
         task_cursor_candidates, object_cursor_candidates = {}, {}
         persisted_object_keys = set()
         site_counter_groups = {}
-        received = invalid = unmapped = 0
+        received = invalid = unmapped = not_applicable = 0
         unmapped_cells = []
         latest_data_at = None
         for task_data in response_json.get("data") or []:
@@ -1747,6 +1830,9 @@ class HttpCollector(BaseCollector):
             if not technology:
                 diagnostics.append(CollectionDiagnostic("contract", f"Task PM inesperada: {task_id}", "unknown_task"))
                 continue
+            period_seconds = (task_periods or {}).get(str(task_id), DEFAULT_PM_PERIOD_SECONDS)
+            # As fórmulas recebem o GP em minutos (``60 * period`` nas durações).
+            period = period_seconds / 60.0
             task_cursor = task_data.get("execTime")
             if task_cursor is not None:
                 task_cursor_candidates[task_id] = task_cursor
@@ -1783,21 +1869,48 @@ class HttpCollector(BaseCollector):
                         unmapped_cells.append(obj_name or str(obj_no))
                         continue
                     counters, counter_errors = self._counter_map(item.get("counterRes"))
-                    period = result.get("period") or task_data.get("period")
+                    self._warn_period_divergence(
+                        task_id, result.get("period") or task_data.get("period"), period_seconds)
+                    self._warn_non_standard_prb(info["cell_id"], counters)
                     site_counter_groups.setdefault((info["site_id"], timestamp, technology), []).append((counters, period))
                     per_metric = []
                     for definition in definitions_for(technology):
                         try:
-                            value = calculate_kpi(definition, counters, float(period) if period is not None else None)
+                            value = calculate_kpi(definition, counters, period)
+                        except NotApplicable as error:
+                            # Contador fora da task ou sem tentativas no minuto: o KPI
+                            # não existe, e isso não é falha de coleta. A exceção é o
+                            # contador que CHEGOU defeituoso (não confiável ou não
+                            # numérico): aí a ausência tem causa e continua sendo defeito.
+                            defective = any(name in counter_errors for name in definition.required)
+                            if defective:
+                                invalid += 1
+                            else:
+                                not_applicable += 1
+                            diagnostics.append(CollectionDiagnostic(
+                                "formula", str(error),
+                                "invalid_formula" if defective else "not_applicable", {
+                                    "metric": definition.id, "cell_id": info["cell_id"],
+                                    "technology": technology,
+                                }))
+                            continue
                         except InvalidKpi as error:
                             invalid += 1
                             diagnostics.append(CollectionDiagnostic("formula", str(error), "invalid_formula", {
                                 "metric": definition.id, "cell_id": info["cell_id"], "technology": technology,
                             }))
                             continue
+                        suspect = check_throughput_floor(definition, counters, period, value)
+                        if suspect:
+                            diagnostics.append(CollectionDiagnostic("formula", suspect, "unit_suspect", {
+                                "metric": definition.id, "cell_id": info["cell_id"], "technology": technology,
+                            }))
                         measurement = {"event_id": self.event_id, "site_id": info["site_id"], "cell_id": info["cell_id"],
                                        "timestamp": timestamp, "metric": definition.id, "value": value,
                                        "scope": "CELL", "technology": technology}
+                        # Consumido pelo agendador no mesmo ciclo (piso de amostra do
+                        # alarme). Não é persistido: ``insert_kpi_batch`` ignora extras.
+                        measurement["sample_size"] = kpi_sample_size(definition, counters)
                         rows.append(measurement)
                         per_metric.append((definition, measurement))
                     # Checkpoint é uma confirmação de persistência, não apenas
@@ -1809,9 +1922,9 @@ class HttpCollector(BaseCollector):
                         diagnostics.append(CollectionDiagnostic("counter", reason, "invalid_counter", {"counter": name, "cell_id": info["cell_id"]}))
                     source.extend(per_metric)
         rows.extend(self._site_rows([row for _, row in source]))
-        # Percentuais compostos usam os contadores somados no mesmo timestamp.
-        # ``period`` é multiplicado pelo número de células para availability,
-        # preservando GP/SP devolvido pelo OSS em vez do intervalo local.
+        # Percentuais compostos e taxas usam os contadores somados no mesmo
+        # timestamp. ``period`` é multiplicado pelo número de células para a
+        # availability, que é uma média de durações sobre o mesmo GP.
         for (site_id, timestamp, technology), samples in site_counter_groups.items():
             summed = {}
             for counters, _ in samples:
@@ -1828,7 +1941,8 @@ class HttpCollector(BaseCollector):
                     continue
                 rows.append({"event_id": self.event_id, "site_id": site_id, "cell_id": "__site__",
                              "timestamp": timestamp, "metric": definition.id, "value": value,
-                             "scope": "SITE", "technology": technology})
+                             "scope": "SITE", "technology": technology,
+                             "sample_size": kpi_sample_size(definition, summed)})
         cursors = {
             f"{task_id}:{object_key}": {"task_id": task_id, "object_key": object_key, "cursor": cursor}
             for (task_id, object_key), cursor in object_cursor_candidates.items()
@@ -1839,7 +1953,8 @@ class HttpCollector(BaseCollector):
                 f"{task_id}:": {"task_id": task_id, "object_key": "", "cursor": cursor}
                 for task_id, cursor in task_cursor_candidates.items()
             })
-        return {"rows": rows, "received": received, "invalid": invalid, "unmapped": unmapped,
+        return {"rows": rows, "received": received, "invalid": invalid,
+                "not_applicable": not_applicable, "unmapped": unmapped,
                 "unmapped_cells": sorted(set(unmapped_cells)),
                 "diagnostics": self._dedupe_diagnostics(diagnostics),
                 "cursors": cursors, "latest_data_at": latest_data_at, "idle_tasks": idle_tasks}

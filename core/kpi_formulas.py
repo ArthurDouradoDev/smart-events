@@ -6,12 +6,32 @@ OSS são dados externos e nunca devem ser avaliados como uma expressão Python.
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 from typing import Callable, Iterable
+
+logger = logging.getLogger(__name__)
 
 
 class InvalidKpi(ValueError):
     """Um KPI não pode ser calculado de forma confiável."""
+
+
+class NotApplicable(InvalidKpi):
+    """O KPI não existe neste minuto — não é defeito.
+
+    Contador fora da task ou denominador zero (nenhuma tentativa no período)
+    são ausências legítimas.  Subclasse de ``InvalidKpi`` para que todo
+    ``except InvalidKpi`` já escrito continue capturando os dois casos; quem
+    precisa separar "sem dado" de "dado quebrado" captura esta primeiro.
+    """
+
+
+# Medido, não documentado: o OSS devolve N.ThpTime.* com unit vazio. Todos os
+# valores são múltiplos de 500 (slot de 0,5 ms @30 kHz) e a hipótese de ms/s
+# viola o piso volume/período em 79 de 83 amostras. Ver plano 2026-08-21-001.
+# Se a documentação Huawei disser outra coisa, este é o único ponto a mudar.
+THP_TIME_TO_SECONDS = 1e-6
 
 
 @dataclass(frozen=True)
@@ -30,13 +50,13 @@ class KpiDefinition:
 def _need(c: dict[str, float], *names: str) -> tuple[float, ...]:
     missing = [name for name in names if name not in c]
     if missing:
-        raise InvalidKpi("contador ausente: " + ", ".join(missing))
+        raise NotApplicable("contador ausente: " + ", ".join(missing))
     return tuple(c[name] for name in names)
 
 
 def _ratio(n: float, d: float, factor: float = 1.0) -> float:
     if d == 0:
-        raise InvalidKpi("denominador zero")
+        raise NotApplicable("denominador zero")
     return factor * n / d
 
 
@@ -113,22 +133,36 @@ def _n_availability(c, period):
 
 def _n_thp_dl(c, _period):
     volume, last_slot, duration = _need(c, "N.ThpVol.DL", "N.ThpVol.DL.LastSlot", "N.ThpTime.DL.RmvLastSlot")
-    return _ratio(volume - last_slot, duration)
+    # kbit / (N.ThpTime × 1e-6 s) = kbit/s; ÷1000 = Mbit/s.
+    return _ratio(volume - last_slot, duration * THP_TIME_TO_SECONDS, 1 / 1000)
 
 
 def _n_thp_ul(c, _period):
     volume, small_packet, duration = _need(c, "N.ThpVol.UL", "N.ThpVol.UE.UL.SmallPkt", "N.ThpTime.UE.UL.RmvSmallPkt")
-    return _ratio(volume - small_packet, duration)
+    return _ratio(volume - small_packet, duration * THP_TIME_TO_SECONDS, 1 / 1000)
+
+
+def _volume_sa(total: float, nsa: float, label: str) -> float:
+    """SA = total − NSA, nunca negativo.
+
+    O próprio export CSV do OSS traz amostras com ``N.NSA.ThpVol > N.ThpVol``;
+    a inconsistência é da origem e não pode virar volume negativo no gráfico.
+    """
+    if nsa > total:
+        logger.debug("[kpi] %s: NSA (%s) maior que o total (%s); volume SA fixado em 0.",
+                     label, nsa, total)
+        return 0.0
+    return total - nsa
 
 
 def _n_volume_dl_sa(c, _period):
     total, nsa = _need(c, "N.ThpVol.DL", "N.NSA.ThpVol.DL")
-    return total - nsa
+    return _volume_sa(total, nsa, "traffic_volume_dl_sa")
 
 
 def _n_volume_ul_sa(c, _period):
     total, nsa = _need(c, "N.ThpVol.UL", "N.NSA.ThpVol.UL")
-    return total - nsa
+    return _volume_sa(total, nsa, "traffic_volume_ul_sa")
 
 
 CATALOG: tuple[KpiDefinition, ...] = (
@@ -138,19 +172,23 @@ CATALOG: tuple[KpiDefinition, ...] = (
     KpiDefinition("utilization_dl", "4G", "DL PRB Utility", "%", ("L.ChMeas.PRB.DL.Used.Avg", "L.ChMeas.PRB.DL.Avail"), "recalculate", _l_prb_dl),
     KpiDefinition("utilization_ul", "4G", "UL PRB Utility", "%", ("L.ChMeas.PRB.UL.Used.Avg", "L.ChMeas.PRB.UL.Avail"), "recalculate", _l_prb_ul),
     KpiDefinition("interference_ul", "4G", "Interferência", "dBm", ("L.UL.Interference.Avg",), "mean", _single("L.UL.Interference.Avg")),
-    KpiDefinition("throughput_dl", "4G", "Throughput DL", "Mbit/s", ("L.Thrp.bits.DL", "L.Thrp.bits.DL.LastTTI", "L.Thrp.Time.DL.RmvLastTTI"), "sum", _l_thp_dl),
-    KpiDefinition("throughput_ul", "4G", "Throughput UL", "Mbit/s", ("L.Thrp.bits.UL", "L.Thrp.bits.UE.UL.LastTTI", "L.Thrp.Time.UE.UL.RmvLastTTI"), "sum", _l_thp_ul),
+    KpiDefinition("throughput_dl", "4G", "Throughput DL", "Mbit/s", ("L.Thrp.bits.DL", "L.Thrp.bits.DL.LastTTI", "L.Thrp.Time.DL.RmvLastTTI"), "recalculate", _l_thp_dl),
+    KpiDefinition("throughput_ul", "4G", "Throughput UL", "Mbit/s", ("L.Thrp.bits.UL", "L.Thrp.bits.UE.UL.LastTTI", "L.Thrp.Time.UE.UL.RmvLastTTI"), "recalculate", _l_thp_ul),
     KpiDefinition("user_count", "4G", "UE médio", "usuários", ("L.Traffic.User.Avg",), "sum", _single("L.Traffic.User.Avg")),
-    KpiDefinition("ran_rtt", "4G", "Wireless RTT", "ms", ("L.PDCP.TCP.time.RANRtt.ConnSetup", "L.PDCP.TCP.RANRtt.ConnSetup"), "mean", _ratio_formula("L.PDCP.TCP.time.RANRtt.ConnSetup", "L.PDCP.TCP.RANRtt.ConnSetup", 1)),
-    KpiDefinition("terrestrial_rtt", "4G", "Terrestrial RTT", "ms", ("L.PDCP.TCP.Time.TerrestrialRtt.ConnSetup", "L.PDCP.TCP.TerrestrialRtt.ConnSetup"), "mean", _ratio_formula("L.PDCP.TCP.Time.TerrestrialRtt.ConnSetup", "L.PDCP.TCP.TerrestrialRtt.ConnSetup", 1)),
+    # A4 — o OSS aceita no máximo 25 contadores por task PM e os quatro contadores de
+    # RTT ficaram de fora das tasks do evento. Sem eles a fórmula nunca calcula: mantê-las
+    # no seletor só produzia coluna vazia e 56 diagnósticos por ciclo. Reativar exige antes
+    # criar uma task PM dedicada com esses contadores.
+    KpiDefinition("ran_rtt", "4G", "Wireless RTT", "ms", ("L.PDCP.TCP.time.RANRtt.ConnSetup", "L.PDCP.TCP.RANRtt.ConnSetup"), "mean", _ratio_formula("L.PDCP.TCP.time.RANRtt.ConnSetup", "L.PDCP.TCP.RANRtt.ConnSetup", 1), monitoring_available=False),
+    KpiDefinition("terrestrial_rtt", "4G", "Terrestrial RTT", "ms", ("L.PDCP.TCP.Time.TerrestrialRtt.ConnSetup", "L.PDCP.TCP.TerrestrialRtt.ConnSetup"), "mean", _ratio_formula("L.PDCP.TCP.Time.TerrestrialRtt.ConnSetup", "L.PDCP.TCP.TerrestrialRtt.ConnSetup", 1), monitoring_available=False),
     KpiDefinition("traffic_volume_dl", "4G", "Volume de Tráfego DL (legado)", "contador OSS", ("L.Thrp.bits.DL",), "sum", _single("L.Thrp.bits.DL")),
     KpiDefinition("traffic_volume_ul", "4G", "Volume de Tráfego UL (legado)", "contador OSS", ("L.Thrp.bits.UL",), "sum", _single("L.Thrp.bits.UL")),
     KpiDefinition("accessibility", "5G_NRCELL", "Acessibilidade considerando RRC Inactive", "%", ("N.RRC.SetupReq.Succ", "N.RRC.ResumeReq.Succ", "N.RRC.SetupReq.Att", "N.RRC.ResumeReq.Att", "N.NGSig.ConnEst.Succ", "N.NGSig.ConnEst.Att", "N.QosFlow.Est.Succ", "N.QosFlow.Est.Att.EPSFB", "N.QosFlow.Est.Att.EmcFB", "N.QosFlow.FailEst.Conflict", "N.QosFlow.Resume.Succ", "N.QosFlow.Est.Att", "N.QosFlow.FailEst.AMF.SyntaxError", "N.QosFlow.Resume.Att"), "recalculate", _n_access),
     KpiDefinition("drop_rate", "5G_NRCELL", "Drop considerando RRC Inactive", "%", ("N.QosFlow.AbnormRel", "N.QosFlow.NormRel", "N.QosFlow.RrcInactiveToIdle.Rel", "N.QosFlow.RrcConnToInactive.Suspend"), "recalculate", _n_drop),
     KpiDefinition("utilization_dl", "5G_NRDUCELL", "DL PRB Utility", "%", ("N.PRB.DL.Used.Avg", "N.PRB.DL.Avail.Avg"), "recalculate", _ratio_formula("N.PRB.DL.Used.Avg", "N.PRB.DL.Avail.Avg")),
     KpiDefinition("utilization_ul", "5G_NRDUCELL", "UL PRB Utility", "%", ("N.PRB.UL.Used.Avg", "N.PRB.UL.Avail.Avg"), "recalculate", _ratio_formula("N.PRB.UL.Used.Avg", "N.PRB.UL.Avail.Avg")),
-    KpiDefinition("throughput_dl", "5G_NRDUCELL", "Throughput DL", "Mbit/s", ("N.ThpVol.DL", "N.ThpVol.DL.LastSlot", "N.ThpTime.DL.RmvLastSlot"), "sum", _n_thp_dl),
-    KpiDefinition("throughput_ul", "5G_NRDUCELL", "Throughput UL", "unidade OSS pendente", ("N.ThpVol.UL", "N.ThpVol.UE.UL.SmallPkt", "N.ThpTime.UE.UL.RmvSmallPkt"), "sum", _n_thp_ul, False),
+    KpiDefinition("throughput_dl", "5G_NRDUCELL", "Throughput DL", "Mbit/s", ("N.ThpVol.DL", "N.ThpVol.DL.LastSlot", "N.ThpTime.DL.RmvLastSlot"), "recalculate", _n_thp_dl),
+    KpiDefinition("throughput_ul", "5G_NRDUCELL", "Throughput UL", "Mbit/s", ("N.ThpVol.UL", "N.ThpVol.UE.UL.SmallPkt", "N.ThpTime.UE.UL.RmvSmallPkt"), "recalculate", _n_thp_ul),
     KpiDefinition("traffic_volume_dl_sa", "5G_NRDUCELL", "Downlink Traffic Volume 5G SA", "kbit", ("N.ThpVol.DL", "N.NSA.ThpVol.DL"), "sum", _n_volume_dl_sa),
     KpiDefinition("traffic_volume_dl_nsa", "5G_NRDUCELL", "Downlink Traffic Volume 5G NSA", "kbit", ("N.NSA.ThpVol.DL",), "sum", _single("N.NSA.ThpVol.DL")),
     KpiDefinition("traffic_volume_ul_sa", "5G_NRDUCELL", "Uplink Traffic Volume 5G SA", "kbit", ("N.ThpVol.UL", "N.NSA.ThpVol.UL"), "sum", _n_volume_ul_sa),
@@ -183,6 +221,95 @@ def catalog_for_api() -> list[dict]:
                      "unit": item.unit, "site_aggregation": item.site_aggregation,
                      "production_ready": item.production_ready})
     return rows
+
+
+# A2 — trava aritmética da unidade de tempo. Por métrica: volume do período, a
+# parcela que a fórmula desconta e o fator para Mbit. O piso é
+# ``(volume − descontado) / período`` porque o tempo escalonado nunca é maior que o
+# período de granularidade — é o mesmo numerador da fórmula, e por isso não acusa
+# célula cuja transmissão se concentrou no último TTI/slot.
+_THROUGHPUT_VOLUME: dict[tuple[str, str], tuple[str, str, float]] = {
+    ("throughput_dl", "4G"): ("L.Thrp.bits.DL", "L.Thrp.bits.DL.LastTTI", 1e-6),
+    ("throughput_ul", "4G"): ("L.Thrp.bits.UL", "L.Thrp.bits.UE.UL.LastTTI", 1e-6),
+    ("throughput_dl", "5G_NRDUCELL"): ("N.ThpVol.DL", "N.ThpVol.DL.LastSlot", 1e-3),
+    ("throughput_ul", "5G_NRDUCELL"): ("N.ThpVol.UL", "N.ThpVol.UE.UL.SmallPkt", 1e-3),
+}
+
+
+def check_throughput_floor(definition: KpiDefinition, counters: dict[str, float],
+                           period: float | None, value: float) -> str | None:
+    """Confere se um throughput calculado é compatível com o volume do período.
+
+    Devolve ``None`` quando o valor é plausível e uma mensagem quando não é.  A
+    linha **não** é descartada: durante evento ao vivo, dado suspeito sinalizado
+    é melhor que dado ausente.  A violação aponta para a unidade de tempo de
+    ``N.ThpTime.*``/``L.Thrp.Time.*`` (ver ``THP_TIME_TO_SECONDS``).
+    """
+    entry = _THROUGHPUT_VOLUME.get((definition.id, definition.technology))
+    if entry is None or not period or period <= 0:
+        return None
+    counter, excluded, to_mbit = entry
+    volume = counters.get(counter)
+    if volume is None or excluded not in counters:
+        return None
+    volume -= counters[excluded]
+    if volume <= 0:
+        return None
+    seconds = period * 60.0
+    floor = volume * to_mbit / seconds
+    if value >= floor * (1 - 1e-9):
+        return None
+    return (f"{definition.id}={value:.6g} Mbit/s abaixo do piso {floor:.6g} Mbit/s "
+            f"({counter} líquido = {volume:.6g} em {seconds:.0f}s): "
+            f"unidade de tempo suspeita")
+
+
+def _sample_4g_access(c: dict[str, float]) -> float:
+    return min(_need(c, "L.RRC.ConnReq.Att", "L.E-RAB.AttEst", "L.S1Sig.ConnEst.Att"))
+
+
+def _sample_5g_access(c: dict[str, float]) -> float:
+    setup_a, resume_a, ng_a, qos_a, syntax, resume_qos_a = _need(
+        c, "N.RRC.SetupReq.Att", "N.RRC.ResumeReq.Att", "N.NGSig.ConnEst.Att",
+        "N.QosFlow.Est.Att", "N.QosFlow.FailEst.AMF.SyntaxError", "N.QosFlow.Resume.Att")
+    return min(setup_a + resume_a, ng_a, qos_a - syntax + resume_qos_a)
+
+
+def _sample_4g_drop(c: dict[str, float]) -> float:
+    ab, mme, normal, rel_mme = _need(
+        c, "L.E-RAB.AbnormRel", "L.E-RAB.AbnormRel.MME", "L.E-RAB.NormRel", "L.E-RAB.Rel.MME")
+    return ab + mme + normal + rel_mme
+
+
+def _sample_5g_drop(c: dict[str, float]) -> float:
+    abnormal, normal, inactive, suspended = _need(
+        c, "N.QosFlow.AbnormRel", "N.QosFlow.NormRel", "N.QosFlow.RrcInactiveToIdle.Rel",
+        "N.QosFlow.RrcConnToInactive.Suspend")
+    return abnormal + normal - inactive + suspended
+
+
+_SAMPLE_SIZE: dict[tuple[str, str], Callable[[dict[str, float]], float]] = {
+    ("accessibility", "4G"): _sample_4g_access,
+    ("accessibility", "5G_NRCELL"): _sample_5g_access,
+    ("drop_rate", "4G"): _sample_4g_drop,
+    ("drop_rate", "5G_NRCELL"): _sample_5g_drop,
+}
+
+
+def sample_size(definition: KpiDefinition, counters: dict[str, float]) -> float | None:
+    """Menor denominador da fórmula — quantas tentativas sustentam o percentual.
+
+    Só faz sentido para taxas contadas em tentativas (``accessibility`` e
+    ``drop_rate``); as demais devolvem ``None``.  Não altera cálculo nenhum:
+    existe para que um 50,0% vindo de 1 sucesso em 2 tentativas não vire alarme.
+    """
+    handler = _SAMPLE_SIZE.get((definition.id, definition.technology))
+    if handler is None:
+        return None
+    try:
+        return float(handler(counters))
+    except InvalidKpi:
+        return None
 
 
 def calculate(definition: KpiDefinition, counters: dict[str, float], period: float | None) -> float:
