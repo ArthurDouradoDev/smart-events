@@ -196,7 +196,13 @@ def _seeds() -> str:
     operator_path = seed_operator_data()
     if not operator_path.is_dir():
         raise RuntimeError("A semente nao foi criada na pasta do operador.")
-    return f"{bundled['events']} evento(s) RoadShow; cliente TIM; {bundled['vips']} VIP(s) TIM"
+    profile = bundled.get("profile") or {}
+    client = str(profile.get("client") or "N/D")
+    profile_name = str(profile.get("name") or profile.get("id") or "legado")
+    return (
+        f"perfil {profile_name}; {bundled['events']} evento(s); "
+        f"cliente {client}; {bundled['vips']} VIP(s)"
+    )
 
 
 def run_self_test(report_path: str | Path | None = None) -> tuple[int, Path, dict]:
@@ -209,7 +215,7 @@ def run_self_test(report_path: str | Path | None = None) -> tuple[int, Path, dic
         _check("Chromium headless e Chromium visual", _playwright),
         _check("gravacao nos dados do operador", _write_access),
         _check("banco SQLite local", _database),
-        _check("sementes RoadShow / TIM", _seeds),
+        _check("semente do perfil de instalacao", _seeds),
     ]
     ok = all(item["ok"] for item in checks)
     now = datetime.now(timezone.utc)

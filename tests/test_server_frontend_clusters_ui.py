@@ -143,6 +143,16 @@ def test_selecting_cell_preserves_the_expanded_site_group():
     assert "expandedGroupKeys.has(groupKey) ? 'open' : ''" in html
 
 
+def test_site_preview_uses_imported_cell_technology_and_frequency():
+    html = HTML_PATH.read_text(encoding="utf-8")
+
+    assert "getCellRadius(cell, zoom)" in html
+    assert "getCellColor(cell)" in html
+    assert "cell.frequency ?? cell.freq" in html
+    assert "getCellRadius(cell.id, zoom)" not in html
+    assert "getCellColor(cell.id)" not in html
+
+
 def test_selecting_multiple_cells_keeps_site_open_in_real_editor():
     sync_api = pytest.importorskip("playwright.sync_api")
     try:
@@ -157,6 +167,10 @@ def test_selecting_multiple_cells_keeps_site_open_in_real_editor():
                 "buffer": b"site_id,site_name,lat,lng\nSITE-A,SITE A,-23.7,-46.69\n",
             })
             page.locator("#sites-info-msg").filter(has_text="Sucesso").wait_for(timeout=5000)
+            fills = page.locator(".leaflet-marker-icon svg path").evaluate_all(
+                "nodes => nodes.map(node => node.getAttribute('fill').toLowerCase())"
+            )
+            assert "#cb009a" in fills  # 4G 1800 importado pela API de sites
             page.locator("#btn-new-cluster").click()
 
             details = page.locator("#cluster-selection-tree details[data-group-key]")

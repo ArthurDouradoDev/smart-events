@@ -1683,7 +1683,7 @@
       const defaultRadius = 20;
       const zoom = map ? map.getZoom() : 11;
       const scale = getZoomScale(zoom);
-      cells.forEach(cell => { cell._radius = getCellRadius(cell.id, zoom) || defaultRadius; });
+      cells.forEach(cell => { cell._radius = getCellRadius(cell, zoom) || defaultRadius; });
       const maxR = Math.max(...cells.map(c => c._radius), defaultRadius);
       const sweep = 100;
 
@@ -1697,7 +1697,7 @@
       const strokeWidth = scale < 0.3 ? 0.3 : 1;
       const centerStrokeWidth = scale < 0.3 ? 0.5 : 1.5;
       const paths = sortedCells.map(cell => {
-        const color = getCellColor(cell.id);
+        const color = getCellColor(cell);
         const az = cell.azimuth ?? 0;
         const r = cell._radius;
         return `<path d="${sectorPathSVG(cx, cy, r, az, sweep)}" fill="${color}" opacity="0.85" stroke="#0D1117" stroke-width="${strokeWidth}"/>`;
@@ -1729,15 +1729,15 @@
       return { x: +(cx + r * Math.cos(rad)).toFixed(2), y: +(cy + r * Math.sin(rad)).toFixed(2) };
     }
 
-    function getCellRadius(cellId, zoom) {
-      const { tech, freq } = resolveTechFreqFromId(cellId);
+    function getCellRadius(cell, zoom) {
+      const { tech, freq } = resolveTechFreqFromId(cell);
       let baseRadius = 20;
       if (tech && freq && FREQUENCY_RADII[tech] && FREQUENCY_RADII[tech][freq]) baseRadius = FREQUENCY_RADII[tech][freq];
       return Math.max(3, baseRadius * getZoomScale(zoom));
     }
 
-    function getCellColor(cellId) {
-      const { tech, freq } = resolveTechFreqFromId(cellId);
+    function getCellColor(cell) {
+      const { tech, freq } = resolveTechFreqFromId(cell);
       if (tech && freq && FREQUENCY_COLORS[tech] && FREQUENCY_COLORS[tech][freq]) return FREQUENCY_COLORS[tech][freq];
       if (tech === "5G") return "#1714dd";
       if (tech === "4G") return "#ffff00";
@@ -1745,16 +1745,21 @@
       return "#484F58";
     }
 
-    function resolveTechFreqFromId(id) {
-      let tech = null, freq = null;
-      const idUpper = id.toUpperCase();
-      if      (idUpper.includes("5G") || idUpper.includes("-Y") || idUpper.includes("_Y")) tech = "5G";
-      else if (idUpper.includes("4G") || idUpper.includes("LTE") || idUpper.includes("-L") || idUpper.includes("_L")) tech = "4G";
-      else if (idUpper.includes("3G") || idUpper.includes("-W") || idUpper.includes("_W")) tech = "3G";
+    function resolveTechFreqFromId(cellOrId) {
+      const cell = (cellOrId && typeof cellOrId === "object") ? cellOrId : { id: cellOrId };
+      let tech = String(cell.tech || "").toUpperCase() || null;
+      let freq = cell.frequency ?? cell.freq ?? null;
+      freq = freq == null ? null : String(freq).match(/\d{3,4}/)?.[0] || null;
+      const idUpper = String(cell.id || "").toUpperCase();
+      if (!tech) {
+        if      (idUpper.includes("5G") || idUpper.includes("-Y") || idUpper.includes("_Y")) tech = "5G";
+        else if (idUpper.includes("4G") || idUpper.includes("LTE") || idUpper.includes("-L") || idUpper.includes("_L")) tech = "4G";
+        else if (idUpper.includes("3G") || idUpper.includes("-W") || idUpper.includes("_W")) tech = "3G";
+      }
       const freqMatch = idUpper.match(/(3500|2600|2300|2100|1800|850|700)/);
-      if (freqMatch) {
+      if (!freq && freqMatch) {
         freq = freqMatch[1];
-      } else {
+      } else if (!freq) {
         const shortcodeMap = { "35":"3500","26":"2600","23":"2300","21":"2100","18":"1800","85":"850","08":"850","07":"700","7":"700" };
         for (const token of idUpper.split(/[-_]/)) {
           if (shortcodeMap[token]) { freq = shortcodeMap[token]; break; }

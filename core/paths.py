@@ -8,11 +8,14 @@ mantemos a estrutura historica do repositorio para nao alterar o fluxo local.
 from __future__ import annotations
 
 import os
+import json
+import re
 import sys
 from pathlib import Path
 
 
 APP_NAME = "SmartEvents"
+_SAFE_DATA_DIR = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._ -]{0,79}$")
 
 
 def resource_dir() -> Path:
@@ -35,7 +38,18 @@ def data_dir() -> Path:
         local_app_data = os.environ.get("LOCALAPPDATA", "").strip()
         if not local_app_data:
             raise RuntimeError("A variavel LOCALAPPDATA nao esta disponivel.")
-        return Path(local_app_data) / APP_NAME
+        directory_name = APP_NAME
+        profile_path = resource_dir() / "build-profile.json"
+        if profile_path.is_file():
+            try:
+                profile = json.loads(profile_path.read_text(encoding="utf-8"))
+                configured = str(profile.get("runtime_data_dir") or "").strip()
+            except (OSError, ValueError, TypeError) as exc:
+                raise RuntimeError(f"Perfil de build invalido: {profile_path}") from exc
+            if not _SAFE_DATA_DIR.fullmatch(configured) or configured in {".", ".."}:
+                raise RuntimeError(f"Diretorio de dados inseguro no perfil: {configured!r}")
+            directory_name = configured
+        return Path(local_app_data) / directory_name
     return resource_dir() / "data"
 
 

@@ -135,7 +135,7 @@ SmartEvents/
   - **Cálculo Automático de Polígono**: Criação de uma bounding box englobando todas as ERBs importadas, com controle de padding ajustável (100m a 2500m) por controle deslizante (slider).
   - **Desenho Manual**: Permite clicar no mapa para definir vértices de polígonos irregulares personalizados.
   - Contador de vértices do polígono.
-- **Importador de Sites inteligente**: Upload e processamento automático de planilhas de ERBs nos formatos Excel (`.xlsx`, `.xls`), CSV, TSV e texto plano, normalizando aliases de colunas (`enodebid`, `cellid`, `latitude`, `longitude`, `azimuth`) e agrupando células sob seus respectivos sites.
+- **Importador de Sites inteligente**: Upload e processamento automático de planilhas de ERBs nos formatos Excel (`.xlsx`, `.xls`), CSV, TSV e texto plano, normalizando aliases de colunas (`enodebid`, `cellid`, `latitude`, `longitude`, `azimuth`) e agrupando células sob seus respectivos sites. As colunas opcionais `band`/`frequency` e `tech`/`technology` alimentam diretamente a cor e o raio das pétalas, sem alterar a compatibilidade com planilhas antigas.
 - **Cadastro Global de VIPs**: Gerenciamento de VIPs (nome, cargo, regional/OSS, task_id do trace) centralizado, permitindo que o aplicativo filtre e rastreie VIPs automaticamente de acordo com o OSS do evento selecionado.
 
 ---

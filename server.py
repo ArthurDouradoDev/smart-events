@@ -1,5 +1,6 @@
 import json
 import logging
+import math
 import re
 import sys
 from pathlib import Path
@@ -20,6 +21,61 @@ logger = logging.getLogger("SmartEventsServer")
 def _slugify(text: str) -> str:
     slug = re.sub(r"[^a-z0-9]+", "-", text.strip().lower()).strip("-")
     return slug or "cluster"
+
+
+def _is_missing_cell_value(value) -> bool:
+    if value is None:
+        return True
+    if isinstance(value, float) and math.isnan(value):
+        return True
+    return str(value).strip().lower() in {"", "nan", "none", "null"}
+
+
+def _normalize_frequency(value) -> Optional[str]:
+    """Normaliza banda/frequência da EP para a chave usada pelo mapa.
+
+    Aceita números do Excel e textos como ``1800 MHz`` ou ``1800 (L1)``.
+    Valores ausentes ou sem uma frequência numérica de 3/4 dígitos continuam
+    ausentes para preservar o comportamento das planilhas legadas.
+    """
+    if _is_missing_cell_value(value):
+        return None
+
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        numeric = float(value)
+        if not math.isfinite(numeric) or not numeric.is_integer():
+            return None
+        return str(int(numeric))
+
+    text = str(value).strip()
+    match = re.search(r"(?<!\d)(\d{3,4})(?:[.,]0+)?(?!\d)", text)
+    return str(int(match.group(1))) if match else None
+
+
+def _normalize_technology(value, frequency: Optional[str]) -> Optional[str]:
+    """Converte aliases comuns para as famílias visuais do mapa.
+
+    A coluna de tecnologia é opcional. Sem ela, mantém a inferência histórica
+    do frontend: 3500 MHz é 5G e as demais bandas conhecidas são 4G.
+    """
+    if not _is_missing_cell_value(value):
+        token = re.sub(r"[^A-Z0-9]+", "", str(value).upper())
+        aliases = {
+            "2G": "2G", "GSM": "2G",
+            "3G": "3G", "WCDMA": "3G", "UMTS": "3G",
+            "4G": "4G", "LTE": "4G",
+            "5G": "5G", "NR": "5G", "NRCELL": "5G", "NRDUCELL": "5G",
+            "5GNRCELL": "5G", "5GNRDUCELL": "5G",
+        }
+        if token in aliases:
+            return aliases[token]
+
+    if frequency == "3500":
+        return "5G"
+    if frequency in {"700", "850", "1800", "2100", "2300", "2600"}:
+        return "4G"
+    return None
+
 
 app = FastAPI(title="SmartEvents Central Server")
 
@@ -128,6 +184,8 @@ async def parse_sites(file: UploadFile = File(...)):
             'nename': ['nename', 'ne_name', 'sitename', 'site_name', 'nome site', 'nome_site', 'estacao', 'estação'],
             'cellname': ['cellname', 'cell_name', 'nome celula', 'nome_celula', 'nome da celula'],
             'azimuth': ['azimut', 'azimuth', 'azimute', 'direcao', 'direção'],
+            'frequency': ['band', 'banda', 'frequency', 'frequencia', 'frequência', 'freq'],
+            'tech': ['tech', 'technology', 'tecnologia', 'tecnologia móvel', 'rat'],
             'cluster': ['cluster', 'grupo', 'agrupamento', 'setor', 'area', 'área'],
         }
 
@@ -193,11 +251,18 @@ async def parse_sites(file: UploadFile = File(...)):
             # Avoid duplicate cells
             existing_cells = [c["id"] for c in sites_dict[site_id]["cells"]]
             if cell_id not in existing_cells:
-                sites_dict[site_id]["cells"].append({
+                frequency = _normalize_frequency(row.get('frequency'))
+                technology = _normalize_technology(row.get('tech'), frequency)
+                cell = {
                     "id": cell_id,
                     "azimuth": azimuth,
                     "beamwidth": 120.0
-                })
+                }
+                if technology:
+                    cell["tech"] = technology
+                if frequency:
+                    cell["frequency"] = frequency
+                sites_dict[site_id]["cells"].append(cell)
 
             # Coluna opcional de cluster: valores separados por ";" atribuem o site
             # a vários clusters de uma vez (N:N), preservado pela importação como semente.

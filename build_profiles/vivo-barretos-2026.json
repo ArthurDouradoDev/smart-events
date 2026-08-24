@@ -1,0 +1,22 @@
+{
+  "schema_version": 1,
+  "id": "vivo-barretos-2026",
+  "profile_name": "Vivo - Festa do Peão de Barretos 2026",
+  "app_name": "SmartEvents Vivo - Barretos 2026",
+  "client": "Vivo",
+  "event_ids": [
+    "festa-do-peao-de-barretos-2026"
+  ],
+  "required_pm_tasks": [
+    {"tech": "4G", "task_id": 2460},
+    {"tech": "NRCELL", "task_id": 2461},
+    {"tech": "NRDUCELL", "task_id": 2462}
+  ],
+  "artifact_basename": "SmartEvents_Vivo_Barretos_2026",
+  "setup_basename": "Setup_SmartEvents_Vivo_Barretos_2026",
+  "runtime_data_dir": "SmartEvents-Vivo-Barretos-2026",
+  "install_dir_name": "SmartEvents Vivo Barretos 2026",
+  "app_id": "A4E2234B-4E5C-4D6C-9E61-A8C7B58802F7",
+  "operator_readme": "installer/README-operador-vivo-barretos.txt",
+  "require_cell_radio_metadata": true
+}

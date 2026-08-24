@@ -29,9 +29,17 @@ _pw_datas, _pw_binaries, _pw_hidden = collect_all('playwright')
 # (data/credentials.json) NÃO são embutidas — seed_files() cria um arquivo vazio para o operador
 # digitar suas contas (o .exe circula entre clientes e não pode carregar segredos).
 _cred_seed = []
-_cat_file = Path('data/clientes.json')
+_cat_file = Path(os.environ.get('SMARTEVENTS_CLIENT_CATALOG_SEED', 'data/clientes.json'))
 if _cat_file.exists():
     _cred_seed = [(str(_cat_file), 'data')]
+
+_profile_datas = []
+_profile_file = os.environ.get('SMARTEVENTS_BUILD_PROFILE_FILE', '').strip()
+if _profile_file:
+    _profile_path = Path(_profile_file)
+    if not _profile_path.is_file():
+        raise RuntimeError(f"Perfil de runtime ausente: {_profile_path}")
+    _profile_datas = [(str(_profile_path), '.')]
 
 _ms_playwright = Path(
     os.environ.get("PLAYWRIGHT_BROWSERS_PATH")
@@ -83,7 +91,7 @@ a = Analysis(
         (str(_server_data_seed), 'server_data'),
         ('core/session_renew.py', 'core'),  # garante o módulo de renovação no bundle
         ('alarms/catalogo-alarmes.csv', 'alarms'),  # catálogo nome→pares (coleta de alarmes)
-    ] + _cred_seed + collect_data_files('certifi') + _pw_datas + _browser_datas,
+    ] + _cred_seed + _profile_datas + collect_data_files('certifi') + _pw_datas + _browser_datas,
     hiddenimports=[
         'server',  # importado por main.py no modo --serve
         'core.session_renew',  # importado por main.py no modo --get-session

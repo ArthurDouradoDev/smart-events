@@ -1,0 +1,18 @@
+{
+  "schema_version": 1,
+  "id": "roadshow-tim",
+  "profile_name": "RoadShow TIM",
+  "app_name": "SmartEvents",
+  "client": "TIM",
+  "event_ids": [
+    "road-show-homero-tsl",
+    "roadshow-homero-tsp"
+  ],
+  "artifact_basename": "SmartEvents_RoadShow",
+  "setup_basename": "Setup_SmartEvents_RoadShow",
+  "runtime_data_dir": "SmartEvents",
+  "install_dir_name": "SmartEvents",
+  "app_id": "72D1D22D-A46F-42C4-8D5C-F82435BDD0AE",
+  "operator_readme": "installer/README-operador.txt",
+  "require_cell_radio_metadata": false
+}
