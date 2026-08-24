@@ -787,3 +787,47 @@ e `thresholds` incluídos.
 
 Gate: `pytest tests/ -q --basetemp=.pytest-work/fase2` → **476 passed, 10 skipped, 0 failed**
 (baseline Fase 1: 423 passed / 10 skipped).
+
+---
+
+## 2026-08-24 — Fusão 4G/5G falhava em Salvador: prefixo de tecnologia no nome do site
+
+Pedido do usuário: 4G e 5G do evento `roadshow-salvador` apareciam como sites duplicados no
+mapa/KPIs — perguntou se dava para reconciliar por `end_id`/lat-long.
+
+**Causa raiz:** a fusão de sites gêmeos (Fase 1, 2026-08-19) exige nome normalizado
+**igual** + distância ≤ 50 m. Em `testesantoamaro`/`santo-amaro-5g` o nome já é idêntico
+entre as duas tecnologias (`SPSMG7`), então funde. A planilha de Salvador nomeia os gêmeos
+com prefixo de tecnologia embutido — `SR-SACAL5` (4G) vs `5G-SACAL5` (5G) — só o token muda,
+coordenada é idêntica (medido: 291/291 pares nome-sem-prefixo batem em distância < 1 m,
+zero falso positivo). Sem stripping, os dois nomes nunca coincidiam e o par nunca fundia.
+**Não existe campo `end_id`/eNodeB-code separado no modelo de site do app** — o `enodebid`
+importado (`server.py::parse_sites`) é o id técnico do OSS, que já é diferente por
+tecnologia (confirmado: 462982 × 1511558 para o mesmo site físico). O papel que o usuário
+descreveu como "End_id" é, na prática, o código do site embutido no próprio nome, sem o
+prefixo de tecnologia — não uma coluna nova a importar.
+
+**Correção:** `Api._normalize_site_name` (`api/api.py`) passou a remover um prefixo de
+tecnologia conhecido (`4G-`, `5G-`, `5D-`, `SD-`, `SR-`) do início do nome antes de usá-lo
+como chave de fusão. A trava de distância ≤ 50 m continua intacta — nomes que colidem só
+depois do strip mas ficam longe continuam recusados com o mesmo warning de homônimo. Nomes
+sem esse prefixo (`SPSMG7`, `18NLCTAL01`) saem inalterados: zero mudança de comportamento
+para os eventos já fundindo corretamente.
+
+**Validado contra o banco real** (`data/smart_events.db`, evento `roadshow-salvador`, 624
+sites brutos): antes da correção, 0 pares fundiam; depois, 291 pares 4G+5G fundidos, 23
+sites só-4G e 19 só-5G (sem gêmeo — `5D-` novos, corretamente não fundidos).
+
+Regressão: `test_sites_com_prefixo_de_tecnologia_diferente_sao_fundidos` em
+`tests/test_api.py::TestSiteMerge`.
+
+Gate: `pytest tests/ -q --basetemp=.pytest-work/salvador-merge-full` → **476 passed, 10
+skipped, 0 failed** (1 falha de Playwright na primeira rodada,
+`test_grade_5g_tem_nove_paineis...`, não reproduziu isolada — flake de timing, mock de
+frontend, sem relação com `_normalize_site_name`).
+
+**Pendência não implementada:** se um evento futuro tiver o nome do site colidindo só
+por coincidência textual após o strip (ex. dois sites reais chamados `X` e `5G-X` sem
+relação), a trava de distância ≤ 50 m ainda protege, mas o prefixo removido é uma lista
+fechada (`4G|5G|5D|SD|SR`) — uma nova convenção de EP com outro token não é coberta sem
+editar `_SITE_NAME_PREFIX_RE`.

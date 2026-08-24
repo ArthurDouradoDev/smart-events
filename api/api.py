@@ -447,10 +447,17 @@ class Api:
         return next(iter(families)) if len(families) == 1 else None
 
     _MERGE_DISTANCE_M = 50.0
+    # Prefixo de tecnologia usado pela EP no nome do site (Salvador: SR-/SD- no 4G,
+    # 5G-/5D- no 5G). Sites gêmeos como "SR-SACAL5" e "5G-SACAL5" só têm esse token
+    # como diferença — sem removê-lo a fusão nunca via mesmo nome e o par ficava
+    # duplicado no mapa/KPIs. Eventos com nome já igual entre 4G/5G (ex. "SPSMG7")
+    # não têm esse prefixo e continuam batendo como antes.
+    _SITE_NAME_PREFIX_RE = re.compile(r"^(?:4G|5G|5D|SD|SR)-")
 
-    @staticmethod
-    def _normalize_site_name(name) -> str:
-        return str(name or "").strip().upper()
+    @classmethod
+    def _normalize_site_name(cls, name) -> str:
+        normalized = str(name or "").strip().upper()
+        return cls._SITE_NAME_PREFIX_RE.sub("", normalized, count=1)
 
     @staticmethod
     def _distance_m(a: dict, b: dict) -> float | None:

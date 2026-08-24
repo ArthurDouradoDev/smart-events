@@ -482,6 +482,32 @@ class TestSiteMerge:
             "725483": "4G", "1774059": "5G",
         }
 
+    def test_sites_com_prefixo_de_tecnologia_diferente_sao_fundidos(
+            self, api, sample_event):
+        # Salvador: a EP nomeia o gêmeo 4G "SR-SACAL5" e o 5G "5G-SACAL5" — mesmo
+        # site físico, coordenada igual, só o prefixo de tecnologia difere.
+        event = {
+            **sample_event,
+            "id": "prefix-merge",
+            "sites": [
+                {"id": "462982", "name": "SR-SACAL5", "lat": -12.975111, "lng": -38.440582,
+                 "is_event_site": True, "cells": _cells("4G-SACAL5", 4)},
+                {"id": "1511558", "name": "5G-SACAL5", "lat": -12.975111, "lng": -38.440582,
+                 "is_event_site": True, "cells": _cells("5G-SACAL5", 3)},
+            ],
+        }
+        database.save_event(event)
+
+        sites = {site["id"]: site for site in api.get_sites(event["id"])}
+        merged = sites["SACAL5"]
+
+        assert "462982" not in sites
+        assert "1511558" not in sites
+        assert merged["tech_families"] == ["4G", "5G"]
+        assert {m["site_id"]: m["family"] for m in merged["members"]} == {
+            "462982": "4G", "1511558": "5G",
+        }
+
     def test_site_sem_gemeo_permanece_intacto(self, api, sample_event):
         event = _twin_sites_event(sample_event)
         database.save_event(event)
