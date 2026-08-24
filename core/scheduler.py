@@ -13,6 +13,7 @@ from typing import Callable, Optional
 from core import database as db
 from core.collection_result import CollectionResult
 from core.collector import BaseCollector, build_collector
+from core.kpi_formulas import threshold_value
 
 logger = logging.getLogger(__name__)
 
@@ -427,9 +428,9 @@ class Scheduler:
 
     def _evaluate_kpi_alerts(self, measurements: list, context: CollectionContext):
         t = context.event_config.get("thresholds", {})
-        crit = t.get("utilization_critical", 95)
-        warn = t.get("utilization_warning", 80)
-        avail_crit = t.get("availability_critical", 95)
+        crit = threshold_value(t.get("utilization_critical"), 95)
+        warn = threshold_value(t.get("utilization_warning"), 80)
+        avail_crit = threshold_value(t.get("availability_critical"), 95)
         # B7 — acessibilidade calculada sobre pouquíssimas tentativas é ruído, não
         # degradação: 1 de 2 vira 50,0% e disparava CRITICAL. Só alarma com amostra.
         min_samples = t.get("alert_min_samples", 20)
@@ -491,8 +492,8 @@ class Scheduler:
 
     def _evaluate_vip_alerts(self, measurements: list, context: CollectionContext):
         t = context.event_config.get("thresholds", {})
-        rsrp_crit = t.get("rsrp_critical", -110)
-        rsrp_warn = t.get("rsrp_warning", -100)
+        rsrp_crit = threshold_value(t.get("rsrp_critical"), -110)
+        rsrp_warn = threshold_value(t.get("rsrp_warning"), -100)
 
         for m in measurements:
             if not m.get("in_event"):

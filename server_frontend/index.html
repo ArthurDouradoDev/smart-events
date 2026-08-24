@@ -942,6 +942,19 @@
               </svg>
               Integração iManager
             </div>
+            <div class="pm-task-header" style="display:flex; gap:8px; margin-bottom:6px; align-items:center; font-size:11px; color:var(--text-secondary); text-transform:uppercase; letter-spacing:0.03em;">
+              <span style="width:180px;">Tecnologia</span>
+              <span style="flex:1;">Task ID</span>
+              <span style="width:148px; display:flex; align-items:center; gap:4px;">
+                Atualização da Task
+                <span title="Frequência com que a task é atualizada no OSS (iManager) — não é o intervalo de coleta do Smart Events." style="cursor:help; display:inline-flex; color:var(--text-muted);">
+                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/>
+                  </svg>
+                </span>
+              </span>
+              <span style="width:34px;"></span>
+            </div>
             <div id="pm-task-list"></div>
             <button type="button" id="btn-add-pm-task" class="btn btn-secondary" style="margin-top:4px; padding:6px 12px; font-size:12px;">+ Adicionar monitoring</button>
             <div style="font-size:12px; color:var(--text-secondary); margin-top:8px;">
@@ -2194,20 +2207,41 @@
       return null;
     }
 
+    const DEFAULT_PM_PERIOD_SECONDS = 60;
+
+    // A1 — GP da task: input inteiro + unidade, gravado sempre em segundos.
+    function secondsToPeriodParts(seconds) {
+      const value = Number(seconds) > 0 ? Number(seconds) : DEFAULT_PM_PERIOD_SECONDS;
+      if (value % 3600 === 0) return { value: value / 3600, unit: 'h' };
+      if (value % 60 === 0) return { value: value / 60, unit: 'min' };
+      return { value, unit: 's' };
+    }
+
+    function periodPartsToSeconds(value, unit) {
+      const n = Number(value) > 0 ? Number(value) : 1;
+      const factor = unit === 'h' ? 3600 : unit === 's' ? 1 : 60;
+      return Math.round(n * factor);
+    }
+
     function configuredPmTasks(integration) {
       const configured = Array.isArray(integration && integration.pm_tasks)
         ? integration.pm_tasks
         : [];
       const tasks = configured
-        .map(item => ({ tech: normalizePmTaskTech(item && item.tech), task_id: Number(item && item.task_id) }))
+        .map(item => ({
+          tech: normalizePmTaskTech(item && item.tech),
+          task_id: Number(item && item.task_id),
+          period_seconds: Number(item && item.period_seconds) > 0
+            ? Number(item.period_seconds) : DEFAULT_PM_PERIOD_SECONDS,
+        }))
         .filter(item => item.tech && Number.isInteger(item.task_id) && item.task_id > 0);
       if (!tasks.length && integration && Number(integration.pm_task_id) > 0) {
-        tasks.push({ tech: '4G', task_id: Number(integration.pm_task_id) });
+        tasks.push({ tech: '4G', task_id: Number(integration.pm_task_id), period_seconds: DEFAULT_PM_PERIOD_SECONDS });
       }
       return tasks;
     }
 
-    function addPmTaskRow(tech, taskId) {
+    function addPmTaskRow(tech, taskId, periodSeconds) {
       const normalized = normalizePmTaskTech(tech) || '4G';
       const selectValue = normalized === '5G_NRCELL' ? 'NRCELL'
         : normalized === '5G_NRDUCELL' ? 'NRDUCELL'
@@ -2217,6 +2251,7 @@
       row.className = 'pm-task-row';
       row.style = 'display:flex; gap:8px; margin-bottom:8px; align-items:center;';
       const idValue = Number(taskId) > 0 ? String(Number(taskId)) : '';
+      const period = secondsToPeriodParts(periodSeconds);
       row.innerHTML = `
         <select class="pm-task-tech" style="width:180px;">
           <option value="4G"${selectValue === '4G' ? ' selected' : ''}>4G / LTE</option>
@@ -2224,6 +2259,12 @@
           <option value="NRDUCELL"${selectValue === 'NRDUCELL' ? ' selected' : ''}>5G NR DU Cell</option>
         </select>
         <input type="number" class="pm-task-id" placeholder="Task ID" min="1" value="${idValue}" style="flex:1;">
+        <input type="number" class="pm-task-period-value" min="1" value="${period.value}" style="width:70px;">
+        <select class="pm-task-period-unit" style="width:70px;">
+          <option value="s"${period.unit === 's' ? ' selected' : ''}>s</option>
+          <option value="min"${period.unit === 'min' ? ' selected' : ''}>min</option>
+          <option value="h"${period.unit === 'h' ? ' selected' : ''}>h</option>
+        </select>
         <button type="button" class="btn btn-secondary pm-task-remove" style="padding:6px 10px;">✕</button>`;
       row.querySelector('.pm-task-remove').addEventListener('click', () => row.remove());
       list.appendChild(row);
@@ -2241,7 +2282,7 @@
         addPmTaskRow();
         return;
       }
-      tasks.forEach(item => addPmTaskRow(item.tech, item.task_id));
+      tasks.forEach(item => addPmTaskRow(item.tech, item.task_id, item.period_seconds));
     }
 
     function renderEvents(events) {
@@ -2257,12 +2298,23 @@
         const sitesCount = event.sites ? event.sites.length : 0;
         const taskLabels = { '4G': '4G', '5G_NRCELL': 'NR Cell', '5G_NRDUCELL': 'NR DU Cell' };
         const pmCounts = {};
+        const pmPeriods = {};
         configuredPmTasks(event.integration).forEach(item => {
           pmCounts[item.tech] = (pmCounts[item.tech] || 0) + 1;
+          (pmPeriods[item.tech] = pmPeriods[item.tech] || []).push(item.period_seconds);
         });
+        // Rótulo do período só aparece quando é uniforme e diferente do default —
+        // um grupo com períodos mistos fica sem sufixo, em vez de escolher um.
+        const periodLabel = tech => {
+          const periods = pmPeriods[tech] || [];
+          const uniform = periods.length && periods.every(p => p === periods[0]) && periods[0] !== DEFAULT_PM_PERIOD_SECONDS;
+          if (!uniform) return '';
+          const parts = secondsToPeriodParts(periods[0]);
+          return ` (${parts.value} ${parts.unit})`;
+        };
         const pmTasks = ['4G', '5G_NRCELL', '5G_NRDUCELL']
           .filter(tech => pmCounts[tech])
-          .map(tech => `${taskLabels[tech]} ×${pmCounts[tech]}`).join(' · ') || '—';
+          .map(tech => `${taskLabels[tech]} ×${pmCounts[tech]}${periodLabel(tech)}`).join(' · ') || '—';
         let badgeClass = 'badge-scheduled', statusLabel = 'Agendado';
         if (status === 'ACTIVE')  { badgeClass = 'badge-active';  statusLabel = 'Ativo'; }
         if (status === 'ENDED' || status === 'ARCHIVED') { badgeClass = 'badge-ended'; statusLabel = 'Encerrado'; }
@@ -2329,7 +2381,13 @@
       const pmTasks = Array.from(document.querySelectorAll('#pm-task-list .pm-task-row')).map(row => ({
         tech: row.querySelector('.pm-task-tech').value,
         task_id: Number(row.querySelector('.pm-task-id').value),
+        period_seconds: periodPartsToSeconds(
+          row.querySelector('.pm-task-period-value').value,
+          row.querySelector('.pm-task-period-unit').value),
       })).filter(item => item.tech && Number.isInteger(item.task_id) && item.task_id > 0);
+      // B2 — threshold gravado como {value, unit}, não número cru: uma futura
+      // mudança de base não invalida alarme nenhum sem avisar.
+      const th = (value, unit) => ({ value: parseFloat(value), unit });
       const payload = {
         id, name,
         status:    statusSelect.value,
@@ -2338,13 +2396,13 @@
         polygon:    formattedPolygon,
         sites:      parsedSites,
         thresholds: {
-          rsrp_warning:          parseFloat(document.getElementById('rsrp-warn').value),
-          rsrp_critical:         parseFloat(document.getElementById('rsrp-crit').value),
-          rsrq_warning:          parseFloat(document.getElementById('rsrq-warn').value),
-          rsrq_critical:         parseFloat(document.getElementById('rsrq-crit').value),
-          utilization_warning:   parseFloat(document.getElementById('util-warn').value),
-          utilization_critical:  parseFloat(document.getElementById('util-crit').value),
-          availability_critical: parseFloat(document.getElementById('avail-crit').value)
+          rsrp_warning:          th(document.getElementById('rsrp-warn').value, 'dBm'),
+          rsrp_critical:         th(document.getElementById('rsrp-crit').value, 'dBm'),
+          rsrq_warning:          th(document.getElementById('rsrq-warn').value, 'dB'),
+          rsrq_critical:         th(document.getElementById('rsrq-crit').value, 'dB'),
+          utilization_warning:   th(document.getElementById('util-warn').value, '%'),
+          utilization_critical:  th(document.getElementById('util-crit').value, '%'),
+          availability_critical: th(document.getElementById('avail-crit').value, '%'),
         },
         oss: {
           cliente:       document.getElementById('oss-cliente').value.trim(),
@@ -2450,13 +2508,15 @@
       renderPmTaskRows(configuredPmTasks(event.integration));
 
       if (event.thresholds) {
-        document.getElementById('rsrp-warn').value  = event.thresholds.rsrp_warning          ?? -100;
-        document.getElementById('rsrp-crit').value  = event.thresholds.rsrp_critical         ?? -110;
-        document.getElementById('rsrq-warn').value  = event.thresholds.rsrq_warning          ?? -12;
-        document.getElementById('rsrq-crit').value  = event.thresholds.rsrq_critical         ?? -15;
-        document.getElementById('util-warn').value  = event.thresholds.utilization_warning   ?? 80;
-        document.getElementById('util-crit').value  = event.thresholds.utilization_critical  ?? 95;
-        document.getElementById('avail-crit').value = event.thresholds.availability_critical ?? 90;
+        // B2: aceita o formato legado (número cru) e o novo ({value, unit}).
+        const thVal = (raw, fallback) => (raw && typeof raw === 'object') ? (raw.value ?? fallback) : (raw ?? fallback);
+        document.getElementById('rsrp-warn').value  = thVal(event.thresholds.rsrp_warning, -100);
+        document.getElementById('rsrp-crit').value  = thVal(event.thresholds.rsrp_critical, -110);
+        document.getElementById('rsrq-warn').value  = thVal(event.thresholds.rsrq_warning, -12);
+        document.getElementById('rsrq-crit').value  = thVal(event.thresholds.rsrq_critical, -15);
+        document.getElementById('util-warn').value  = thVal(event.thresholds.utilization_warning, 80);
+        document.getElementById('util-crit').value  = thVal(event.thresholds.utilization_critical, 95);
+        document.getElementById('avail-crit').value = thVal(event.thresholds.availability_critical, 90);
       }
 
       parsedSites = event.sites || [];

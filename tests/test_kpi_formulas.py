@@ -5,6 +5,7 @@ import pytest
 from core.kpi_formulas import (
     CATALOG, InvalidKpi, NotApplicable, calculate, catalog_for_api,
     check_throughput_floor, definition, sample_size,
+    threshold_object, threshold_value,
 )
 
 
@@ -155,3 +156,29 @@ def test_sample_size_covers_the_5g_accessibility_denominators():
 
 def test_sample_size_is_none_when_the_counters_are_absent():
     assert sample_size(definition("accessibility", "4G"), {}) is None
+
+
+# ── Fase 2 / B2 — threshold com unidade ───────────────────────────────────
+
+def test_threshold_value_accepts_legacy_raw_number():
+    assert threshold_value(80, default=0) == 80
+
+
+def test_threshold_value_extracts_from_new_object_format():
+    assert threshold_value({"value": 80, "unit": "%"}, default=0) == 80
+
+
+def test_threshold_value_falls_back_to_default_when_missing():
+    assert threshold_value(None, default=95) == 95
+
+
+def test_threshold_object_normalizes_legacy_raw_number():
+    assert threshold_object(80, "%") == {"value": 80, "unit": "%"}
+
+
+def test_threshold_object_keeps_new_format_as_is():
+    assert threshold_object({"value": 80, "unit": "%"}) == {"value": 80, "unit": "%"}
+
+
+def test_threshold_object_is_none_when_missing():
+    assert threshold_object(None) is None

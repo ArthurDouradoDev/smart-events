@@ -678,12 +678,15 @@ function _datasetLabel(panel, meta, isUl, scopeCount) {
 function _chartOptions(panel, response) {
   const primaryMetric = panel.metrics[0];
   const threshold = response.thresholds?.[primaryMetric] || {};
+  // B2: o threshold vem normalizado como {value, unit}.
+  const warnValue = Number(threshold.warning?.value);
+  const critValue = Number(threshold.critical?.value);
   const annotations = {};
-  if (Number.isFinite(Number(threshold.warning))) {
-    annotations.warning = _thresholdAnnotation(Number(threshold.warning), "#D29922");
+  if (Number.isFinite(warnValue)) {
+    annotations.warning = _thresholdAnnotation(warnValue, "#D29922");
   }
-  if (Number.isFinite(Number(threshold.critical))) {
-    annotations.critical = _thresholdAnnotation(Number(threshold.critical), "#F85149");
+  if (Number.isFinite(critValue)) {
+    annotations.critical = _thresholdAnnotation(critValue, "#F85149");
   }
   return {
     responsive: true,

@@ -778,6 +778,52 @@ class TestClusters:
         }]
 
 
+class TestMetricThresholds:
+    """B2 — threshold com unidade. ``_metric_thresholds`` precisa aceitar o
+    formato legado (número cru, usado por ``sample_event``) e o novo
+    ({"value", "unit"}), e sempre devolver o objeto normalizado."""
+
+    def test_accepts_legacy_raw_number(self, api, sample_event):
+        event = {**sample_event, "id": "threshold-legacy",
+                 "thresholds": {"utilization_warning": 80, "utilization_critical": 95}}
+        database.save_event(event)
+
+        result = api._metric_thresholds(event["id"], "utilization_dl")
+
+        assert result == {"warning": {"value": 80, "unit": "%"},
+                           "critical": {"value": 95, "unit": "%"}}
+
+    def test_accepts_new_object_format(self, api, sample_event):
+        event = {**sample_event, "id": "threshold-object",
+                 "thresholds": {
+                     "utilization_warning": {"value": 80, "unit": "%"},
+                     "utilization_critical": {"value": 95, "unit": "%"},
+                 }}
+        database.save_event(event)
+
+        result = api._metric_thresholds(event["id"], "utilization_dl")
+
+        assert result == {"warning": {"value": 80, "unit": "%"},
+                           "critical": {"value": 95, "unit": "%"}}
+
+    def test_missing_threshold_is_none_not_zero(self, api, sample_event):
+        event = {**sample_event, "id": "threshold-missing", "thresholds": {}}
+        database.save_event(event)
+
+        result = api._metric_thresholds(event["id"], "accessibility")
+
+        assert result == {"warning": None, "critical": None}
+
+    def test_direct_metric_key_takes_priority_over_utilization_fallback(self, api, sample_event):
+        event = {**sample_event, "id": "threshold-availability",
+                 "thresholds": {"availability_critical": 90}}
+        database.save_event(event)
+
+        result = api._metric_thresholds(event["id"], "availability")
+
+        assert result == {"warning": None, "critical": {"value": 90, "unit": "%"}}
+
+
 class TestKpiOverview:
     def test_overview_devolve_todas_as_metricas_na_mesma_grade(self, api, sample_event):
         event = _twin_sites_event(sample_event, "overview-common-grid")

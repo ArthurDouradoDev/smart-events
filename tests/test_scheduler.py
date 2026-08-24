@@ -267,3 +267,55 @@ class TestKpiAlertSampleFloor:
         alerts = self._alerts_for(scheduler, monkeypatch,
                                   self._measurement(500, value=99.9))
         assert alerts == []
+
+
+class TestKpiAlertThresholdObjectFormat:
+    """B2 — thresholds podem estar gravados como número cru (legado) ou como
+    {"value", "unit"}. O alarme em tempo real não pode parar de disparar
+    silenciosamente quando o cadastro passa a gravar o novo formato."""
+
+    @staticmethod
+    def _context(thresholds):
+        event = {"id": "event", "oss": {"region": "SP"}, "thresholds": thresholds}
+        return CollectionContext(
+            generation=1, event_id="event", oss="SP", collector=object(),
+            event_config=event, stop_event=threading.Event(),
+        )
+
+    @staticmethod
+    def _utilization_measurement(value):
+        return {"metric": "utilization_dl", "site_id": "SITE", "cell_id": "4G-CELL",
+                "value": value, "timestamp": "2026-08-21T11:10:00Z"}
+
+    def test_utilization_alert_fires_with_object_shaped_threshold(self, scheduler, monkeypatch):
+        alerts = []
+        monkeypatch.setattr(db, "is_silenced", lambda *_: False)
+        monkeypatch.setattr(db, "insert_alert", lambda row: alerts.append(row))
+        thresholds = {"utilization_critical": {"value": 95, "unit": "%"},
+                      "utilization_warning": {"value": 80, "unit": "%"}}
+        scheduler._evaluate_kpi_alerts(
+            [self._utilization_measurement(97.0)], self._context(thresholds))
+        assert len(alerts) == 1
+        assert alerts[0]["severity"] == "CRITICAL"
+
+    def test_utilization_alert_stays_silent_below_object_shaped_threshold(self, scheduler, monkeypatch):
+        alerts = []
+        monkeypatch.setattr(db, "is_silenced", lambda *_: False)
+        monkeypatch.setattr(db, "insert_alert", lambda row: alerts.append(row))
+        thresholds = {"utilization_critical": {"value": 95, "unit": "%"},
+                      "utilization_warning": {"value": 80, "unit": "%"}}
+        scheduler._evaluate_kpi_alerts(
+            [self._utilization_measurement(50.0)], self._context(thresholds))
+        assert alerts == []
+
+    def test_vip_rsrp_alert_fires_with_object_shaped_threshold(self, scheduler, monkeypatch):
+        alerts = []
+        monkeypatch.setattr(db, "is_silenced", lambda *_: False)
+        monkeypatch.setattr(db, "insert_alert", lambda row: alerts.append(row))
+        thresholds = {"rsrp_critical": {"value": -110, "unit": "dBm"},
+                      "rsrp_warning": {"value": -100, "unit": "dBm"}}
+        measurement = {"vip_name": "VIP", "in_event": True, "rsrp": -115,
+                       "serving_cell": "4G-CELL", "timestamp": "2026-08-21T11:10:00Z"}
+        scheduler._evaluate_vip_alerts([measurement], self._context(thresholds))
+        assert len(alerts) == 1
+        assert alerts[0]["severity"] == "CRITICAL"

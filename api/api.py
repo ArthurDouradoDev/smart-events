@@ -19,7 +19,7 @@ from core import database as db
 from core import credentials
 from core.scheduler import scheduler
 from core.log_buffer import log_buffer
-from core.kpi_formulas import catalog_for_api
+from core.kpi_formulas import catalog_for_api, threshold_value, threshold_object
 
 logger = logging.getLogger(__name__)
 
@@ -830,8 +830,8 @@ class Api:
             user_family = technology_family if technology_family in ("4G", "5G") else None
             cell_family = user_family or configured_family
             thresholds = config.get("thresholds", {})
-            warn = thresholds.get("utilization_warning", 80)
-            crit = thresholds.get("utilization_critical", 95)
+            warn = threshold_value(thresholds.get("utilization_warning"), 80)
+            crit = threshold_value(thresholds.get("utilization_critical"), 95)
 
             cluster_membership: dict[str, list[str]] = {}
             for cluster in config.get("clusters") or []:
@@ -1588,11 +1588,23 @@ class Api:
             }
 
     def _metric_thresholds(self, event_id: str, metric: str) -> dict:
+        """B2: devolve sempre o objeto normalizado ``{"value", "unit"}``.
+
+        Aceita o threshold gravado no formato legado (número cru) ou novo — ver
+        ``core.kpi_formulas.threshold_object``. Os KPIs alcançáveis por aqui são
+        percentuais, daí o ``unit_default="%"`` para thresholds legados sem unidade.
+        """
         config = db.get_event(event_id) or _active_event or {}
         thresholds = config.get("thresholds", {})
+        warning = thresholds.get(f"{metric}_warning")
+        if warning is None and "utilization" in metric:
+            warning = thresholds.get("utilization_warning")
+        critical = thresholds.get(f"{metric}_critical")
+        if critical is None and "utilization" in metric:
+            critical = thresholds.get("utilization_critical")
         return {
-            "warning": thresholds.get(f"{metric}_warning", thresholds.get("utilization_warning") if "utilization" in metric else None),
-            "critical": thresholds.get(f"{metric}_critical", thresholds.get("utilization_critical") if "utilization" in metric else None),
+            "warning": threshold_object(warning, "%"),
+            "critical": threshold_object(critical, "%"),
         }
 
     # ── VIPs (cadastro global) ───────────────────────────────────────
@@ -1696,8 +1708,8 @@ class Api:
             # get_vip_latest agora é global: sem filtro de event_id.
             latest = {r["vip_name"]: r for r in db.get_vip_latest(timestamp)}
             thresholds = config.get("thresholds", {})
-            rsrp_warn = thresholds.get("rsrp_warning", -100)
-            rsrp_crit = thresholds.get("rsrp_critical", -110)
+            rsrp_warn = threshold_value(thresholds.get("rsrp_warning"), -100)
+            rsrp_crit = threshold_value(thresholds.get("rsrp_critical"), -110)
 
             merged_sites = self._merged_sites(config)
             resolve_site_id = self._create_cell_resolver(merged_sites)
@@ -1752,7 +1764,7 @@ class Api:
                     "rsrp":              rsrp,
                     "rsrq":              rsrq,
                     "status":            signal_status,
-                    "rsrp_min":          thresholds.get("rsrp_warning"),
+                    "rsrp_min":          threshold_value(thresholds.get("rsrp_warning")),
                     "rsrp_max":          -40,  # teto prático
                 })
 

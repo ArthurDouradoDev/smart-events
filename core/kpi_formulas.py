@@ -223,6 +223,30 @@ def catalog_for_api() -> list[dict]:
     return rows
 
 
+# B2 — threshold com unidade. Um threshold em `config["thresholds"]` pode estar
+# no formato legado (número cru) ou no novo `{"value": ..., "unit": ...}`. Os
+# dois helpers abaixo são o único ponto que decide qual formato está guardado,
+# para que nenhum consumidor precise repetir esse `isinstance`.
+def threshold_value(raw, default: float | None = None) -> float | None:
+    """Extrai o número de um threshold, aceitando o formato legado e o novo (B2)."""
+    if isinstance(raw, dict):
+        return raw.get("value", default)
+    return default if raw is None else raw
+
+
+def threshold_object(raw, unit_default: str = "") -> dict | None:
+    """Normaliza um threshold para ``{"value", "unit"}`` (B2).
+
+    Devolve ``None`` quando não há valor configurado, nunca inventa um número.
+    """
+    if raw is None:
+        return None
+    if isinstance(raw, dict):
+        value = raw.get("value")
+        return None if value is None else {"value": value, "unit": raw.get("unit", unit_default)}
+    return {"value": raw, "unit": unit_default}
+
+
 # A2 — trava aritmética da unidade de tempo. Por métrica: volume do período, a
 # parcela que a fórmula desconta e o fator para Mbit. O piso é
 # ``(volume − descontado) / período`` porque o tempo escalonado nunca é maior que o

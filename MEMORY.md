@@ -734,3 +734,56 @@ marcadores do mapa e cores de status, e re-escalá-los está fora do escopo dest
 clicáveis em `#kpi-overview-context`: clicar oculta o escopo **nos nove painéis de uma vez**,
 e o último escopo visível não pode ser desligado. Dentro do card ficaram apenas o crosshair
 sincronizado e o tooltip (2 colunas acima de 4 séries, preso dentro do card).
+
+---
+
+## 2026-08-24 — Fase 2: período da task e threshold com unidade no cadastro
+
+Plano: `docs/plans/2026-08-21-001-fix-kpi-monitoring-unidades-e-escala-plan.md`.
+Ao chegar nesta fase, `core/collector.py` já lia `period_seconds` por task (item A1 do
+plano) como efeito colateral da Fase 1 — só faltava o campo no formulário. O trabalho real
+desta fase foi a UI de período (A1) e o threshold com unidade (B2).
+
+**A1 — UI do período.** `addPmTaskRow` ganhou `.pm-task-period-value` (inteiro) e
+`.pm-task-period-unit` (`s`/`min`/`h`), gravados sempre em segundos
+(`periodPartsToSeconds`). `configuredPmTasks` decompõe `period_seconds` de volta para
+value+unit na leitura (`secondsToPeriodParts`), com fallback para
+`DEFAULT_PM_PERIOD_SECONDS = 60` — igual ao já feito em `core/collector.py`. O rótulo da
+lista de eventos (`4G ×3 · NR Cell ×1 (15 min)`) só aparece quando o período é **uniforme
+dentro da tecnologia** e diferente do default; um grupo com períodos mistos fica sem
+sufixo, em vez de escolher um arbitrariamente.
+
+**B2 — threshold com unidade, e o raio de explosão que o plano não listou.** O plano
+descrevia a mudança como local a `Api._metric_thresholds` mais três consumidores nomeados
+(`get_kpi_series`, `get_kpi_overview`, `_evaluate_kpi_alerts`). Na prática, gravar cada
+threshold como `{"value", "unit"}` em vez de número cru quebra **todo** lugar que lê
+`config["thresholds"][chave]` direto, porque `numero >= objeto` e `Number(objeto)` falham
+em silêncio:
+- `core/scheduler.py` — `_evaluate_kpi_alerts` (utilização/disponibilidade) e
+  `_evaluate_vip_alerts` (RSRP) leem a config direto, não passam por `_metric_thresholds`.
+  Alarme em tempo real teria parado de disparar sem erro nenhum.
+- `api/api.py` — `get_sites` (status de utilização) e `get_vips` (`signal_status`,
+  `rsrp_min`) também leem a config direto.
+- `frontend/js/vip.js` (linha do RSRP no modal), `frontend/js/kpi.js` e
+  `frontend/js/kpi_overview.js` (linhas tracejadas de threshold nos gráficos) liam
+  `data.thresholds.warning`/`.critical` como número.
+
+**Decisão:** dois helpers em `core/kpi_formulas.py` — `threshold_value(raw, default)`
+(extrai o número, aceita os dois formatos) e `threshold_object(raw, unit_default)`
+(normaliza para `{"value","unit"}`, usado só em `_metric_thresholds`) — e todo ponto de
+leitura acima foi passado a usar um dos dois. `_metric_thresholds` é o único lugar que
+devolve o objeto; os demais continuam vendo um número, como sempre viram. Mocks de
+`frontend/js/bridge.js` foram atualizados para o novo formato, para o modo `--mock` não
+divergir da forma real da API. `core/models.py::Thresholds` (dataclass com campos `float`)
+não foi tocado — não é instanciado em nenhum caminho de execução real, só em
+`tests/test_models.py`; é scaffolding morta, fora do contrato de persistência.
+
+**Por que não é regressão silenciosa:** `TestKpiAlertThresholdObjectFormat` em
+`test_scheduler.py` prova que o alarme de utilização e o de RSRP do VIP disparam
+igual com threshold no formato novo. `test_submit_payload_carries_period_seconds_and_threshold_units`
+roda num Chromium real (Playwright) contra `server_frontend/index.html` servido por HTTP,
+preenche o formulário completo e confere o payload de `POST /api/events` — `period_seconds`
+e `thresholds` incluídos.
+
+Gate: `pytest tests/ -q --basetemp=.pytest-work/fase2` → **476 passed, 10 skipped, 0 failed**
+(baseline Fase 1: 423 passed / 10 skipped).

@@ -243,7 +243,10 @@ const _mock = {
       end_time: new Date(Date.now() + 10 * 3600 * 1000).toISOString(),
       polygon: [[-23.703,-46.701],[-23.697,-46.691],[-23.691,-46.696],[-23.694,-46.705],[-23.703,-46.701]],
       vips: [{name:"Carlos Menezes"},{name:"Ana Rodrigues"},{name:"Roberto Lima"},{name:"Fernanda Costa"},{name:"Patricia Souza"}],
-      thresholds: { rsrp_warning:-100, rsrp_critical:-110, utilization_warning:80, utilization_critical:95 },
+      thresholds: {
+        rsrp_warning: { value:-100, unit:"dBm" }, rsrp_critical: { value:-110, unit:"dBm" },
+        utilization_warning: { value:80, unit:"%" }, utilization_critical: { value:95, unit:"%" },
+      },
     }
   }),
   get_events: () => _mockEvents(),
@@ -305,7 +308,7 @@ const _mock = {
     }
     const gapIdx = Math.floor(n / 2);
     const gaps = [{ from_idx: gapIdx, to_idx: gapIdx + 3, seconds: 180 }];
-    const thresholds = { warning: 80, critical: 95 };
+    const thresholds = { warning: { value:80, unit:"%" }, critical: { value:95, unit:"%" } };
     const makeValues = (offset, speed=0.2) => labels.map((_, i) => +(offset + Math.sin(i * speed) * 12).toFixed(1));
     const family = technology_family === "4G" || technology_family === "5G" ? technology_family : null;
 
@@ -392,7 +395,8 @@ const _mock = {
     return {
       ok: true, scope, scope_id, technology_family: family, labels, metrics,
       units: Object.fromEntries(metricIds.map(metric => [metric, unitsByMetric[metric] || ""])),
-      thresholds: Object.fromEntries(metricIds.map(metric => [metric, { warning: 80, critical: 95 }])),
+      thresholds: Object.fromEntries(metricIds.map(metric => [metric,
+        { warning: { value:80, unit:"%" }, critical: { value:95, unit:"%" } }])),
     };
   },
   get_kpi_overview_multi: (event_id, scopes, technology_family, minutes=60) => {

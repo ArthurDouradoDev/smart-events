@@ -830,6 +830,23 @@ def test_task_without_period_defaults_to_60_seconds(tmp_db, monkeypatch):
     assert availability[0]["value"] == pytest.approx(100.0)
 
 
+def test_invalid_period_seconds_falls_back_to_60_with_warning(tmp_db, monkeypatch, caplog):
+    """Fase 2 — ``period_seconds`` não numérico não pode travar a coleta em
+    silêncio: cai para o default de 60s e avisa nomeando a task."""
+    monkeypatch.setattr(db, "get_event_vips", lambda *_: [])
+    event = _event_5g_nrcell()
+    event["integration"]["pm_tasks"][0]["period_seconds"] = "abc"
+    collector = HttpCollector(event, "https://oss.example")
+
+    with caplog.at_level(logging.WARNING):
+        tasks = collector._configured_pm_tasks({})
+
+    assert tasks == [{"task_id": 20, "technology": "5G_NRCELL", "period_seconds": 60}]
+    avisos = [record for record in caplog.records if "period_seconds inválido" in record.getMessage()]
+    assert len(avisos) == 1
+    assert "20" in avisos[0].getMessage()
+
+
 def test_response_period_divergence_only_warns(tmp_db, monkeypatch, caplog):
     monkeypatch.setattr(db, "get_event_vips", lambda *_: [])
     collector = HttpCollector(_event_5g_nrcell(), "https://oss.example")

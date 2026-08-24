@@ -994,19 +994,21 @@ async function _refreshChart(arg) {
     legendDisplay = false;
   }
 
-  // Linhas de threshold
+  // Linhas de threshold. B2: o valor vem normalizado como {value, unit}.
   const annotations = {};
-  if (data.thresholds?.warning != null) {
+  const warnThreshold = data.thresholds?.warning?.value;
+  const critThreshold = data.thresholds?.critical?.value;
+  if (warnThreshold != null) {
     annotations.warnLine = {
-      type: "line", yMin: data.thresholds.warning, yMax: data.thresholds.warning,
+      type: "line", yMin: warnThreshold, yMax: warnThreshold,
       borderColor: "#D29922", borderWidth: 1, borderDash: [5, 4],
       label: { display: true, content: "Atenção", position: "end",
                font: { size: 10 }, color: "#D29922", backgroundColor: "transparent" },
     };
   }
-  if (data.thresholds?.critical != null) {
+  if (critThreshold != null) {
     annotations.critLine = {
-      type: "line", yMin: data.thresholds.critical, yMax: data.thresholds.critical,
+      type: "line", yMin: critThreshold, yMax: critThreshold,
       borderColor: "#F85149", borderWidth: 1, borderDash: [5, 4],
       label: { display: true, content: "Crítico", position: "end",
                font: { size: 10 }, color: "#F85149", backgroundColor: "transparent" },

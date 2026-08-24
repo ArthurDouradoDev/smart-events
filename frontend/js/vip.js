@@ -56,6 +56,12 @@ function _formatNumber(value) {
   return Number.isFinite(numeric) ? numeric.toFixed(2) : "—";
 }
 
+// B2: threshold legado é número cru; o novo formato é {value, unit}.
+function _thresholdValue(raw, fallback) {
+  if (raw && typeof raw === "object") return Number(raw.value ?? fallback);
+  return raw == null ? fallback : Number(raw);
+}
+
 export function initVip() {
   State.on("change:vips", render);
   // Trocar o evento ativo/histórico invalida a associação célula-site do
@@ -533,8 +539,8 @@ function _renderChart(series) {
 
   const config = State.activeEvent || State.historicalEvent;
   const thresholds = config?.thresholds || {};
-  const warnTh = thresholds.rsrp_warning ?? -100;
-  const critTh = thresholds.rsrp_critical ?? -110;
+  const warnTh = _thresholdValue(thresholds.rsrp_warning, -100);
+  const critTh = _thresholdValue(thresholds.rsrp_critical, -110);
 
   const canvas = document.getElementById("vip-modal-chart");
   _modalChart = new Chart(canvas, {
