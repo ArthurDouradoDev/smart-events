@@ -1,0 +1,22 @@
+{
+  "schema_version": 1,
+  "id": "roadshow-salvador",
+  "profile_name": "RoadShow Salvador",
+  "app_name": "SmartEvents RoadShow Salvador",
+  "client": "TIM",
+  "event_ids": [
+    "roadshow-salvador"
+  ],
+  "required_pm_tasks": [
+    {"tech": "4G", "task_id": 2279},
+    {"tech": "NRCELL", "task_id": 2280},
+    {"tech": "NRDUCELL", "task_id": 2281}
+  ],
+  "artifact_basename": "SmartEvents_RoadShow_Salvador",
+  "setup_basename": "Setup_SmartEvents_RoadShow_Salvador",
+  "runtime_data_dir": "SmartEvents-RoadShow-Salvador",
+  "install_dir_name": "SmartEvents RoadShow Salvador",
+  "app_id": "97CE18D7-11E6-4223-90AC-5B18989B0C53",
+  "operator_readme": "installer/README-operador-roadshow-salvador.txt",
+  "require_cell_radio_metadata": false
+}

@@ -831,3 +831,47 @@ por coincidência textual após o strip (ex. dois sites reais chamados `X` e `5G
 relação), a trava de distância ≤ 50 m ainda protege, mas o prefixo removido é uma lista
 fechada (`4G|5G|5D|SD|SR`) — uma nova convenção de EP com outro token não é coberta sem
 editar `_SITE_NAME_PREFIX_RE`.
+
+---
+
+## 2026-08-24 — Instalador dedicado do RoadShow Salvador (perfil `roadshow-salvador`)
+
+Terceiro perfil de build, ao lado de `roadshow-tim` e `vivo-barretos-2026`. Nada de código
+mudou: o pipeline de build já é parametrizado por perfil desde Barretos. O trabalho foi
+**declarar** o perfil e escrever o README do operador.
+
+Arquivos novos:
+- `build_profiles/roadshow-salvador.json`
+- `installer/README-operador-roadshow-salvador.txt`
+
+**Dados que vieram do próprio evento** (`server_data/events/roadshow-salvador.json`), não
+inventados — é a fonte de verdade para tudo que o perfil declara:
+- `client: "TIM"` ← `oss.cliente`. **Obrigatório bater**, senão `prepare_installer_seed`
+  simplesmente não copia o evento e a semente sai vazia (o filtro exige `event_id` **e**
+  cliente casando, `tools/prepare_installer_seed.py:103-111`).
+- `required_pm_tasks` 4G=2279, NRCELL=2280, NRDUCELL=2281 ← `integration.pm_tasks`.
+  `core/seed.py:144` reprova o build se o evento não tiver exatamente essas tasks.
+- Regional OSS `OUTRAS` → `https://10.220.30.9:31943/` (de `server_data/clientes/tim.json`).
+  Salvador é BA, então **não** é a URL de SP — repetir a de Barretos aqui seria erro silencioso.
+
+**`require_cell_radio_metadata: false`, ao contrário de Barretos.** Medido antes de decidir:
+4 células de 624 sites estão sem `tech`/`frequency` (`4G-SAFEM7-18-IDA/IDB/IDC`,
+`4G-SABAM6-18-IA`). Com a trava ligada o build reprovaria. Barretos pode exigir `true` porque
+a planilha dele veio completa; Salvador não. Se essas 4 células forem corrigidas no EP, dá
+para ligar a trava.
+
+**`app_id` é GUID novo** (`97CE18D7-11E6-4223-90AC-5B18989B0C53`), distinto dos outros dois.
+É o que faz o Inno Setup tratar os três como aplicações independentes — reaproveitar um GUID
+faria um instalador desinstalar o outro. Mesma lógica para `runtime_data_dir`
+(`SmartEvents-RoadShow-Salvador`), que isola `%LOCALAPPDATA%`.
+
+Gate: `python build.py --profile roadshow-salvador` → **Build aprovado**. Self-test 9/9 na
+máquina de build; `_verify_bundle` conferiu perfil, catálogo só-TIM e eventos, e confirmou que
+nenhum `credentials.json` foi embutido; `tests/test_installer.py` 7 passed.
+Setup 579,3 MB, sha256 `5c88c61e…`, em `dist/roadshow-salvador/installer/`.
+
+**Pendência conhecida (afeta os dois perfis TIM):** a semente puxa VIPs por cliente, sem
+recorte por evento (`tools/prepare_installer_seed.py:130-136`), então os 3 VIPs de teste da
+TIM (`20260813-teste`, `baldin-edge60pro`, `douglas`) entram no instalador de Salvador. É o
+comportamento pré-existente do `roadshow-tim`, não uma regressão — mas não foi uma decisão
+deliberada para Salvador.

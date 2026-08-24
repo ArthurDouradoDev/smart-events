@@ -452,3 +452,27 @@ zero `null` nas séries do mock.
 temporal em todas as chamadas. Mock com relógio livre não é "aproximadamente igual" ao
 real — ele fabrica um modo de falha que o real não tem, e some com a evidência do bug
 verdadeiro.
+
+---
+
+## 2026-08-24 — Build rodado com o Python errado: `.build-tools\Python312` em vez de `.venv-build`
+
+**Como apareceu:** primeira tentativa de `build.py --profile roadshow-salvador` morreu em
+`require_locked_dependencies` com **50 pacotes "ausente"** — a lista inteira do
+`requirements-build.lock`, incluindo o próprio PyInstaller.
+
+**Causa raiz:** existem dois interpretadores 3.12 no repositório e eu escolhi o errado.
+`.build-tools\Python312\python.exe` é o **interpretador base**, sem dependências instaladas;
+quem tem o lock aplicado é o venv `.venv-build\Scripts\python.exe`, criado a partir dele
+(`.venv-build/pyvenv.cfg` aponta para lá como `home`). "50 de 50 ausentes" não é ambiente
+desatualizado — é ambiente **vazio**, sinal de interpretador trocado, não de lock furado.
+A tentação de "consertar" com `pip install -r` teria poluído o Python base e mascarado o erro.
+
+**Correção:** `& ".venv-build\Scripts\python.exe" build.py --profile <perfil>`, com
+`$env:PLAYWRIGHT_BROWSERS_PATH = "$env:LOCALAPPDATA\ms-playwright"` — a variável não está
+persistida no ambiente do usuário e `build.py:229-231` aborta sem ela.
+
+**Regra:** o build do instalador roda **sempre** por `.venv-build\Scripts\python.exe`.
+`.build-tools\Python312` só existe para criar esse venv. Um `require_*` reprovando a lista
+toda de uma vez é diagnóstico de interpretador errado — verificar `pyvenv.cfg` antes de
+mexer em dependência.
