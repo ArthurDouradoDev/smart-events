@@ -1,8 +1,8 @@
 /**
  * kpi_overview.js — Visão geral full-screen com nove gráficos sincronizados.
  *
- * O escopo é uma comparação: dois seletores múltiplos independentes (Clusters e
- * Sites) alimentam uma única consulta multi-escopo. Cada escopo vira uma cor
+ * O escopo é uma comparação: três seletores múltiplos independentes (Clusters,
+ * Sites e Células) alimentam uma única consulta multi-escopo. Cada escopo vira uma cor
  * estável; nos painéis pareados o DL é linha contínua e o UL é a mesma cor
  * tracejada, sobre um único eixo — os dois lados compartilham a unidade.
  */
@@ -57,7 +57,8 @@ let _activeIndex = null;
 let _hoveredPanelId = null;
 let _scopeSites = [];
 let _scopeClusters = [];
-const _selection = { cluster: new Set(), site: new Set() };
+let _scopeCells = [];
+const _selection = { cluster: new Set(), site: new Set(), cell: new Set() };
 const _hiddenScopes = new Set();
 const _charts = new Map();
 // Escala vigente de cada painel: o tooltip e os ticks precisam da mesma.
@@ -113,6 +114,12 @@ export function initKpiOverview() {
       _syncFamilyTabs();
       _renderPanelShells();
       void _load();
+      // Célula é específica de família (ao contrário de site/cluster): a
+      // lista precisa ser buscada de novo, e seleções que sumiram, purgadas.
+      // Um `_refreshScopeData()` completo reaplicaria a semente de seleção
+      // (herdada do dashboard) sempre que a comparação estiver vazia — o que
+      // reintroduziria um escopo que o usuário acabou de limpar.
+      void _refreshCellsForFamily();
     });
   });
 
@@ -156,6 +163,7 @@ function _open() {
   _minutes = [0, 15, 30, 60].includes(Number(State.timeWindow)) ? Number(State.timeWindow) : 60;
   _scopeSites = State.sites || [];
   _scopeClusters = State.clusters || [];
+  _scopeCells = [];
   _hiddenScopes.clear();
   _pendingSeed = true;
   _applyPreferredSelection();
@@ -193,6 +201,7 @@ function _syncTimeTabs() {
 function _applyPreferredSelection() {
   _selection.cluster.clear();
   _selection.site.clear();
+  _selection.cell.clear();
   const clusterIds = new Set(_scopeClusters.map(cluster => cluster.id));
   const siteIds = new Set(_scopeSites.map(site => site.id));
 
@@ -219,7 +228,7 @@ function _plural(count, singular) {
 }
 
 function _selectionSize() {
-  return _selection.cluster.size + _selection.site.size;
+  return _selection.cluster.size + _selection.site.size + _selection.cell.size;
 }
 
 /** Assinatura estável da seleção — usada para decidir se vale recarregar. */
@@ -239,13 +248,22 @@ function _clusterColor(cluster, index) {
   return cluster.color || SERIES_COLORS[index % SERIES_COLORS.length];
 }
 
+/** Cor-base da célula: mesma ideia do site, índice estável na lista do evento. */
+function _cellBaseColors() {
+  const ordered = _scopeCells.map(cell => String(cell.id)).sort();
+  return new Map(ordered.map((id, index) => [
+    id, SERIES_COLORS[index % SERIES_COLORS.length],
+  ]));
+}
+
 /**
- * Escopos selecionados, na ordem de exibição: clusters primeiro, depois sites.
+ * Escopos selecionados, na ordem de exibição: clusters, depois sites, depois
+ * células.
  *
  * O cluster nunca muda de cor — é a cor cadastrada dele, a mesma do polígono no
- * mapa. O site tem uma cor-base estável (índice dele na lista do evento) e só
- * cede o lugar quando ela já foi tomada: duas séries da mesma cor no mesmo
- * gráfico seriam ilegíveis, e é o site que não tem cor própria a defender.
+ * mapa. Site e célula têm cor-base estável (índice deles na própria lista) e só
+ * cedem o lugar quando ela já foi tomada: duas séries da mesma cor no mesmo
+ * gráfico seriam ilegíveis, e são site/célula que não têm cor própria a defender.
  */
 function _selectedScopes() {
   const scopes = [];
@@ -275,6 +293,22 @@ function _selectedScopes() {
       scope: "site",
       scopeId: site.id,
       name: site.name || site.id,
+      color,
+    });
+  });
+  const cellBaseColors = _cellBaseColors();
+  _scopeCells.forEach(cell => {
+    if (!_selection.cell.has(cell.id)) return;
+    const base = cellBaseColors.get(String(cell.id)) || SERIES_COLORS[0];
+    const color = taken.has(base.toLowerCase())
+      ? (SERIES_COLORS.find(candidate => !taken.has(candidate.toLowerCase())) || base)
+      : base;
+    taken.add(color.toLowerCase());
+    scopes.push({
+      key: `cell:${cell.id}`,
+      scope: "cell",
+      scopeId: cell.id,
+      name: cell.name || cell.id,
       color,
     });
   });
@@ -315,6 +349,7 @@ function _closeOpenPicker() {
 function _renderPickers() {
   _renderClusterPicker();
   _renderSitePicker();
+  _renderCellPicker();
   _syncPickerSummaries();
 }
 
@@ -344,7 +379,7 @@ function _renderClusterPicker() {
   const options = document.createElement("div");
   options.className = "scope-picker-options";
   const allSelected = _scopeClusters.every(cluster => _selection.cluster.has(cluster.id));
-  const fitsAll = _scopeClusters.length + _selection.site.size <= MAX_SCOPES;
+  const fitsAll = _scopeClusters.length + _selection.site.size + _selection.cell.size <= MAX_SCOPES;
   options.appendChild(_optionRow({
     checked: allSelected,
     blocked: !allSelected && !fitsAll,
@@ -431,11 +466,65 @@ function _renderSiteOptions() {
   });
 }
 
+/** Monta a casca do seletor de células uma vez; a busca só repinta as opções. */
+function _renderCellPicker() {
+  const menu = document.querySelector("#kpi-overview-cell-picker .scope-picker-menu");
+  if (!menu) return;
+  menu.innerHTML = "";
+
+  const search = document.createElement("input");
+  search.type = "search";
+  search.className = "scope-picker-search";
+  search.placeholder = "Buscar célula…";
+  search.addEventListener("input", () => _renderCellOptions());
+  menu.appendChild(search);
+
+  const options = document.createElement("div");
+  options.className = "scope-picker-options";
+  menu.appendChild(options);
+  _renderCellOptions();
+}
+
+function _renderCellOptions() {
+  const menu = document.querySelector("#kpi-overview-cell-picker .scope-picker-menu");
+  const options = menu?.querySelector(".scope-picker-options");
+  if (!options) return;
+  const term = (menu.querySelector(".scope-picker-search")?.value || "").trim().toLowerCase();
+  const matches = _scopeCells.filter(cell =>
+    !term || `${cell.name || ""} ${cell.id} ${cell.site_name || ""}`.toLowerCase().includes(term));
+
+  options.innerHTML = "";
+  if (!matches.length) {
+    const empty = document.createElement("div");
+    empty.className = "scope-picker-empty";
+    empty.textContent = _scopeCells.length ? "Nenhuma célula encontrada." : "Nenhuma célula nesta tecnologia.";
+    options.appendChild(empty);
+    return;
+  }
+  const baseColors = _cellBaseColors();
+  matches.forEach(cell => {
+    const checked = _selection.cell.has(cell.id);
+    options.appendChild(_optionRow({
+      checked,
+      blocked: !checked && _selectionSize() >= MAX_SCOPES,
+      color: baseColors.get(String(cell.id)),
+      name: cell.name || cell.id,
+      meta: cell.site_name || "",
+      onToggle: enabled => {
+        if (enabled) _selection.cell.add(cell.id);
+        else _selection.cell.delete(cell.id);
+        _onSelectionChanged();
+      },
+    }));
+  });
+}
+
 function _onSelectionChanged() {
   _pendingSeed = false;
   _hiddenScopes.clear();
   _renderClusterPicker();
   _renderSiteOptions();
+  _renderCellOptions();
   _syncPickerSummaries();
   void _load();
 }
@@ -452,8 +541,10 @@ function _summaryText(kind, entries) {
 function _syncPickerSummaries() {
   const clusterValue = document.querySelector("#kpi-overview-cluster-picker .scope-picker-value");
   const siteValue = document.querySelector("#kpi-overview-site-picker .scope-picker-value");
+  const cellValue = document.querySelector("#kpi-overview-cell-picker .scope-picker-value");
   if (clusterValue) clusterValue.textContent = _summaryText("cluster", _scopeClusters);
   if (siteValue) siteValue.textContent = _summaryText("site", _scopeSites);
+  if (cellValue) cellValue.textContent = _summaryText("cell", _scopeCells);
 
   const hint = document.getElementById("kpi-overview-scope-hint");
   if (hint) {
@@ -502,26 +593,59 @@ function _toggleScopeVisibility(scopeKey) {
   _applyScopeVisibility();
 }
 
+/**
+ * Só a lista de células, disparada ao trocar de aba 4G/5G.
+ *
+ * Não reusa `_refreshScopeData` porque essa reaplica a semente de seleção
+ * (herdada do dashboard) sempre que a comparação estiver vazia — o que
+ * reintroduziria um escopo que o usuário acabou de limpar só por ter trocado
+ * de tecnologia. Só a purga de células que deixaram de existir na família nova.
+ */
+async function _refreshCellsForFamily() {
+  if (!State.eventId || !_isOpen()) return;
+  try {
+    const cells = await API.getEventCells(State.eventId, _family);
+    if (!_isOpen()) return;
+    _scopeCells = Array.isArray(cells) ? cells : _scopeCells;
+    const before = _selectionKey();
+    const cellIds = new Set(_scopeCells.map(cell => cell.id));
+    [..._selection.cell].forEach(id => {
+      if (!cellIds.has(id)) _selection.cell.delete(id);
+    });
+    _renderPickers();
+    if (_selectionKey() !== before) void _load();
+  } catch (error) {
+    console.error("Erro ao atualizar células da visão geral:", error);
+  }
+}
+
 async function _refreshScopeData() {
   if (!State.eventId || !_isOpen()) return;
   try {
     const timestamp = State.mode === "historical" ? State.historicalTimestamp : null;
-    const [sites, clusters] = await Promise.all([
+    const [sites, clusters, cells] = await Promise.all([
       API.getSites(State.eventId, timestamp, State.selectedMetric, null),
       API.getClusters(State.eventId),
+      API.getEventCells(State.eventId, _family),
     ]);
     if (!_isOpen()) return;
     _scopeSites = Array.isArray(sites) ? sites : _scopeSites;
     _scopeClusters = Array.isArray(clusters) ? clusters : _scopeClusters;
+    _scopeCells = Array.isArray(cells) ? cells : _scopeCells;
     const before = _selectionKey();
-    // Escopos que sumiram do evento não podem continuar na comparação.
+    // Escopos que sumiram do evento (ou de família, no caso de células) não
+    // podem continuar na comparação.
     const clusterIds = new Set(_scopeClusters.map(cluster => cluster.id));
     const siteIds = new Set(_scopeSites.map(site => site.id));
+    const cellIds = new Set(_scopeCells.map(cell => cell.id));
     [..._selection.cluster].forEach(id => {
       if (!clusterIds.has(id)) _selection.cluster.delete(id);
     });
     [..._selection.site].forEach(id => {
       if (!siteIds.has(id)) _selection.site.delete(id);
+    });
+    [..._selection.cell].forEach(id => {
+      if (!cellIds.has(id)) _selection.cell.delete(id);
     });
     if (_pendingSeed || !_selectionSize()) {
       _pendingSeed = false;
@@ -581,7 +705,7 @@ async function _load() {
   const scopes = _selectedScopes();
   if (!State.eventId || !scopes.length) {
     _renderPanelShells();
-    _showState("error", "Selecione ao menos um cluster ou site para visualizar os KPIs.");
+    _showState("error", "Selecione ao menos um cluster, site ou célula para visualizar os KPIs.");
     return;
   }
   const requestId = ++_requestId;

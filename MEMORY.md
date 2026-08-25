@@ -1012,3 +1012,36 @@ ligado ao dado real, é `units.js` que ele deve usar.
 10 skips são os de VPN, iguais). `kpi_crosscheck --event testesantoamaro` → **20/24**,
 idêntico ao da Fase 3 e pelas mesmas quatro divergências herdadas de linhas anteriores à
 Fase 1.
+
+---
+
+## 2026-08-25 — Visão geral de KPIs: célula como terceiro escopo
+
+**Célula virou escopo de primeira classe, ao lado de site e cluster.** Terceiro seletor
+múltiplo (`#kpi-overview-cell-picker`, "Células") na toolbar de `kpi_overview.js`, mesmo
+molde do de sites (busca + checkboxes, sem "selecionar todas" — a lista pode ser grande).
+Célula já existia como conceito no modelo de dados (`Cell.cell_id`, seleção parcial de
+cluster) e como sub-filtro dentro de um site (`#cell-selector` do dashboard principal); o que
+faltava era torná-la comparável do mesmo jeito que site/cluster já eram.
+
+**API nova: `Api.get_event_cells(event_id, technology_family)`.** Lista todas as células do
+evento (todos os sites fundidos) com o site dono — o análogo de `get_sites`/`get_clusters`
+para esse terceiro seletor. `get_kpi_series`/`get_kpi_overview`/`get_kpi_overview_multi`
+ganharam `scope="cell"`: acha o site dono da célula varrendo o evento inteiro
+(`_find_site_for_cell`) e cai no caminho de célula única que já existia — nenhuma lógica de
+agregação foi duplicada.
+
+**Célula é específica de família; site e cluster não são.** Trocar a aba 4G/5G precisa
+rebuscar a lista de células e purgar da seleção as que não existem na família nova — mas
+**sem** reusar `_refreshScopeData()` inteiro para isso: essa função também reaplica a
+semente de seleção (herdada do dashboard) sempre que a comparação está vazia, e chamá-la a
+cada troca de aba reintroduzia um escopo que o usuário tinha acabado de limpar (bug pego só
+ao rodar a suite Playwright de `test_frontend_kpi_overview_ui.py` — os 4 painéis pareados
+timeoutavam esperando 4 datasets e vinham 6, porque um site 4G-only da barra lateral do
+dashboard era resemeado no meio da comparação em 5G). Extraído `_refreshCellsForFamily()`,
+que só busca `get_event_cells` e purga seleção — sem tocar em site/cluster nem reaplicar a
+semente.
+
+**Gate:** `pytest tests/ -q` → **499 passed, 10 skipped** no arquivo cheio (mais os 11 de
+`test_frontend_kpi_overview_ui.py`, rodados à parte com Playwright) + 5 testes novos de
+backend (`TestEventCells`, `TestCellScope`) — sem regressão na baseline.

@@ -526,3 +526,36 @@ e `[]` passam como 0 e `false` passa como 0. Ao decidir qualquer coisa a partir 
 que representa tempo (onde ausência é um valor de primeira classe), descartar a ausência
 explicitamente antes da conversão — e escrever o teste com a série toda vazia, que é o caso
 que o dado de mock quase nunca produz.
+
+---
+
+## 2026-08-25 — Reusar `_refreshScopeData()` na troca de aba 4G/5G reintroduzia escopo já limpo
+
+**Como apareceu:** ao adicionar `scope="cell"` na visão geral, células precisam ser
+rebuscadas a cada troca de aba 4G/5G (são específicas de família; site e cluster não). O
+jeito óbvio foi chamar `_refreshScopeData()` (já buscava sites/clusters/células) também no
+clique da aba de tecnologia. `pytest tests/test_frontend_kpi_overview_ui.py` pegou o problema
+na hora: 5 dos 11 testes travaram em `page.wait_for_function` esperando 4 datasets num painel
+pareado com 2 clusters selecionados — vinham 6.
+
+**Causa raiz:** `_refreshScopeData()` tem uma reseed embutida — `if (_pendingSeed ||
+!_selectionSize()) { _applyPreferredSelection(); }` — pensada para quando a visão geral abre
+com a comparação vazia. `_applyPreferredSelection()` herda `State.selectedSite` (o site
+selecionado na barra lateral do dashboard, sem relação com a comparação da visão geral). Os
+testes limpam a seleção da visão geral e então trocam de aba; nesse instante
+`_selectionSize()` é 0, então a troca de aba disparava a reseed e reintroduzia o site da
+barra lateral (um site só-4G) como 3º escopo dentro da comparação em 5G — 3 escopos × 2
+(DL/UL) = 6 datasets, todos os testes que faziam "limpar → trocar aba → escolher cluster"
+travavam esperando 4.
+
+**Correção:** extraído `_refreshCellsForFamily()` — só busca `get_event_cells` e purga da
+seleção as células que sumiram na família nova, sem tocar em site/cluster nem chamar
+`_applyPreferredSelection()`. A troca de aba passou a chamar essa função, não
+`_refreshScopeData()` inteiro.
+
+**Regra:** uma função que reseed-a "se a seleção estiver vazia" não pode ser reusada por um
+caminho que só precisa atualizar *uma parte* do estado — reusar o todo por conveniência
+reintroduz o efeito colateral (a reseed) em contextos onde "seleção vazia" é intencional, não
+um estado inicial. Extrair a fatia específica do refresh é mais barato que o bug. E: quando o
+projeto já tem uma suite Playwright cobrindo a superfície mexida, rodá-la é o jeito de pegar
+isso — os testes de API sozinhos (backend) não veem timing/estado assíncrono de UI.

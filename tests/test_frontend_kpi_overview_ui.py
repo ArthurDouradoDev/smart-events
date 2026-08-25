@@ -331,7 +331,7 @@ def test_sem_escopo_selecionado_a_visao_pede_uma_selecao():
 
                 error = page.locator("#kpi-overview-error")
                 error.wait_for(state="visible", timeout=5000)
-                assert "Selecione ao menos um cluster ou site" in error.inner_text()
+                assert "Selecione ao menos um cluster, site ou célula" in error.inner_text()
     except Exception as exc:  # pragma: no cover
         _skip_if_no_browser(exc)
 

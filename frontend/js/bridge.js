@@ -306,6 +306,14 @@ const _mock = {
       { id: `${site_id}-C`, label: `${site_id}-C`, tech: "NR",  freq: "3500", family: "5G" },
     ];
   },
+  get_event_cells: (_eventId, technology_family=null) => {
+    const family = technology_family === "4G" || technology_family === "5G" ? technology_family : null;
+    return MOCK_SITES.flatMap(s => (s.cells || [])
+      .filter(c => !family || !c.family || c.family === family)
+      .map(c => ({
+        id: c.id, name: c.id, family: c.family, site_id: s.id, site_name: s.name,
+      })));
+  },
   get_vips: (event_id, timestamp=null) => ([
     { id:"carlos-menezes", name:"Carlos Menezes", role:"CEO Empresa X",  notes:"VIP principal",        in_event:true,  serving_cell:"ERB-07", serving_site: "ERB-07", serving_site_name: "ERB-07 Interlagos", last_timestamp: new Date().toISOString(), rsrp:-85, rsrq:-7,  status:"ok",      rsrp_min:-110, rsrp_max:-40 },
     { id:"ana-rodrigues",  name:"Ana Rodrigues",  role:"Diretora",       notes:null,                   in_event:true,  serving_cell:"ERB-07", serving_site: "ERB-07", serving_site_name: "ERB-07 Interlagos", last_timestamp: new Date().toISOString(), rsrp:-97, rsrq:-12, status:"warning", rsrp_min:-110, rsrp_max:-40 },
@@ -339,6 +347,20 @@ const _mock = {
       const techs = families.length ? families : (family ? [] : ["4G"]);
       const series = techs.map((tech, i) => ({
         technology: tech, labels, values: makeValues(35 + i * 15, 0.16 + i * 0.03),
+      }));
+      return {
+        ok: true, labels, values: series.length === 1 ? series[0].values : [],
+        series, cells_data: {}, gaps, thresholds,
+      };
+    }
+
+    if (scope === "cell") {
+      const cellEntry = MOCK_SITES.flatMap(s => s.cells || []).find(c => c.id === scope_id);
+      const techs = cellEntry?.family
+        ? (family && cellEntry.family !== family ? [] : [cellEntry.family])
+        : (family ? [family] : ["4G"]);
+      const series = techs.map((tech, i) => ({
+        technology: tech, labels, values: makeValues(25 + i * 12, 0.14 + i * 0.03),
       }));
       return {
         ok: true, labels, values: series.length === 1 ? series[0].values : [],
@@ -441,12 +463,12 @@ const _mock = {
       const scope = entry?.scope;
       const scopeId = entry?.scope_id ?? entry?.id;
       const key = `${scope}:${scopeId}`;
-      if (!["site", "cluster"].includes(scope) || !scopeId || seen.has(key)) return;
+      if (!["site", "cluster", "cell"].includes(scope) || !scopeId || seen.has(key)) return;
       seen.add(key);
       entries.push({ scope, scope_id: String(scopeId) });
     });
     if (!entries.length) {
-      return { ok: false, error: "informe ao menos um cluster ou site", labels: [], series: [], units: {}, reasons: {}, thresholds: {} };
+      return { ok: false, error: "informe ao menos um cluster, site ou célula", labels: [], series: [], units: {}, reasons: {}, thresholds: {} };
     }
     const responses = entries.map(entry => ({
       entry,
@@ -669,6 +691,7 @@ const API = {
   endEvent:         (id)                     => API.call("end_event", id),
   getSites:         (eventId, timestamp=null, metric=null, technologyFamily=null) => API.call("get_sites", eventId, timestamp, metric, technologyFamily),
   getSiteCells:     (eventId, siteId, technologyFamily=null) => API.call("get_site_cells", eventId, siteId, technologyFamily),
+  getEventCells:    (eventId, technologyFamily=null) => API.call("get_event_cells", eventId, technologyFamily),
   getKpiSeries:     (eventId, siteId, m, w, cellId=null, technologyFamily=null, scope=null, scopeId=null) =>
     API.call("get_kpi_series", eventId, siteId, m, w, cellId, null, technologyFamily, scope, scopeId),
   getKpiOverview:   (eventId, scope, scopeId, technologyFamily, minutes=60) =>

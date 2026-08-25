@@ -806,6 +806,76 @@ class TestClusters:
         }]
 
 
+class TestEventCells:
+    """`get_event_cells` alimenta o filtro por células da Visão Geral."""
+
+    def test_lista_todas_as_celulas_com_o_site_dono(self, api, sample_event):
+        database.save_event(sample_event)
+
+        cells = api.get_event_cells(sample_event["id"])
+
+        assert {c["id"] for c in cells} == {"SR-SPPNB2_1", "SR-SPPNB2_2", "SR-SPPNB2_3"}
+        assert all(c["site_id"] == "SR-SPPNB2" and c["site_name"] == "SR-SPPNB2"
+                   for c in cells)
+
+    def test_recorta_por_familia_e_cobre_sites_fundidos(self, api, sample_event):
+        event = _twin_sites_event(sample_event, "event-cells-twin")
+        database.save_event(event)
+
+        cells_5g = api.get_event_cells(event["id"], "5G")
+
+        # SPSMG7 (3 células 5G) + SPSMH1 (2 células 5G), sites já fundidos por
+        # nome+coordenada — a lista precisa cobrir o evento inteiro, não só um site.
+        assert len(cells_5g) == 5
+        assert {c["site_id"] for c in cells_5g} == {"SPSMG7", "SPSMH1"}
+        assert {c["family"] for c in cells_5g} == {"5G"}
+
+
+class TestCellScope:
+    """`scope="cell"` na Visão Geral: terceiro escopo, ao lado de site e cluster."""
+
+    def test_serie_de_celula_acha_o_site_dono_no_evento_inteiro(self, api, sample_event):
+        event = _twin_sites_event(sample_event, "cell-scope-owner")
+        database.save_event(event)
+        # `scope_id` só traz o id da célula — o dono (site cru "725483", fundido
+        # em "SPSMG7") precisa ser resolvido varrendo o evento inteiro.
+        _insert_cell_kpi(event["id"], "725483", "4G-SPSMG7-0", "4G", 42.0)
+
+        result = api.get_kpi_series(
+            event["id"], None, "utilization_dl", minutes=0,
+            scope="cell", scope_id="4G-SPSMG7-0")
+
+        assert result["ok"] is True
+        assert result["series"][0]["technology"] == "4G"
+        assert result["series"][0]["values"] == [42.0]
+
+    def test_celula_inexistente_devolve_serie_vazia_sem_erro(self, api, sample_event):
+        database.save_event(sample_event)
+
+        result = api.get_kpi_series(
+            sample_event["id"], None, "utilization_dl", minutes=0,
+            scope="cell", scope_id="NAO-EXISTE")
+
+        assert result["ok"] is True
+        assert result["series"] == []
+
+    def test_get_kpi_overview_multi_aceita_escopo_de_celula(self, api, sample_event):
+        database.save_event(sample_event)
+        _insert_cell_kpi(sample_event["id"], "SR-SPPNB2", "SR-SPPNB2_1", "4G", 55.0)
+
+        result = api.get_kpi_overview_multi(
+            sample_event["id"],
+            [{"scope": "cell", "scope_id": "SR-SPPNB2_1"}],
+            "4G",
+            minutes=0,
+        )
+
+        assert result["ok"] is True
+        assert result["series"][0]["scope"] == "cell"
+        assert result["series"][0]["scope_id"] == "SR-SPPNB2_1"
+        assert result["series"][0]["metrics"]["utilization_dl"] == [55.0]
+
+
 class TestMetricThresholds:
     """B2 — threshold com unidade. ``_metric_thresholds`` precisa aceitar o
     formato legado (número cru, usado por ``sample_event``) e o novo

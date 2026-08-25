@@ -976,6 +976,36 @@ class Api:
             logger.error(f"get_site_cells error: {e}")
             return []
 
+    def get_event_cells(self, event_id: str, technology_family: Optional[str] = None) -> list:
+        """Lista todas as células do evento (todos os sites), cada uma com o
+        site dono. Alimenta o filtro por células da Visão Geral, do mesmo
+        jeito que ``get_sites``/``get_clusters`` alimentam os outros dois.
+        """
+        try:
+            config = db.get_event(event_id) or _active_event
+            if not config:
+                return []
+            merged = self._merged_sites(config)
+            configured_family = self._single_configured_family(config)
+            user_family = technology_family if technology_family in ("4G", "5G") else None
+            cell_family = user_family or configured_family
+            out = []
+            for site in merged:
+                cells = self._filter_cells_for_family(site.get("cells") or [], cell_family)
+                for c in cells:
+                    annotated = self._annotate_cell(c)
+                    out.append({
+                        "id":        annotated.get("id", ""),
+                        "name":      annotated.get("label") or annotated.get("id", ""),
+                        "family":    annotated.get("family"),
+                        "site_id":   site.get("id"),
+                        "site_name": site.get("name") or site.get("id"),
+                    })
+            return out
+        except Exception as e:
+            logger.error(f"get_event_cells error: {e}")
+            return []
+
     def get_clusters(self, event_id: str) -> list:
         """Lista os clusters do evento (cadastrados no servidor central) para o
         dropdown do app, incluindo o recorte granular de células."""
@@ -1070,6 +1100,23 @@ class Api:
             member["site_id"] for member in members
             if member.get("family") in (family, None)
         ]
+
+    @staticmethod
+    def _find_site_for_cell(merged: list[dict], cell_id: str) -> dict | None:
+        """Acha o site fundido dono de uma célula, varrendo o evento inteiro.
+
+        Usado pelo escopo ``scope="cell"`` da Visão Geral, que recebe só o id
+        da célula — ao contrário do gráfico do dashboard, que já sabe o site.
+        """
+        wanted = str(cell_id or "").upper()
+        if not wanted:
+            return None
+        for site in merged:
+            for cell in site.get("cells") or []:
+                cell_key = cell if isinstance(cell, str) else cell.get("id", "")
+                if str(cell_key).upper() == wanted:
+                    return site
+        return None
 
     def _owner_site_id_for_cell(self, site: dict | None, cell_id: str, fallback: str) -> str:
         if not site or not cell_id:
@@ -1294,11 +1341,23 @@ class Api:
 
         ``scope="cluster"`` combina linhas SITE para membros completos. Quando o
         cluster contém uma seleção parcial, somente as linhas CELL explicitamente
-        escolhidas entram no agregado.
+        escolhidas entram no agregado. ``scope="cell"`` acha o site dono de
+        ``scope_id`` no evento inteiro e cai no caminho de célula única.
         """
         try:
             config = db.get_event(event_id) or _active_event
             merged = self._merged_sites(config) if config else []
+
+            if scope == "cell":
+                owner = self._find_site_for_cell(merged, scope_id)
+                if not owner:
+                    return {
+                        "ok": True, "labels": [], "values": [], "series": [],
+                        "cells_data": {}, "gaps": [],
+                        "thresholds": self._metric_thresholds(event_id, metric),
+                    }
+                site_id = owner["id"]
+                cell_id = scope_id
 
             if scope == "cluster":
                 family = technology_family if technology_family in ("4G", "5G") else None
@@ -1431,7 +1490,7 @@ class Api:
         serie e quebrar a sincronizacao dos graficos.
         """
         family = technology_family if technology_family in KPI_OVERVIEW_METRICS else None
-        normalized_scope = scope if scope in ("site", "cluster") else None
+        normalized_scope = scope if scope in ("site", "cluster", "cell") else None
         if not family:
             return {
                 "ok": False, "error": "technology_family deve ser 4G ou 5G",
@@ -1440,7 +1499,7 @@ class Api:
             }
         if not normalized_scope or not scope_id:
             return {
-                "ok": False, "error": "scope deve ser site ou cluster e possuir scope_id",
+                "ok": False, "error": "scope deve ser site, cluster ou cell e possuir scope_id",
                 "labels": [], "metrics": {}, "units": {}, "thresholds": {},
                 "reasons": {},
             }
@@ -1459,8 +1518,8 @@ class Api:
                     "__all__",
                     None,
                     family,
-                    "cluster" if normalized_scope == "cluster" else None,
-                    scope_id if normalized_scope == "cluster" else None,
+                    normalized_scope if normalized_scope in ("cluster", "cell") else None,
+                    scope_id if normalized_scope in ("cluster", "cell") else None,
                 )
                 if not result.get("ok", False):
                     raise RuntimeError(
@@ -1520,7 +1579,7 @@ class Api:
 
     def get_kpi_overview_multi(self, event_id: str, scopes: list,
                                technology_family: str, minutes: int = 60) -> dict:
-        """Compara varios escopos (clusters e/ou sites) na mesma grade temporal.
+        """Compara varios escopos (clusters, sites e/ou celulas) na mesma grade temporal.
 
         Cada escopo reutiliza :meth:`get_kpi_overview`, entao a expansao de site
         fundido e a agregacao de cluster continuam saindo de um unico lugar. A
@@ -1543,7 +1602,7 @@ class Api:
                 continue
             scope = entry.get("scope")
             scope_id = entry.get("scope_id") or entry.get("id")
-            if scope not in ("site", "cluster") or not scope_id:
+            if scope not in ("site", "cluster", "cell") or not scope_id:
                 continue
             key = (scope, str(scope_id))
             if key not in seen:
@@ -1552,7 +1611,7 @@ class Api:
 
         if not requested:
             return {
-                "ok": False, "error": "informe ao menos um cluster ou site",
+                "ok": False, "error": "informe ao menos um cluster, site ou célula",
                 "labels": [], "series": [], "units": {}, "thresholds": {},
                 "reasons": {},
             }
