@@ -3,8 +3,8 @@ import math
 import pytest
 
 from core.kpi_formulas import (
-    CATALOG, InvalidKpi, NotApplicable, calculate, catalog_for_api,
-    check_throughput_floor, definition, sample_size,
+    CATALOG, InvalidKpi, KpiDefinition, NotApplicable, calculate, catalog_for_api,
+    check_throughput_floor, definition, sample_size, to_canonical,
     threshold_object, threshold_value,
 )
 
@@ -182,3 +182,84 @@ def test_threshold_object_keeps_new_format_as_is():
 
 def test_threshold_object_is_none_when_missing():
     assert threshold_object(None) is None
+
+# ── Fase 3 / B1 — unidade canônica na leitura ──────────────────────────────────
+
+def test_every_definition_declares_base_unit():
+    """Sem base declarada, o frontend recebe unidade implícita — o defeito B1."""
+    faltando = [(item.id, item.technology) for item in CATALOG if not item.base_unit]
+    assert faltando == []
+
+
+def test_to_canonical_converts_5g_kbit_to_bit():
+    assert to_canonical("traffic_volume_dl_sa", "5G_NRDUCELL", 1.0) == 1000.0
+
+
+def test_to_canonical_converts_throughput_mbit_per_second_to_bit_per_second():
+    assert to_canonical("throughput_dl", "4G", 6.776) == pytest.approx(6_776_000.0)
+    assert to_canonical("throughput_ul", "5G_NRDUCELL", 1.0) == pytest.approx(1e6)
+
+
+def test_to_canonical_leaves_unknown_technology_untouched():
+    """Banco anterior à coluna ``technology`` (volume em MB) fica fora do contrato.
+
+    O par ``(metric, technology)`` é o que identifica a base gravada; sem ele
+    não há como escolher fator, e inventar um seria pior que não converter.
+    """
+    assert to_canonical("traffic_volume_dl", None, 123.0) == 123.0
+    assert to_canonical("traffic_volume_dl", "", 123.0) == 123.0
+
+
+def test_to_canonical_leaves_metric_outside_the_catalog_untouched():
+    assert to_canonical("dl_prb_usage", "4G", 42.0) == 42.0
+
+
+def test_percentage_and_dbm_metrics_are_not_rescaled():
+    assert to_canonical("utilization_dl", "4G", 80.0) == 80.0
+    assert to_canonical("availability", "5G_NRCELL", 100.0) == 100.0
+    assert to_canonical("interference_ul", "5G_NRDUCELL", -110.0) == -110.0
+    assert to_canonical("user_count", "5G_NRCELL", 19.356) == 19.356
+
+
+def test_4g_and_5g_volume_share_the_same_base_unit():
+    """4G grava bit e 5G grava kbit sob nomes de métrica diferentes; a base é uma só."""
+    quatro_g = definition("traffic_volume_dl", "4G")
+    cinco_g = definition("traffic_volume_dl_nsa", "5G_NRDUCELL")
+    assert quatro_g.base_unit == cinco_g.base_unit == "bit"
+    assert (quatro_g.to_base, cinco_g.to_base) == (1.0, 1e3)
+
+
+def test_paired_throughput_metrics_share_the_same_base_unit():
+    for technology in ("4G", "5G_NRDUCELL"):
+        dl = definition("throughput_dl", technology)
+        ul = definition("throughput_ul", technology)
+        assert dl.base_unit == ul.base_unit == "bit/s"
+
+
+def test_catalog_announces_the_canonical_unit_and_keeps_the_oss_one():
+    rows = {(item["id"], item["technology"]): item for item in catalog_for_api()}
+    volume = rows[("traffic_volume_dl_sa", "5G_NRDUCELL")]
+    assert (volume["unit"], volume["oss_unit"]) == ("bit", "kbit")
+    throughput = rows[("throughput_dl", "4G")]
+    assert (throughput["unit"], throughput["oss_unit"]) == ("bit/s", "Mbit/s")
+
+
+def test_legacy_traffic_volume_keeps_monitoring_available():
+    """B8: removê-las do seletor mataria a coluna "Participação" da lista de sites."""
+    oferecidos = {(item["id"], item["technology"]) for item in catalog_for_api()}
+    assert ("traffic_volume_dl", "4G") in oferecidos
+    assert ("traffic_volume_ul", "4G") in oferecidos
+
+
+def test_legacy_traffic_volume_is_named_by_the_data_not_by_the_code():
+    """B8: "(legado)" descrevia a origem do código e "contador OSS" não é unidade."""
+    for metric in ("traffic_volume_dl", "traffic_volume_ul"):
+        item = definition(metric, "4G")
+        assert "legado" not in item.name
+        assert item.unit == "bit"
+
+
+def test_definition_without_a_known_unit_fails_at_import_time():
+    """Unidade nova sem base derruba o import — nunca vira conversão por suposição."""
+    with pytest.raises(ValueError, match="sem base"):
+        KpiDefinition("x", "4G", "X", "Gbit", ("C",), "sum", lambda c, p: 0.0)

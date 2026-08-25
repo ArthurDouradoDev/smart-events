@@ -9,6 +9,7 @@
 
 import State from "./state.js";
 import API from "./bridge.js";
+import { escalaDaMetrica, esquecerEscalas, formatar } from "./units.js";
 
 const PANELS = {
   "4G": [
@@ -59,6 +60,8 @@ let _scopeClusters = [];
 const _selection = { cluster: new Set(), site: new Set() };
 const _hiddenScopes = new Set();
 const _charts = new Map();
+// Escala vigente de cada painel: o tooltip e os ticks precisam da mesma.
+const _panelScales = new Map();
 let _scopeMeta = new Map();
 // A visão pode abrir antes de o app terminar de carregar sites/clusters; nesse
 // caso a semente de seleção é reaplicada quando os dados chegam.
@@ -129,8 +132,16 @@ export function initKpiOverview() {
   State.on("change:clusters", clusters => {
     if (!_isOpen()) _scopeClusters = clusters || [];
   });
-  State.on("change:activeEvent", () => { if (_isOpen()) void _refreshScopeData(); });
-  State.on("change:historicalEvent", () => { if (_isOpen()) void _refreshScopeData(); });
+  // Trocar de evento troca a ordem de grandeza: a memória de escala (compartilhada
+  // com o dashboard, é o mesmo módulo) não pode atravessar essa fronteira.
+  State.on("change:activeEvent", () => {
+    esquecerEscalas();
+    if (_isOpen()) void _refreshScopeData();
+  });
+  State.on("change:historicalEvent", () => {
+    esquecerEscalas();
+    if (_isOpen()) void _refreshScopeData();
+  });
 }
 
 function _isOpen() {
@@ -605,10 +616,22 @@ function _renderCharts(response) {
     const datasets = _datasetsFor(panel, response, scopeCount);
     const hasData = datasets.some(dataset => dataset.data.some(value => value != null));
     card.classList.toggle("is-empty", !hasData);
-    card.querySelector(".kpi-overview-no-data")?.classList.toggle("hidden", hasData);
+    const emptyLabel = card.querySelector(".kpi-overview-no-data");
+    emptyLabel?.classList.toggle("hidden", hasData);
+    if (emptyLabel && !hasData) emptyLabel.textContent = _emptyMessage(panel, response);
+
+    // B4/B5: um degrau de escala por painel — os dois traços de um par
+    // dividem o eixo, então dividir a unidade também é obrigatório.
     const units = [...new Set(panel.metrics.map(metric => response.units?.[metric]).filter(Boolean))];
+    const scale = escalaDaMetrica(
+      `${_family}:${panel.id}`,
+      datasets.map(dataset => dataset.data),
+      units.length === 1 ? units[0] : "",
+    );
+    _panelScales.set(panel.id, scale);
+    datasets.forEach(dataset => { dataset.unitLabel = scale.rotulo || dataset.unit; });
     card.querySelector(".kpi-overview-card-unit").textContent =
-      units.length === 1 ? units[0] : units.join(" / ");
+      units.length === 1 ? scale.rotulo : units.join(" / ");
 
     let chartRef = null;
     canvas.addEventListener("mousemove", event => {
@@ -625,10 +648,26 @@ function _renderCharts(response) {
       type: "line",
       plugins: [_crosshairPlugin],
       data: { labels, datasets },
-      options: _chartOptions(panel, response),
+      options: _chartOptions(panel, response, scale),
     });
     _charts.set(panel.id, chartRef);
   });
+}
+
+/**
+ * B6 — painel vazio não é sempre a mesma coisa.
+ *
+ * "Sem dados" é ausência de coleta; "sem tráfego" é a métrica ficar indefinida
+ * porque não houve tentativa nenhuma naquele minuto (denominador zero), o que é
+ * o caso normal do SA no 5G. O backend decide por métrica em `reasons`; aqui só
+ * se escolhe a frase — um painel pareado só está vazio quando os dois lados
+ * estão, então basta que todos concordem para chamar de "sem tráfego".
+ */
+function _emptyMessage(panel, response) {
+  const reasons = response.reasons || {};
+  const noTraffic = panel.metrics.length
+    && panel.metrics.every(metric => reasons[metric] === "no_traffic");
+  return noTraffic ? "Sem tráfego no período" : "Sem dados no período";
 }
 
 /**
@@ -675,7 +714,7 @@ function _datasetLabel(panel, meta, isUl, scopeCount) {
   return panel.paired ? side : panel.title;
 }
 
-function _chartOptions(panel, response) {
+function _chartOptions(panel, response, scale) {
   const primaryMetric = panel.metrics[0];
   const threshold = response.thresholds?.[primaryMetric] || {};
   // B2: o threshold vem normalizado como {value, unit}.
@@ -717,7 +756,10 @@ function _chartOptions(panel, response) {
       yLeft: {
         position: "left",
         grid: { color: "#21262D" },
-        ticks: { color: "#8B949E", font: { size: 9 }, maxTicksLimit: 4, callback: _formatNumber },
+        ticks: {
+          color: "#8B949E", font: { size: 9 }, maxTicksLimit: 4,
+          callback: value => formatar(value, scale),
+        },
       },
     },
   };
@@ -775,11 +817,12 @@ function _renderTooltip(context, panel) {
   const visible = context.chart.data.datasets
     .map((dataset, position) => ({ dataset, position }))
     .filter(({ position }) => context.chart.isDatasetVisible(position));
+  const scale = _panelScales.get(panel.id) || null;
   const rows = visible.map(({ dataset }) => {
     const value = dataset.data[index];
     return `<div class="kpi-overview-tooltip-row">
       <span><i class="kpi-overview-tooltip-swatch" style="background:${_safeColor(dataset.borderColor)}"></i><em>${_esc(dataset.label)}</em></span>
-      <strong>${value == null ? "—" : `${_formatNumber(value)} ${_esc(dataset.unit)}`}</strong>
+      <strong>${value == null ? "—" : `${formatar(value, scale)} ${_esc(dataset.unitLabel || dataset.unit)}`}</strong>
     </div>`;
   }).join("");
   tooltip.classList.toggle("is-dense", visible.length > 4);
@@ -805,11 +848,6 @@ function _hexToRgba(hex, alpha) {
   if (!match) return `rgba(56, 139, 253, ${alpha})`;
   const value = parseInt(match[1], 16);
   return `rgba(${(value >> 16) & 255}, ${(value >> 8) & 255}, ${value & 255}, ${alpha})`;
-}
-
-function _formatNumber(value) {
-  const numeric = Number(value);
-  return Number.isFinite(numeric) ? numeric.toLocaleString("pt-BR", { maximumFractionDigits: 2 }) : "—";
 }
 
 function _formatTime(value) {

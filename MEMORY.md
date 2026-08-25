@@ -875,3 +875,140 @@ recorte por evento (`tools/prepare_installer_seed.py:130-136`), então os 3 VIPs
 TIM (`20260813-teste`, `baldin-edge60pro`, `douglas`) entram no instalador de Salvador. É o
 comportamento pré-existente do `roadshow-tim`, não uma regressão — mas não foi uma decisão
 deliberada para Salvador.
+
+---
+
+## 2026-08-24 — Fase 3: unidade canônica aplicada na leitura, sem migrar histórico
+
+Terceira fase do plano `docs/plans/2026-08-21-001-fix-kpi-monitoring-unidades-e-escala-plan.md`
+(achados B1 e B8). Fecha o problema de a **mesma grandeza** estar gravada em bases diferentes
+conforme a origem: `traffic_volume_dl` do 4G em **bit**, os `traffic_volume_*` do 5G em
+**kbit**, o throughput das duas em **Mbit/s**, e o banco legado `vips-rio-tim-jun-2026.db` em
+**MB**. Nada na linha denunciava isso — a unidade era implícita no par `(metric, technology)`.
+
+**Decisão travada: o valor gravado não muda, nunca.** O banco continua guardando exatamente o
+que o OSS entrega, e a base comum é aplicada na leitura. Isso preserva a auditoria direta
+contra os CSVs do OSS que o `tools/kpi_crosscheck.py` faz linha a linha — se o gravado fosse
+convertido, o crosscheck perderia a única fonte independente que existe sem VPN. O histórico
+**não é migrado** (B1).
+
+**Onde a conversão mora, e por quê:** em `core/database.py`, no helper `_canonical`, aplicado
+nas seis funções de leitura de KPI. Não em `api/api.py`: `Api.get_kpi_series` tem vários
+pontos de retorno (cluster, site fundido, família única) e converter em cada um é o tipo de
+duplicação que produz divergência entre célula, site e cluster. A camada de banco é o funil
+real, a conversão é linear, e toda agregação a jusante continua correta. Verificado: nenhum
+caminho lê do banco e regrava, então não há risco de conversão dupla ao persistir.
+
+**A base é derivada da unidade do OSS, não repetida em 26 linhas.** `_UNIT_TO_BASE` mapeia
+`unit -> (base_unit, to_base)` e `KpiDefinition.__post_init__` preenche os dois campos novos.
+Uma definição com unidade sem base declarada **quebra o import**, não a leitura: é preferível
+o app não subir a inventar unidade canônica por suposição — foi exatamente esse silêncio que
+produziu o B1. Fatores: `%`, `dBm`, `ms` e `usuários` ficam em 1,0; `bit`→`bit` ×1; `kbit`→
+`bit` ×1e3; `Mbit/s`→`bit/s` ×1e6.
+
+**Linha sem `technology` volta intacta, por decisão explícita.** `to_canonical` exige o par
+`(metric, technology)`; sem tecnologia não há como saber a base gravada, e aplicar o fator do
+4G por engano seria pior que não converter. Cuidado não óbvio: `definition(metric, None)`
+casa com a **primeira** tecnologia do catálogo, então o guard `if not technology` é
+obrigatório e não é redundante. Bancos anteriores à coluna ficam fora do contrato.
+
+**Contrato da API mudou:** `catalog_for_api()` passa a anunciar `unit` = unidade **canônica** e
+mantém a crua como `oss_unit`. `get_kpi_catalog` e `get_kpi_overview` herdam de graça — nenhum
+dos dois precisou de edição, porque os dois já liam do catálogo.
+
+**B8 — o rótulo "legado".** `traffic_volume_dl`/`_ul` do 4G perderam o "(legado)" (descrevia a
+origem do código, não o dado) e a unidade "contador OSS" (que não é unidade) virou `bit`.
+`monitoring_available` continua `True` de propósito: removê-las do seletor mataria a coluna
+**"Participação"** da lista de sites, que só aparece com uma delas selecionada
+(`frontend/js/kpi.js:355-357`).
+
+**Efeito visível, esperado e transitório:** os números pioraram de ler. Medido no evento real
+`testesantoamaro`: `traffic_volume_dl_nsa` foi de 8,29e5 para 8,29e8, `throughput_dl` de 431
+para 4,31e8. Quem formata isso é a Fase 4 — **não mostrar a Fase 3 sozinha ao usuário final.**
+
+**Ganho já disponível para a Fase 4:** os painéis pareados passaram a ter unidade idêntica nas
+duas séries (`bit/s` nos dois throughputs, `bit` nos quatro volumes, `%` nas duas utilizações).
+É a pré-condição do B3 (eixo único) e do fim do rótulo `"DL / UL"` no cabeçalho.
+
+**Gate:** `pytest tests/ -q` → **498 passed, 10 skipped** (baseline era 477/10; os 10 skips são
+os de VPN, iguais). `kpi_crosscheck --raw` devolveu saída **idêntica** à do HEAD anterior
+(20/24), confirmando que nada no banco mudou — comparado rodando o script do HEAD num
+worktree temporário contra o mesmo banco.
+
+**Ressalva sobre o 20/24, que não é regressão da Fase 3:** o banco de `testesantoamaro` tem
+linhas **anteriores e posteriores** à Fase 1 misturadas (a `availability` 5G aparece com 20,0 e
+com 100,0), e os CSVs de `csvs_reference/` são de 2026-08-21, dentro da janela pré-Fase 1.
+As quatro métricas que divergem (`availability` 0,2; `throughput_dl`/`_ul` 0,001;
+`traffic_volume_dl_sa` inf, de 2 linhas negativas) são exatamente os bugs que a Fase 1
+corrigiu, congelados nas linhas velhas. O 22/22 do plano exige recoletar aquela janela — não é
+alcançável sem VPN e não é trabalho da Fase 3.
+
+---
+
+## 2026-08-24 — Fase 4: escala automática, eixo único e "sem tráfego" ≠ "sem dados"
+
+Quarta e última fase do plano
+`docs/plans/2026-08-21-001-fix-kpi-monitoring-unidades-e-escala-plan.md` (achados B3, B4, B5 e
+B6). A Fase 3 deixou todo valor na unidade-base e, com isso, números de 7 a 9 dígitos na tela;
+esta fase resolve a leitura sem tocar em nenhum valor — `kpi_crosscheck` continua **20/24**,
+byte a byte igual ao da Fase 3.
+
+**`frontend/js/units.js` é o único formatador do app.** Eram quatro implementações
+divergentes (`toFixed(2)` em `kpi.js` e `vip.js`, `toLocaleString` em `kpi_overview.js`).
+Agora as três telas importam `formatar`. Duas mudanças visíveis caem junto e são
+intencionais: o número passa a ser **pt-BR** em toda a lista de sites e nos tooltips do
+dashboard (`1.234,50`, não `1234.50`), e o sufixo de percentual perdeu o espaço (`91,00%`),
+que só existia no caminho do catálogo e não no fallback.
+
+**A escala é decimal e sobe a cada 1000** (`bit → kbit → Mbit → Gbit → Tbit`). `kbit` é 10³
+por definição em telecom — o `KiB`/`MiB` de sistema de arquivos daria 2,4% de erro por degrau.
+Só `bit` e `bit/s` escalam; `%`, `dBm`, `ms` e `usuários` passam intactos. A lista de
+escaláveis é **derivada** do mapa de degraus, para as duas não divergirem.
+
+**O degrau é memorizado por métrica, e a memória mora no módulo — não no `State`.** O plano
+dizia `State`; na implementação isso não agrega nada (a memória não tem assinante, não é dado
+de evento e não participa do pub/sub) e criaria acoplamento de `units.js` com o store. Um
+`Map` no módulo tem o mesmo tempo de vida e uma superfície menor. `esquecerEscalas()` é
+chamado na troca de evento pelos dois consumidores.
+
+**Consequência não óbvia dessa decisão:** o import de `units.js` **não pode** levar o `?v=`
+de cache-busting que o app usa nos demais módulos. Especificadores diferentes criariam
+instâncias diferentes do módulo e cada tela teria a sua memória — o degrau deixaria de ser
+comum, em silêncio. Travado por `test_importadores_usam_o_mesmo_especificador_de_units`.
+
+**Escala fixa por métrica, com histerese (sobe em 1000, desce só abaixo de 900).** Medido no
+evento real: no mesmo instante, um site tinha 3,3e7 bit e outro 2,5e9 bit — com escala por
+painel sairiam "33,5 M" e "2,49 G", e 33,5 *parece* maior que 2,49. E na janela de 15 min o
+degrau de um deles trocaria sozinho 17 vezes em 427 pontos.
+
+**Os dados do gráfico continuam na unidade-base; quem divide é a formatação.** O eixo do
+Chart.js opera no espaço canônico e só o `callback` do tick e o tooltip aplicam o divisor.
+Isso evita conversão dupla e — mais importante — **o threshold não precisou ser tocado**:
+`_thresholdAnnotation` desenha em `yLeft` no mesmo espaço dos dados, então a linha tracejada
+continua exata.
+
+**B3 (eixo único) já estava no código** desde a visão geral multi-escopo; a Fase 4 apenas o
+travou com teste nos quatro painéis pareados do 5G, junto com o cabeçalho que deixou de cair
+em `"DL / UL"`.
+
+**B6 — `reason` por métrica vem da grade, não do `not_applicable`.** O plano supunha propagar
+o contador do ciclo de coleta; ele nunca foi persistido por métrica (é contado em memória
+pelo collector e só vai para o log). A informação equivalente está no banco: a janela só tem
+`labels` se alguma métrica produziu valor, então `labels` vazio é **"no_data"**, e métrica sem
+ponto numa janela com coleta é **"no_traffic"**. No multi-escopo o melhor motivo vence — um
+escopo com tráfego basta para o painel não estar vazio.
+
+**Mock com ordem de grandeza canônica.** `bridge.js` passou a multiplicar throughput e volume
+por 1e6/1e8 e o catálogo mock anuncia `bit/s`/`bit`. Sem isso o Playwright validaria uma
+escala que não existe em produção — nenhuma célula real faz 91 bit/s.
+
+**Fora do escopo, com motivo:** `templates/report/report.js` **não** foi migrado para
+`units.js`. Verificado: o relatório é alimentado por `sample_data.js`, um dataset estático de
+strings **já formatadas** (`"2.05k"`, `"310"`); não existe caminho de valor de KPI vivo até
+ele. Migrá-lo seria escrever código para um consumidor que não existe. Quando o relatório for
+ligado ao dado real, é `units.js` que ele deve usar.
+
+**Gate:** `pytest tests/ -q` → **518 passed, 10 skipped** (baseline da Fase 3 era 498/10; os
+10 skips são os de VPN, iguais). `kpi_crosscheck --event testesantoamaro` → **20/24**,
+idêntico ao da Fase 3 e pelas mesmas quatro divergências herdadas de linhas anteriores à
+Fase 1.

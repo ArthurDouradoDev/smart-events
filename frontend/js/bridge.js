@@ -73,6 +73,9 @@ const _vipSeriesScenario = new URLSearchParams(window.location.search).get("vipS
 const _vpnScenario = new URLSearchParams(window.location.search).get("vpnScenario") || "connected";
 const _eventDropdownScenario = new URLSearchParams(window.location.search).get("eventDropdownScenario") || "default";
 const _kpiTechnologyScenario = new URLSearchParams(window.location.search).get("kpiTechnology") || "4G";
+// Visão geral: "empty" devolve a janela sem nenhuma coleta, para exercitar a
+// distinção do B6 entre "sem dados" e "sem tráfego".
+const _kpiOverviewScenario = new URLSearchParams(window.location.search).get("kpiOverview") || "default";
 const _vipErrorOnceSeen = new Set(); // nomes de VIP já vistos pelo cenário error_once
 let _vpnProbeCount = 0;
 let _eventActivated = false;
@@ -103,13 +106,22 @@ function _mockEvents() {
   }];
 }
 
+// Fase 3: throughput e volume chegam ao frontend em bit/s e bit. O mock respeita
+// a ordem de grandeza canônica, senão a tela exercitaria uma escala que não
+// existe em produção — nenhuma célula real faz 91 bit/s.
+const _CANONICAL_MAGNITUDE = 1e6;
+
+function _mockMagnitude(metric) {
+  return /throughput|traffic_volume/.test(String(metric || "")) ? _CANONICAL_MAGNITUDE : 1;
+}
+
 function _mockKpiCatalog() {
   if (_kpiTechnologyScenario === "5G_NRDUCELL") {
     return { ok: true, technologies: ["5G_NRDUCELL"], metrics: [
       {id:"utilization_dl", technology:"5G_NRDUCELL", name:"DL PRB Utility", unit:"%", site_aggregation:"recalculate"},
       {id:"utilization_ul", technology:"5G_NRDUCELL", name:"UL PRB Utility", unit:"%", site_aggregation:"recalculate"},
-      {id:"throughput_dl", technology:"5G_NRDUCELL", name:"Throughput DL", unit:"Mbit/s", site_aggregation:"sum"},
-      {id:"throughput_ul", technology:"5G_NRDUCELL", name:"Throughput UL", unit:"unidade OSS pendente", site_aggregation:"sum"},
+      {id:"throughput_dl", technology:"5G_NRDUCELL", name:"Throughput DL", unit:"bit/s", site_aggregation:"recalculate"},
+      {id:"throughput_ul", technology:"5G_NRDUCELL", name:"Throughput UL", unit:"bit/s", site_aggregation:"recalculate"},
       {id:"interference_ul", technology:"5G_NRDUCELL", name:"UL Interference Médio", unit:"dBm", site_aggregation:"mean"},
     ]};
   }
@@ -118,7 +130,7 @@ function _mockKpiCatalog() {
     {id:"availability", technology:"4G", name:"Availability", unit:"%", site_aggregation:"recalculate"},
     {id:"drop_rate", technology:"4G", name:"Drop Dados", unit:"%", site_aggregation:"recalculate"},
     {id:"utilization_dl", technology:"4G", name:"DL PRB Utility", unit:"%", site_aggregation:"recalculate"},
-    {id:"throughput_dl", technology:"4G", name:"Throughput DL", unit:"Mbit/s", site_aggregation:"sum"},
+    {id:"throughput_dl", technology:"4G", name:"Throughput DL", unit:"bit/s", site_aggregation:"recalculate"},
   ]};
 }
 
@@ -256,11 +268,14 @@ const _mock = {
       const cells = family
         ? (s.cells || []).filter(c => !c.family || c.family === family)
         : (s.cells || []);
+      // Participação é percentual e não escala; o valor cru da métrica, sim.
+      const isShare = ["user_count","traffic_volume_dl","traffic_volume_ul"].includes(metric);
       return {
         ...s,
         cells,
-        metric_value: metric === "user_count" ? Math.round(100 / arr.length) : s.utilization,
-        metric_is_share: ["user_count","traffic_volume_dl","traffic_volume_ul"].includes(metric),
+        metric_value: metric === "user_count" ? Math.round(100 / arr.length)
+          : isShare ? s.utilization : s.utilization * _mockMagnitude(metric),
+        metric_is_share: isShare,
         cluster_ids: _clusterIdsFor(s.id),
       };
     }).filter(s => !family || (s.cells && s.cells.length) || !(s.tech_families || []).length);
@@ -309,7 +324,9 @@ const _mock = {
     const gapIdx = Math.floor(n / 2);
     const gaps = [{ from_idx: gapIdx, to_idx: gapIdx + 3, seconds: 180 }];
     const thresholds = { warning: { value:80, unit:"%" }, critical: { value:95, unit:"%" } };
-    const makeValues = (offset, speed=0.2) => labels.map((_, i) => +(offset + Math.sin(i * speed) * 12).toFixed(1));
+    const magnitude = _mockMagnitude(metric);
+    const makeValues = (offset, speed=0.2) => labels.map(
+      (_, i) => +((offset + Math.sin(i * speed) * 12) * magnitude).toFixed(1));
     const family = technology_family === "4G" || technology_family === "5G" ? technology_family : null;
 
     if (scope === "cluster") {
@@ -368,17 +385,30 @@ const _mock = {
          "utilization_dl", "utilization_ul", "throughput_dl", "throughput_ul",
          "traffic_volume_dl_sa", "traffic_volume_ul_sa",
          "traffic_volume_dl_nsa", "traffic_volume_ul_nsa"];
+    // Fase 3: a API anuncia a unidade canônica, não a bruta do OSS.
     const unitsByMetric = {
       accessibility: "%", availability: "%", drop_rate: "%",
       utilization_dl: "%", utilization_ul: "%", interference_ul: "dBm",
-      throughput_dl: "Mbit/s", throughput_ul: family === "5G" ? "unidade OSS pendente" : "Mbit/s",
-      user_count: "usuários", traffic_volume_dl_sa: "kbit", traffic_volume_ul_sa: "kbit",
-      traffic_volume_dl_nsa: "kbit", traffic_volume_ul_nsa: "kbit",
+      throughput_dl: "bit/s", throughput_ul: "bit/s", user_count: "usuários",
+      traffic_volume_dl_sa: "bit", traffic_volume_ul_sa: "bit",
+      traffic_volume_dl_nsa: "bit", traffic_volume_ul_nsa: "bit",
     };
+    // Ordem de grandeza canônica: sem isso o Playwright validaria uma escala
+    // que não existe em produção (throughput em Mbit/s, volume em Gbit).
+    const magnitudeByMetric = {
+      throughput_dl: 1e6, throughput_ul: 1e6,
+      traffic_volume_dl_nsa: 1e8, traffic_volume_ul_nsa: 1e8,
+    };
+    // B6: o SA fica sem tentativa nenhuma na maior parte dos minutos — no evento
+    // real ele foi 0,049% do tráfego. O painel sai vazio por falta de tráfego,
+    // não por falta de coleta, e a tela precisa saber diferenciar.
+    const noTrafficMetrics = new Set(
+      family === "5G" ? ["traffic_volume_dl_sa", "traffic_volume_ul_sa"] : []);
     const count = minutes === 0 ? 73 : Math.max(16, Number(minutes) + 1);
     const now = Math.floor(Date.now() / 60000) * 60000;
-    const labels = Array.from({ length: count }, (_, index) =>
-      new Date(now - (count - 1 - index) * 60000).toISOString());
+    const labels = _kpiOverviewScenario === "empty" ? [] : Array.from(
+      { length: count }, (_, index) =>
+        new Date(now - (count - 1 - index) * 60000).toISOString());
     // Deslocamento derivado do id: dois clusters comparados lado a lado precisam
     // render seres visivelmente diferentes no modo mock.
     const scopeSeed = [...String(scope_id || "")].reduce((acc, ch) => acc + ch.charCodeAt(0), 0);
@@ -388,13 +418,18 @@ const _mock = {
       metrics[metric] = labels.map((_, index) => {
         // Buracos deliberados provam que todas as métricas continuam na mesma grade.
         if (metric === "availability" && index > 0 && index % 11 === 0) return null;
+        if (noTrafficMetrics.has(metric)) return null;
         const base = metric.includes("interference") ? -102 : 22 + metricIndex * 5 + scopeOffset;
-        return +(base + Math.sin(index * (0.12 + metricIndex * 0.008)) * (metric.includes("interference") ? 4 : 9)).toFixed(2);
+        const value = base + Math.sin(index * (0.12 + metricIndex * 0.008)) * (metric.includes("interference") ? 4 : 9);
+        return +(value * (magnitudeByMetric[metric] || 1)).toFixed(2);
       });
     });
+    const collected = labels.length > 0;
     return {
       ok: true, scope, scope_id, technology_family: family, labels, metrics,
       units: Object.fromEntries(metricIds.map(metric => [metric, unitsByMetric[metric] || ""])),
+      reasons: Object.fromEntries(metricIds.map(metric => [metric,
+        !collected ? "no_data" : (noTrafficMetrics.has(metric) ? "no_traffic" : "ok")])),
       thresholds: Object.fromEntries(metricIds.map(metric => [metric,
         { warning: { value:80, unit:"%" }, critical: { value:95, unit:"%" } }])),
     };
@@ -411,7 +446,7 @@ const _mock = {
       entries.push({ scope, scope_id: String(scopeId) });
     });
     if (!entries.length) {
-      return { ok: false, error: "informe ao menos um cluster ou site", labels: [], series: [], units: {}, thresholds: {} };
+      return { ok: false, error: "informe ao menos um cluster ou site", labels: [], series: [], units: {}, reasons: {}, thresholds: {} };
     }
     const responses = entries.map(entry => ({
       entry,
@@ -432,7 +467,8 @@ const _mock = {
     });
     return {
       ok: true, technology_family: responses[0].data.technology_family, labels, series,
-      units: responses[0].data.units, thresholds: responses[0].data.thresholds, failures: [],
+      units: responses[0].data.units, reasons: responses[0].data.reasons,
+      thresholds: responses[0].data.thresholds, failures: [],
     };
   },
   get_alerts: (event_id, timestamp=null) => ([

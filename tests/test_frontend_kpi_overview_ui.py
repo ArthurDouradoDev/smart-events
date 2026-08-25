@@ -59,8 +59,8 @@ def _overview(playwright):
         browser.close()
 
 
-def _open_overview(page, url):
-    page.goto(f"{url}/index.html", wait_until="domcontentloaded")
+def _open_overview(page, url, query=""):
+    page.goto(f"{url}/index.html{query}", wait_until="domcontentloaded")
     page.locator(".site-item").first.wait_for(state="visible", timeout=8000)
     page.locator("#open-kpi-overview").click()
     page.wait_for_function(
@@ -332,5 +332,125 @@ def test_sem_escopo_selecionado_a_visao_pede_uma_selecao():
                 error = page.locator("#kpi-overview-error")
                 error.wait_for(state="visible", timeout=5000)
                 assert "Selecione ao menos um cluster ou site" in error.inner_text()
+    except Exception as exc:  # pragma: no cover
+        _skip_if_no_browser(exc)
+
+
+def _abrir_5g(page, url, query=""):
+    """Visão geral no 5G comparando os dois clusters — o cenário dos pares."""
+    _open_overview(page, url, query)
+    _clear_selection(page)
+    page.locator('#kpi-overview-family-tabs [data-family="5G"]').click()
+    _pick(page, "kpi-overview-cluster-picker", "Todos os clusters")
+    page.wait_for_function(
+        """() => {
+          const canvas = document.querySelector(
+            '.kpi-overview-card[data-panel-id="throughput"] canvas');
+          const chart = Chart.getChart(canvas);
+          return !!chart && chart.data.datasets.length === 4;
+        }""",
+        timeout=8000,
+    )
+
+
+_PAIRED_PANELS = ("prb_utility", "throughput", "traffic_volume_sa",
+                  "traffic_volume_nsa")
+
+
+def test_paired_panel_uses_single_axis_when_units_match():
+    """B3: com a unidade igual nos dois lados, um segundo eixo só engana.
+
+    O painel PRB é o caso caro: a linha do threshold é desenhada em `yLeft`
+    fixo, então com dois eixos ela cruzava as barras de UL de uma escala que
+    não era a dela.
+    """
+    sync_api = pytest.importorskip("playwright.sync_api")
+    try:
+        with _frontend_server() as url, sync_api.sync_playwright() as playwright:
+            with _overview(playwright) as (page, _browser):
+                _abrir_5g(page, url)
+
+                for panel_id in _PAIRED_PANELS:
+                    panel = page.evaluate(_PANEL_DATASETS, panel_id)
+                    assert panel["axes"] == ["x", "yLeft"], panel_id
+    except Exception as exc:  # pragma: no cover
+        _skip_if_no_browser(exc)
+
+
+def test_panel_header_shows_unit_not_dl_ul():
+    """B4/B5: o cabeçalho traz a unidade escalada, não o rótulo de fallback."""
+    sync_api = pytest.importorskip("playwright.sync_api")
+    try:
+        with _frontend_server() as url, sync_api.sync_playwright() as playwright:
+            with _overview(playwright) as (page, _browser):
+                _abrir_5g(page, url)
+
+                unidades = {
+                    panel_id: page.locator(
+                        f'.kpi-overview-card[data-panel-id="{panel_id}"] '
+                        '.kpi-overview-card-unit').inner_text()
+                    for panel_id in _PAIRED_PANELS
+                }
+
+                assert "DL / UL" not in unidades.values()
+                assert unidades["prb_utility"] == "%"
+                # Throughput em bit/s na base, ~1e7 no mock: sobe dois degraus.
+                assert unidades["throughput"] == "Mbit/s"
+                # Volume em bit na base, ~1e9 no mock: sobe três.
+                assert unidades["traffic_volume_nsa"] == "Gbit"
+    except Exception as exc:  # pragma: no cover
+        _skip_if_no_browser(exc)
+
+
+def test_eixo_e_tooltip_dividem_o_mesmo_degrau_de_escala():
+    """O tick e o tooltip não podem divergir: é o mesmo número na mesma tela."""
+    sync_api = pytest.importorskip("playwright.sync_api")
+    try:
+        with _frontend_server() as url, sync_api.sync_playwright() as playwright:
+            with _overview(playwright) as (page, _browser):
+                _abrir_5g(page, url)
+
+                rotulos = page.evaluate(
+                    """() => {
+                      const canvas = document.querySelector(
+                        '.kpi-overview-card[data-panel-id="traffic_volume_nsa"] canvas');
+                      const chart = Chart.getChart(canvas);
+                      const callback = chart.options.scales.yLeft.ticks.callback;
+                      return [callback(2e9), callback(2.5e9),
+                              chart.data.datasets[0].unitLabel];
+                    }"""
+                )
+
+                # 2e9 bit lidos em Gbit: "2", não "2.000.000.000".
+                assert rotulos == ["2", "2,5", "Gbit"]
+    except Exception as exc:  # pragma: no cover
+        _skip_if_no_browser(exc)
+
+
+def test_empty_panel_distinguishes_no_traffic_from_no_data():
+    """B6: métrica indefinida por falta de tentativa não é falha de coleta."""
+    sync_api = pytest.importorskip("playwright.sync_api")
+    try:
+        with _frontend_server() as url, sync_api.sync_playwright() as playwright:
+            with _overview(playwright) as (page, _browser):
+                # O SA do mock não tem tráfego nenhum, como no evento real.
+                _abrir_5g(page, url)
+                vazio = page.locator(
+                    '.kpi-overview-card[data-panel-id="traffic_volume_sa"] '
+                    '.kpi-overview-no-data')
+                vazio.wait_for(state="visible", timeout=5000)
+                assert vazio.inner_text() == "Sem tráfego no período"
+                assert page.locator(
+                    '.kpi-overview-card[data-panel-id="throughput"] '
+                    '.kpi-overview-no-data').is_hidden()
+
+            with _overview(playwright) as (page, _browser):
+                # Nenhuma coleta na janela: nenhum painel pode falar de tráfego.
+                _abrir_5g(page, url, query="?kpiOverview=empty")
+                textos = page.locator(
+                    ".kpi-overview-card.is-empty .kpi-overview-no-data"
+                ).all_inner_texts()
+                assert len(textos) == 9
+                assert set(textos) == {"Sem dados no período"}
     except Exception as exc:  # pragma: no cover
         _skip_if_no_browser(exc)

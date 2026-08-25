@@ -4,6 +4,7 @@
 
 import API   from "./bridge.js";
 import State from "./state.js";
+import { formatar } from "./units.js";
 
 const STATUS_COLORS = {
   ok:       "#3FB950",
@@ -51,9 +52,10 @@ let _lastFocusedEl = null;   // elemento a receber foco de volta ao fechar
 const _WINDOWS = ["today", "3d", "7d", "all"];
 const VIP_MAX_RENDER_POINTS = 480;
 
+// RSRP e RSRQ são dBm/dB: não escalam (ver ESCALAVEIS em units.js). O que se
+// ganha aqui é o mesmo formato de número do resto do app, não a escala.
 function _formatNumber(value) {
-  const numeric = Number(value);
-  return Number.isFinite(numeric) ? numeric.toFixed(2) : "—";
+  return formatar(value, null, { minimoDeCasas: 2 });
 }
 
 // B2: threshold legado é número cru; o novo formato é {value, unit}.

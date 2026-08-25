@@ -31,6 +31,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from core.kpi_formulas import (  # noqa: E402
     CATALOG, InvalidKpi, calculate, check_throughput_floor, definitions_for,
+    to_canonical,
 )
 
 _CELL_NAME = re.compile(r"Cell Name\s*=\s*([^,]+)", re.I)
@@ -100,8 +101,18 @@ def _stored_values(db_path: Path, event_id: str) -> dict[tuple, float]:
             for cell, timestamp, metric, technology, value in rows}
 
 
-def _compare(csv_dir: Path, stored: dict, offset_min: int) -> tuple[dict, list, list]:
-    """Devolve (razões por métrica, exemplos, suspeitas de unidade)."""
+def _compare(csv_dir: Path, stored: dict, offset_min: int,
+             raw: bool = True) -> tuple[dict, list, list]:
+    """Devolve (razões por métrica, exemplos, suspeitas de unidade).
+
+    Com ``raw=True`` compara o valor **gravado** contra o CSV, na unidade que o
+    OSS entrega — é a checagem de não-regressão: a Fase 3 converte na leitura e
+    não pode ter mexido em nada no banco.  Com ``raw=False`` os dois lados
+    passam por ``to_canonical`` antes da comparação, que é o que a API serve;
+    isso não reprova um fator errado (ele incide nos dois lados), mas exercita
+    a conversão em todo par ``(metric, technology)`` que o evento real produz e
+    imprime os números na ordem de grandeza que a tela vai exibir.
+    """
     ratios: dict[tuple[str, str], list[float]] = defaultdict(list)
     samples, suspects = [], []
     for path in sorted(csv_dir.glob("*.csv")):
@@ -132,6 +143,9 @@ def _compare(csv_dir: Path, stored: dict, offset_min: int) -> tuple[dict, list, 
                 app = stored.get((cell_id, timestamp, definition.id, technology))
                 if app is None:
                     continue
+                if not raw:
+                    value = to_canonical(definition.id, technology, value)
+                    app = to_canonical(definition.id, technology, app)
                 ratio = app / value if value else (1.0 if app == 0 else float("inf"))
                 ratios[(technology, definition.id)].append(ratio)
                 samples.append((technology, cell_id, timestamp, definition.id, value, app, ratio))
@@ -151,6 +165,9 @@ def main() -> int:
                         help="fuso do OSS em minutos (padrão: -180)")
     parser.add_argument("--examples", type=int, default=6,
                         help="quantas linhas detalhadas exibir (padrão: 6)")
+    parser.add_argument("--raw", action="store_true",
+                        help="compara na unidade gravada; sem a flag, na unidade "
+                             "canônica que a API serve")
     args = parser.parse_args()
 
     db_path = args.data_dir / f"smart_events_{args.event}.db"
@@ -162,12 +179,13 @@ def main() -> int:
         return 2
 
     stored = _stored_values(db_path, args.event)
-    ratios, samples, suspects = _compare(args.csv_dir, stored, args.tz_offset_min)
+    ratios, samples, suspects = _compare(args.csv_dir, stored, args.tz_offset_min, args.raw)
     if not ratios:
         print("Nenhuma medição do CSV encontrou linha correspondente no banco.")
         print("Confira o evento, o fuso (--tz-offset-min) e se os CSVs são do mesmo período.")
         return 2
 
+    print(f"Comparando na unidade {'gravada (OSS)' if args.raw else 'canônica (API)'}.\n")
     for technology, cell_id, timestamp, metric, oss, app, ratio in samples[:args.examples]:
         print(f"{technology:<12}{cell_id:<20}{timestamp}")
         print(f"  {metric:<18}OSS={oss:>12.3f}  APP={app:>12.3f}  "

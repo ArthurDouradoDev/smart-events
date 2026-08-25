@@ -288,7 +288,9 @@ class TestApiKpiCatalog:
         }
         throughput_dl = next(item for item in result["metrics"] if item["id"] == "throughput_dl")
         assert throughput_dl["production_ready"] is True
-        assert throughput_dl["unit"] == "Mbit/s"
+        # Fase 3: o catálogo anuncia a unidade canônica; a do OSS fica ao lado.
+        assert throughput_dl["unit"] == "bit/s"
+        assert throughput_dl["oss_unit"] == "Mbit/s"
 
     def test_evento_sem_task_nao_anuncia_kpi_indisponivel(
             self, api, sample_event):
@@ -918,7 +920,10 @@ class TestKpiOverview:
 
         assert result["ok"] is True
         assert result["scope"] == "cluster"
-        assert result["metrics"]["throughput_dl"] == [30.0]
+        # Fase 3: gravado em Mbit/s, servido em bit/s. A conversão acontece na
+        # leitura, antes da soma do cluster — 10+20 Mbit/s viram 30 Mbit/s em
+        # bit/s, e não uma soma de bases diferentes.
+        assert result["metrics"]["throughput_dl"] == [30_000_000.0]
 
     def test_grade_4g_tem_nove_paineis_sem_rtt(self, api, sample_event):
         database.save_event(sample_event)
@@ -949,6 +954,66 @@ class TestKpiOverview:
             "traffic_volume_ul_nsa",
         }
         assert len(result["metrics"]) == 13
+
+    def test_overview_reports_base_unit_for_paired_panels(self, api, sample_event):
+        """Fase 3: painel pareado só pode ter eixo único se as duas séries batem.
+
+        Antes da Fase 1 o UL do 5G declarava "unidade OSS pendente" e o
+        cabeçalho caía no rótulo "DL / UL"; com a unidade canônica os pares
+        passam a coincidir, o que é o pré-requisito do B3 na Fase 4.
+        """
+        event = _twin_sites_event(sample_event, "overview-5g-unidades")
+        database.save_event(event)
+
+        result = api.get_kpi_overview(
+            event["id"], "site", "SPSMG7", "5G", minutes=0)
+
+        units = result["units"]
+        assert units["throughput_dl"] == units["throughput_ul"] == "bit/s"
+        assert units["traffic_volume_dl_sa"] == units["traffic_volume_dl_nsa"] == "bit"
+        assert units["utilization_dl"] == units["utilization_ul"] == "%"
+
+    def test_overview_reports_reason_per_metric(self, api, sample_event):
+        """B6: painel vazio por falta de tráfego não é painel sem coleta.
+
+        Com coleta na janela, a métrica sem nenhum ponto é a que ficou
+        indefinida — denominador zero, o caso normal do SA no 5G.
+        """
+        event = _twin_sites_event(sample_event, "overview-reasons")
+        database.save_event(event)
+        _insert_site_kpi(
+            event["id"], "1774059", "5G_NRDUCELL", 42.0, metric="user_count")
+
+        result = api.get_kpi_overview(
+            event["id"], "site", "SPSMG7", "5G", minutes=0)
+
+        assert result["reasons"]["user_count"] == "ok"
+        assert result["reasons"]["traffic_volume_dl_sa"] == "no_traffic"
+
+    def test_overview_without_any_collection_reports_no_data(
+            self, api, sample_event):
+        """Sem nenhuma linha na janela, nada é "sem tráfego": não houve coleta."""
+        event = _twin_sites_event(sample_event, "overview-sem-coleta")
+        database.save_event(event)
+
+        result = api.get_kpi_overview(
+            event["id"], "site", "SPSMG7", "5G", minutes=0)
+
+        assert result["labels"] == []
+        assert set(result["reasons"].values()) == {"no_data"}
+
+    def test_overview_4g_and_5g_volumes_report_the_same_base_unit(
+            self, api, sample_event):
+        """B1: a mesma grandeza deixa de sair em bases diferentes por tecnologia."""
+        event = _twin_sites_event(sample_event, "overview-unidade-comum")
+        database.save_event(event)
+
+        quatro_g = api.get_kpi_overview(
+            event["id"], "site", "SPSMG7", "4G", minutes=0)
+        cinco_g = api.get_kpi_overview(
+            event["id"], "site", "SPSMG7", "5G", minutes=0)
+
+        assert quatro_g["units"]["throughput_dl"] == cinco_g["units"]["throughput_dl"]
 
 
 class TestKpiOverviewMulti:
@@ -989,8 +1054,40 @@ class TestKpiOverviewMulti:
         assert result["ok"] is True
         assert result["labels"] == [first, second]
         assert [item["scope_id"] for item in result["series"]] == ["sul", "oeste"]
-        assert result["series"][0]["metrics"]["throughput_dl"] == [10.0, None]
-        assert result["series"][1]["metrics"]["throughput_dl"] == [None, 20.0]
+        assert result["series"][0]["metrics"]["throughput_dl"] == [10_000_000.0, None]
+        assert result["series"][1]["metrics"]["throughput_dl"] == [None, 20_000_000.0]
+
+    def test_reason_consolidado_entre_escopos_usa_o_melhor(self, api, sample_event):
+        """B6: um escopo com tráfego já basta para o painel não estar vazio."""
+        extra_site = {
+            "id": "SR-EXTRA", "name": "SR-EXTRA", "lat": -23.59, "lng": -46.68,
+            "is_event_site": True, "cells": _cells("4G-SR-EXTRA", 2),
+        }
+        event = _event_with_clusters(
+            sample_event,
+            [
+                {"id": "sul", "name": "Sul", "site_ids": ["SR-SPPNB2"]},
+                {"id": "oeste", "name": "Oeste", "site_ids": ["SR-EXTRA"]},
+            ],
+            event_id="overview-multi-reasons",
+            extra_sites=[extra_site],
+        )
+        database.save_event(event)
+        _insert_site_kpi(
+            event["id"], "SR-SPPNB2", "4G", 10.0, metric="throughput_dl")
+
+        result = api.get_kpi_overview_multi(
+            event["id"],
+            [{"scope": "cluster", "scope_id": "sul"},
+             {"scope": "cluster", "scope_id": "oeste"}],
+            "4G",
+            minutes=0,
+        )
+
+        # "sul" tem ponto e "oeste" não tem nada: o painel continua com dados.
+        assert result["reasons"]["throughput_dl"] == "ok"
+        # Nenhum dos dois tem accessibility, mas houve coleta na janela.
+        assert result["reasons"]["accessibility"] == "no_traffic"
 
     def test_mistura_cluster_e_site_preservando_a_ordem_pedida(self, api, sample_event):
         event = _event_with_clusters(

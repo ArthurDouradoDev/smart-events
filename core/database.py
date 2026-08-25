@@ -8,6 +8,7 @@ from typing import List, Optional
 from datetime import datetime
 
 from core.paths import data_dir
+from core.kpi_formulas import to_canonical
 
 _db_logger = logging.getLogger(__name__)
 
@@ -638,6 +639,28 @@ def save_collection_checkpoints(event_id: str, cursors: dict, collector: str = "
         raise
 
 
+def _canonical(rows, metric: Optional[str] = None) -> List[dict]:
+    """Converte ``value`` para a unidade canônica do catálogo (Fase 3 / B1).
+
+    Este é o funil único de leitura dos KPIs: converter aqui, e não em cada um
+    dos vários pontos de retorno de ``Api.get_kpi_series``, evita a duplicação
+    que produziria divergência entre célula, site e cluster. A conversão é
+    linear, então toda agregação a jusante (soma, média) continua correta.
+
+    ``metric`` só é usado quando a consulta não trouxe a coluna — nas que
+    filtram por uma métrica só, ela é o próprio argumento da função.
+    """
+    out = []
+    for row in rows:
+        item = dict(row)
+        value = item.get("value")
+        if value is not None:
+            item["value"] = to_canonical(
+                item.get("metric") or metric, item.get("technology"), value)
+        out.append(item)
+    return out
+
+
 def get_kpi_series(
     event_id: str,
     site_id: str,
@@ -648,7 +671,7 @@ def get_kpi_series(
     conn = get_event_conn(event_id)
     if minutes and minutes > 0:
         rows = conn.execute("""
-            SELECT cell_id, timestamp, value
+            SELECT cell_id, timestamp, value, technology
             FROM kpi_measurements
             WHERE event_id = ?
               AND site_id  = ?
@@ -658,14 +681,14 @@ def get_kpi_series(
         """, (event_id, site_id, metric, f"-{minutes}")).fetchall()
     else:
         rows = conn.execute("""
-            SELECT cell_id, timestamp, value
+            SELECT cell_id, timestamp, value, technology
             FROM kpi_measurements
             WHERE event_id = ?
               AND site_id  = ?
               AND metric   = ? AND scope = 'CELL'
             ORDER BY timestamp ASC
         """, (event_id, site_id, metric)).fetchall()
-    return [dict(r) for r in rows]
+    return _canonical(rows, metric)
 
 
 def get_kpi_series_by_cell(
@@ -685,7 +708,7 @@ def get_kpi_series_by_cell(
 
     if minutes and minutes > 0:
         rows = conn.execute("""
-            SELECT cell_id, timestamp, value
+            SELECT cell_id, timestamp, value, technology
             FROM kpi_measurements
             WHERE event_id = ?
               AND site_id  = ?
@@ -696,7 +719,7 @@ def get_kpi_series_by_cell(
         """, (event_id, site_id, cell_id, metric, f"-{minutes}")).fetchall()
     else:
         rows = conn.execute("""
-            SELECT cell_id, timestamp, value
+            SELECT cell_id, timestamp, value, technology
             FROM kpi_measurements
             WHERE event_id = ?
               AND site_id  = ?
@@ -704,7 +727,7 @@ def get_kpi_series_by_cell(
               AND metric   = ? AND scope = 'CELL'
             ORDER BY timestamp ASC
         """, (event_id, site_id, cell_id, metric)).fetchall()
-    return [dict(r) for r in rows]
+    return _canonical(rows, metric)
 
 
 def get_kpi_site_series(event_id: str, site_id: str, metric: str, minutes: int = 60,
@@ -722,7 +745,7 @@ def get_kpi_site_series(event_id: str, site_id: str, metric: str, minutes: int =
     rows = conn.execute(
         "SELECT cell_id, timestamp, value, technology FROM kpi_measurements WHERE "
         + " AND ".join(conditions) + " ORDER BY timestamp ASC", params).fetchall()
-    return [dict(row) for row in rows]
+    return _canonical(rows, metric)
 
 
 def get_latest_site_kpi_by_metric(event_id: str, metric: str, max_timestamp: Optional[str] = None) -> List[dict]:
@@ -741,7 +764,7 @@ def get_latest_site_kpi_by_metric(event_id: str, metric: str, max_timestamp: Opt
         ) latest ON latest.site_id = k.site_id AND latest.technology = k.technology AND latest.max_ts = k.timestamp
         WHERE k.event_id = ? AND k.metric = ? AND k.scope = 'SITE'
     """, params).fetchall()
-    return [dict(row) for row in rows]
+    return _canonical(rows, metric)
 
 
 def get_latest_kpi_by_metric(
@@ -761,7 +784,7 @@ def get_latest_kpi_by_metric(
     params_inner.append(event_id)
 
     rows = conn.execute(f"""
-        SELECT k.site_id, k.cell_id, k.metric, k.value, k.timestamp
+        SELECT k.site_id, k.cell_id, k.metric, k.value, k.timestamp, k.technology
         FROM kpi_measurements k
         INNER JOIN (
             SELECT site_id, cell_id, MAX(timestamp) AS max_ts
@@ -773,7 +796,7 @@ def get_latest_kpi_by_metric(
                     AND k.timestamp = latest.max_ts
         WHERE k.event_id = ? AND k.metric = ?
     """, params_inner + [metric]).fetchall()
-    return [dict(r) for r in rows]
+    return _canonical(rows, metric)
 
 
 def get_latest_kpi(event_id: str, max_timestamp: Optional[str] = None) -> List[dict]:
@@ -781,7 +804,7 @@ def get_latest_kpi(event_id: str, max_timestamp: Optional[str] = None) -> List[d
     conn = get_event_conn(event_id)
     if max_timestamp:
         rows = conn.execute("""
-            SELECT k.site_id, k.cell_id, k.metric, k.value, k.timestamp
+            SELECT k.site_id, k.cell_id, k.metric, k.value, k.timestamp, k.technology
             FROM kpi_measurements k
             INNER JOIN (
                 SELECT site_id, cell_id, metric, MAX(timestamp) AS max_ts
@@ -796,7 +819,7 @@ def get_latest_kpi(event_id: str, max_timestamp: Optional[str] = None) -> List[d
         """, (event_id, max_timestamp, event_id)).fetchall()
     else:
         rows = conn.execute("""
-            SELECT k.site_id, k.cell_id, k.metric, k.value, k.timestamp
+            SELECT k.site_id, k.cell_id, k.metric, k.value, k.timestamp, k.technology
             FROM kpi_measurements k
             INNER JOIN (
                 SELECT site_id, cell_id, metric, MAX(timestamp) AS max_ts
@@ -809,7 +832,7 @@ def get_latest_kpi(event_id: str, max_timestamp: Optional[str] = None) -> List[d
                         AND k.timestamp = latest.max_ts
             WHERE k.event_id = ?
         """, (event_id, event_id)).fetchall()
-    return [dict(r) for r in rows]
+    return _canonical(rows)
 
 
 # ── VIP Measurements ────────────────────────────────────────────────

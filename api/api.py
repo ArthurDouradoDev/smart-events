@@ -52,6 +52,35 @@ KPI_OVERVIEW_METRICS = {
 KPI_OVERVIEW_MAX_SCOPES = 8
 
 
+# Consolidacao entre escopos: o melhor motivo vence (ver get_kpi_overview_multi).
+_REASON_RANK = {"ok": 0, "no_traffic": 1, "no_data": 2}
+
+
+def _overview_reasons(labels: list, metrics: dict) -> dict:
+    """B6 — por que um painel esta vazio: falta de coleta ou falta de trafego.
+
+    Sao coisas diferentes e a tela precisa distinguir. A janela so tem
+    ``labels`` quando alguma metrica da familia produziu valor ali, entao
+    ``labels`` vazio significa que nao houve coleta ("no_data"). Com coleta na
+    janela, uma metrica sem nenhum ponto e uma metrica que ficou **indefinida**
+    — denominador zero, isto e, nenhuma tentativa no minuto ("no_traffic"), que
+    e o caso normal do SA no 5G.
+
+    A leitura nao tem acesso ao ``not_applicable`` do ciclo de coleta: ele e
+    contado em memoria pelo collector e nunca foi persistido por metrica. A
+    ausencia de ponto na grade e o mesmo fato visto do banco.
+    """
+    collected = bool(labels)
+    return {
+        metric: (
+            "ok" if any(value is not None for value in values)
+            else "no_traffic" if collected
+            else "no_data"
+        )
+        for metric, values in metrics.items()
+    }
+
+
 class Api:
 
     # URL do servidor FastAPI local embutido (injetada por main.py no startup).
@@ -1407,11 +1436,13 @@ class Api:
             return {
                 "ok": False, "error": "technology_family deve ser 4G ou 5G",
                 "labels": [], "metrics": {}, "units": {}, "thresholds": {},
+                "reasons": {},
             }
         if not normalized_scope or not scope_id:
             return {
                 "ok": False, "error": "scope deve ser site ou cluster e possuir scope_id",
                 "labels": [], "metrics": {}, "units": {}, "thresholds": {},
+                "reasons": {},
             }
 
         try:
@@ -1478,12 +1509,13 @@ class Api:
                 "metrics": metrics,
                 "units": units,
                 "thresholds": thresholds,
+                "reasons": _overview_reasons(labels, metrics),
             }
         except Exception as e:
             logger.error(f"get_kpi_overview error: {e}")
             return {
                 "ok": False, "error": str(e), "labels": [], "metrics": {},
-                "units": {}, "thresholds": {},
+                "units": {}, "thresholds": {}, "reasons": {},
             }
 
     def get_kpi_overview_multi(self, event_id: str, scopes: list,
@@ -1501,6 +1533,7 @@ class Api:
             return {
                 "ok": False, "error": "technology_family deve ser 4G ou 5G",
                 "labels": [], "series": [], "units": {}, "thresholds": {},
+                "reasons": {},
             }
 
         requested: list[tuple[str, str]] = []
@@ -1521,6 +1554,7 @@ class Api:
             return {
                 "ok": False, "error": "informe ao menos um cluster ou site",
                 "labels": [], "series": [], "units": {}, "thresholds": {},
+                "reasons": {},
             }
         if len(requested) > KPI_OVERVIEW_MAX_SCOPES:
             return {
@@ -1528,6 +1562,7 @@ class Api:
                 "error": (f"compare no maximo {KPI_OVERVIEW_MAX_SCOPES} escopos "
                           f"por vez (foram pedidos {len(requested)})"),
                 "labels": [], "series": [], "units": {}, "thresholds": {},
+                "reasons": {},
             }
 
         try:
@@ -1552,6 +1587,7 @@ class Api:
                 collected.append({
                     "scope": scope,
                     "scope_id": scope_id,
+                    "reasons": result.get("reasons") or {},
                     "lookup": {
                         metric: dict(zip(labels, result_metrics.get(metric) or []))
                         for metric in metric_ids
@@ -1566,10 +1602,19 @@ class Api:
                     "ok": False,
                     "error": failures[0]["error"] if failures else "sem dados no periodo",
                     "labels": [], "series": [], "units": {}, "thresholds": {},
-                    "failures": failures,
+                    "reasons": {}, "failures": failures,
                 }
 
             labels = sorted(label_union)
+            # Um escopo com trafego basta para o painel nao estar vazio; so
+            # quando nenhum deles tem ponto e que a frase da tela muda.
+            reasons = {
+                metric: min(
+                    (item["reasons"].get(metric, "no_data") for item in collected),
+                    key=_REASON_RANK.get,
+                )
+                for metric in metric_ids
+            }
             series = [{
                 "scope": item["scope"],
                 "scope_id": item["scope_id"],
@@ -1585,6 +1630,7 @@ class Api:
                 "series": series,
                 "units": units,
                 "thresholds": thresholds,
+                "reasons": reasons,
                 "failures": failures,
             }
         except Exception as e:
@@ -1592,6 +1638,7 @@ class Api:
             return {
                 "ok": False, "error": str(e),
                 "labels": [], "series": [], "units": {}, "thresholds": {},
+                "reasons": {},
             }
 
     def _metric_thresholds(self, event_id: str, metric: str) -> dict:

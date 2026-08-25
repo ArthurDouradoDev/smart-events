@@ -145,6 +145,71 @@ class TestKpiMeasurements:
         assert conn.in_transaction is False
 
 
+# ── Fase 3 / B1 — unidade canônica na leitura ────────────────────────
+
+class TestKpiCanonicalUnits:
+    """O banco guarda o que o OSS entregou; a base comum é aplicada na leitura.
+
+    Manter o gravado intacto é o que permite ao ``tools/kpi_crosscheck.py``
+    continuar auditando linha a linha contra o CSV do próprio OSS.
+    """
+
+    def _insert(self, event_id, metric, value, technology, scope="CELL",
+                ts="2026-06-01T10:00:00Z"):
+        database.insert_kpi_batch([{
+            "event_id": event_id, "site_id": "SR-SPPNB2", "cell_id": "SR-SPPNB2_1",
+            "metric": metric, "value": value, "timestamp": ts,
+            "technology": technology, "scope": scope,
+        }])
+
+    def test_kpi_series_returns_canonical_values(self, event_in_db, sample_event):
+        self._insert(sample_event["id"], "traffic_volume_dl_sa", 1.0, "5G_NRDUCELL")
+        series = database.get_kpi_series(
+            sample_event["id"], "SR-SPPNB2", "traffic_volume_dl_sa", minutes=0)
+        assert [row["value"] for row in series] == [1000.0]
+
+    def test_stored_value_is_not_touched(self, event_in_db, sample_event):
+        self._insert(sample_event["id"], "traffic_volume_dl_sa", 1.0, "5G_NRDUCELL")
+        conn = database.get_event_conn(sample_event["id"])
+        stored = conn.execute(
+            "SELECT value FROM kpi_measurements WHERE metric = ?",
+            ("traffic_volume_dl_sa",)).fetchone()[0]
+        assert stored == 1.0
+
+    def test_rows_without_technology_are_returned_unchanged(self, event_in_db, sample_event):
+        """Banco legado (volume em MB, sem a coluna) não é convertido."""
+        self._insert(sample_event["id"], "traffic_volume_dl", 5.0, "")
+        series = database.get_kpi_series(
+            sample_event["id"], "SR-SPPNB2", "traffic_volume_dl", minutes=0)
+        assert [row["value"] for row in series] == [5.0]
+
+    def test_site_series_is_canonical(self, event_in_db, sample_event):
+        self._insert(sample_event["id"], "throughput_dl", 6.776, "4G", scope="SITE")
+        series = database.get_kpi_site_series(
+            sample_event["id"], "SR-SPPNB2", "throughput_dl", minutes=0)
+        assert series[0]["value"] == pytest.approx(6_776_000.0)
+
+    def test_latest_by_metric_is_canonical(self, event_in_db, sample_event):
+        self._insert(sample_event["id"], "throughput_dl", 2.0, "5G_NRDUCELL")
+        rows = database.get_latest_kpi_by_metric(sample_event["id"], "throughput_dl")
+        assert [row["value"] for row in rows] == [pytest.approx(2e6)]
+
+    def test_latest_kpi_converts_each_metric_by_its_own_base(self, event_in_db, sample_event):
+        self._insert(sample_event["id"], "throughput_dl", 2.0, "5G_NRDUCELL")
+        self._insert(sample_event["id"], "utilization_dl", 80.0, "5G_NRDUCELL")
+        by_metric = {row["metric"]: row["value"]
+                     for row in database.get_latest_kpi(sample_event["id"])}
+        assert by_metric["throughput_dl"] == pytest.approx(2e6)
+        assert by_metric["utilization_dl"] == 80.0
+
+    def test_series_by_cell_is_canonical(self, event_in_db, sample_event):
+        self._insert(sample_event["id"], "traffic_volume_ul_nsa", 3.0, "5G_NRDUCELL")
+        series = database.get_kpi_series_by_cell(
+            sample_event["id"], "SR-SPPNB2", "SR-SPPNB2_1",
+            "traffic_volume_ul_nsa", minutes=0)
+        assert [row["value"] for row in series] == [3000.0]
+
+
 # ── VIP Measurements ─────────────────────────────────────────────────
 
 class TestVipMeasurements:

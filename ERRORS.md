@@ -476,3 +476,53 @@ persistida no ambiente do usuário e `build.py:229-231` aborta sem ela.
 `.build-tools\Python312` só existe para criar esse venv. Um `require_*` reprovando a lista
 toda de uma vez é diagnóstico de interpretador errado — verificar `pyvenv.cfg` antes de
 mexer em dependência.
+
+---
+
+## 2026-08-24 — `definition(metric, None)` casa com a primeira tecnologia e converteria linha legada
+
+**Como apareceu:** ao escrever `to_canonical` na Fase 3, a versão natural seria
+`item = definition(metric, technology)` e pronto. Pego na revisão, **antes de rodar** — não
+chegou a virar dado errado em tela, mas passaria em todo teste que usasse evento novo.
+
+**Causa raiz:** `definition(metric, technology)` já existia com a tecnologia **opcional**, e
+com `technology=None` ela devolve a **primeira** entrada do `CATALOG` com aquele `metric` —
+não `None`. As linhas sem tecnologia são justamente as dos bancos anteriores à coluna
+(`smart_events_vips-rio-tim-jun-2026.db`, 1.011.298 linhas com volume em **MB**). Sem guard
+explícito, cada uma dessas linhas receberia o fator da primeira tecnologia catalogada e o
+volume em MB sairia multiplicado como se fosse bit — errado por 10⁶, e **silenciosamente**,
+porque o valor continua sendo um número plausível num gráfico.
+
+**Correção:** `if not technology: return value` como primeira linha de `to_canonical`, com o
+motivo no docstring, e um teste que fixa os dois casos vazios (`None` e `""`) —
+`test_to_canonical_leaves_unknown_technology_untouched`.
+
+**Regra:** helper de lookup com parâmetro opcional que significa "qualquer um" não pode ser
+reusado num caminho onde a ausência significa "não sei". São semânticas opostas — "curinga" e
+"desconhecido" — e o mesmo `None` expressa as duas. Ao reaproveitar um lookup assim, tratar a
+ausência **antes** de chamá-lo, nunca esperar que ele devolva `None`.
+
+---
+
+## 2026-08-24 — `Number(null)` é 0 e fazia o buraco de coleta derrubar o degrau da escala
+
+**Como apareceu:** primeira execução de `tests/test_frontend_units.py` na Fase 4. Onze testes
+passaram e só `test_painel_sem_pontos_nao_troca_o_degrau` falhou: uma série de `2e9 bit`
+(escala `Gbit`) que passava a chegar toda em `null` voltava rotulada como `bit`, não `Gbit`.
+
+**Causa raiz:** o seletor do maior valor da série filtrava por `Number.isFinite(Number(item))`,
+e `Number(null)` é **0** — finito. Um buraco de coleta entrava na conta como zero legítimo, o
+maior valor virava 0 e a histerese descia todos os degraus de uma vez. Em produção isso não
+apareceria como número errado (o valor exibido continua correto), mas como **unidade piscando
+no cabeçalho** a cada minuto sem dado — exatamente a instabilidade que a escala fixa por
+métrica existe para eliminar. Vale para `undefined` e `""` pelo mesmo motivo: `Number("")` é 0.
+
+**Correção:** descartar `item == null || item === ""` **antes** de converter, em
+`_maiorAbsoluto` (`frontend/js/units.js`), com o motivo no comentário. Série sem nenhum ponto
+devolve `null` e o degrau anterior é mantido.
+
+**Regra:** em JS, `Number.isFinite(Number(x))` **não** é teste de "x é um número": `null`, `""`
+e `[]` passam como 0 e `false` passa como 0. Ao decidir qualquer coisa a partir de uma série
+que representa tempo (onde ausência é um valor de primeira classe), descartar a ausência
+explicitamente antes da conversão — e escrever o teste com a série toda vazia, que é o caso
+que o dado de mock quase nunca produz.

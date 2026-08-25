@@ -4,6 +4,7 @@
 
 import State from "./state.js";
 import API   from "./bridge.js";
+import { escalaDaMetrica, esquecerEscalas, formatar } from "./units.js";
 
 let _chart = null;
 let _popupChart = null;
@@ -11,16 +12,39 @@ let _searchQuery = "";
 let _catalogRequestId = 0;
 let _chartRequestId = 0;
 
-const METRIC_LABELS = {
-  utilization_dl:    "Utilização DL (%)",
-  traffic_volume_dl: "Volume de Tráfego DL (MB)",
-  traffic_volume_ul: "Volume de Tráfego UL (MB)",
-  throughput_dl:     "Throughput DL (Mbps)",
-  throughput_ul:     "Throughput UL (Mbps)",
+// Nomes de partida, usados só até o catálogo chegar — a partir daí cada entrada
+// é sobrescrita com o nome vindo do backend. A unidade não entra no nome: quem
+// a decide é a escala vigente (units.js), que muda com a ordem de grandeza.
+const METRIC_NAMES = {
+  utilization_dl:    "Utilização DL",
+  throughput_dl:     "Throughput DL",
+  throughput_ul:     "Throughput UL",
   user_count:        "Usuários Ativos",
-  accessibility:     "Acessibilidade (%)",
+  accessibility:     "Acessibilidade",
 };
 let KPI_CATALOG = [];
+
+/** Escala vigente do gráfico e da lista — uma só por métrica selecionada. */
+let _escalaMetrica = null;
+
+/** Unidade canônica declarada pelo catálogo para a métrica. */
+function _unidadeCanonica(metric) {
+  return KPI_CATALOG.find(item => item.id === metric)?.unit || "";
+}
+
+/** Recalcula a escala da métrica selecionada a partir dos valores em tela. */
+function _atualizarEscala(metric, valores) {
+  _escalaMetrica = escalaDaMetrica(
+    `dashboard:${metric}`, valores, _unidadeCanonica(metric));
+  return _escalaMetrica;
+}
+
+/** Nome da métrica com a unidade que está de fato sendo exibida. */
+function _metricLabel(metric) {
+  const nome = METRIC_NAMES[metric] || metric;
+  const unidade = _escalaMetrica?.rotulo || _unidadeCanonica(metric);
+  return unidade ? `${nome} (${unidade})` : nome;
+}
 
 const TECH_FAMILY = {
   "4G": "4G",
@@ -62,9 +86,8 @@ function hexToRgba(hex, alpha) {
   return `rgba(${r}, ${g}, ${b}, ${alpha})`;
 }
 
-function _formatNumber(value) {
-  const numeric = Number(value);
-  return Number.isFinite(numeric) ? numeric.toFixed(2) : "—";
+function _formatNumber(value, escala = _escalaMetrica) {
+  return formatar(value, escala, { minimoDeCasas: 2 });
 }
 
 // ── Inicialização ─────────────────────────────────────────────────
@@ -79,9 +102,11 @@ export function initKpi() {
   // catálogo quando o contexto real chega (e também ao alternar eventos), para
   // que o dropdown reflita somente as tasks PM daquele evento.
   State.on("change:activeEvent", event => {
+    esquecerEscalas();
     if (event?.id) { _loadKpiCatalog(event.id); _loadClusters(event.id); }
   });
   State.on("change:historicalEvent", event => {
+    esquecerEscalas();
     if (event?.id) { _loadKpiCatalog(event.id); _loadClusters(event.id); }
   });
 
@@ -232,7 +257,7 @@ async function _loadKpiCatalog(eventId = State.eventId) {
       other => other.id === meta.id && _technologyFamily(other.technology) !== family
     );
     groups.get(common ? "common" : family)?.entries.push(meta);
-    METRIC_LABELS[meta.id] = `${meta.name} (${meta.unit})`;
+    METRIC_NAMES[meta.id] = meta.name;
   });
   selector.innerHTML = "";
   if (!response.metrics.length) {
@@ -355,8 +380,13 @@ function _renderSiteList(sites) {
   if (colHeader) {
     colHeader.textContent = isVolumeMetric
       ? "Participação"
-      : (METRIC_LABELS[metric]?.split(" ")[0] || "Valor");
+      : (METRIC_NAMES[metric]?.split(" ")[0] || "Valor");
   }
+
+  // A escala da coluna sai dos valores reais da métrica; participação é
+  // percentual e fica de fora, senão puxaria o degrau para baixo.
+  _atualizarEscala(metric, (sites || []).filter(
+    site => !site.metric_is_share).map(site => site.metric_value));
 
   const counts = State.siteCounts;
   summary.textContent = `${counts.healthy} ok · ${counts.critical} críticos`;
@@ -412,7 +442,8 @@ function _renderSiteList(sites) {
 
     if (site.metric_value != null) {
       if (site.metric_is_share) {
-        displayVal = `${_formatNumber(site.metric_value)}%`;
+        // Participação é percentual: a escala da métrica de volume não se aplica.
+        displayVal = `${_formatNumber(site.metric_value, null)}%`;
         displayClass = "";  // sem colorização para métricas de volume
       } else {
         const suffix = _getMetricSuffix(metric);
@@ -420,7 +451,7 @@ function _renderSiteList(sites) {
         displayClass = site.status;
       }
     } else if (site.utilization != null) {
-      displayVal = `${_formatNumber(site.utilization)}%`;
+      displayVal = `${_formatNumber(site.utilization, null)}%`;
     }
 
     const hasVip = (State.vips || []).some(v => v.in_event && v.serving_site === site.id);
@@ -485,13 +516,12 @@ function _buildClusterScopeItem(cluster, comparisonMode = false) {
   return item;
 }
 
-// Helper para sufixo de unidade
+// Sufixo de unidade da lista de sites. A escala manda: exibir "bit/s" ao lado de
+// um valor já dividido por 1e6 seria errado por seis ordens de grandeza.
 function _getMetricSuffix(metric) {
-  const meta = KPI_CATALOG.find(item => item.id === metric);
-  if (meta?.unit) return ` ${meta.unit}`;
+  const unidade = _escalaMetrica?.rotulo || _unidadeCanonica(metric);
+  if (unidade) return unidade === "%" ? "%" : ` ${unidade}`;
   if (metric.includes("utilization") || metric === "accessibility") return "%";
-  if (metric.includes("throughput")) return " Mbps";
-  if (metric.includes("traffic_volume")) return " MB";
   return "";
 }
 
@@ -903,6 +933,15 @@ async function _refreshChart(arg) {
                     cellId === "__media__" ? "Média das células" :
                     cellId;
 
+  // A escala vale para tudo que vai à tela — série única, células e agregados de
+  // cluster dividem o mesmo degrau, senão o rótulo mentiria para alguma delas.
+  // Precisa vir antes dos datasets: o rótulo do gráfico já cita a unidade.
+  _atualizarEscala(selectedMetric, [
+    values || [],
+    Object.values(cellsData || {}),
+    techSeries.map(item => item.values || []),
+  ]);
+
   let datasets = [];
   let legendDisplay = false;
   const useFamilyAverages = cellId === "__media__" && techSeries.length > 0;
@@ -980,7 +1019,7 @@ async function _refreshChart(arg) {
   } else {
     const adjustedValues = _applyGaps(values, gaps);
     datasets.push({
-      label: `${METRIC_LABELS[selectedMetric] || selectedMetric} — ${cellLabel}`,
+      label: `${_metricLabel(selectedMetric)} — ${cellLabel}`,
       data: adjustedValues,
       borderColor:     "#388BFD",
       backgroundColor: "rgba(56,139,253,0.08)",
@@ -1039,7 +1078,7 @@ async function _refreshChart(arg) {
     const siteName = isClusterComparison
       ? "Comparativo de clusters"
       : (clusterName ? `Cluster: ${clusterName}` : (site?.name ?? selectedSite));
-    const metricLabel = METRIC_LABELS[selectedMetric] || selectedMetric;
+    const metricLabel = _metricLabel(selectedMetric);
     const titleEl = document.getElementById("popup-chart-title");
     if (titleEl) {
       titleEl.textContent = `Visualização Detalhada — ${siteName} — ${metricLabel} (${cellLabel})`;

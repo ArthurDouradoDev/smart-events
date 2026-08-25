@@ -217,16 +217,21 @@ def test_transient_vpn_failure_on_boot_does_not_open_false_alert():
 
 
 def test_site_metric_values_use_exactly_two_decimal_places():
+    """Fase 4: duas casas continuam obrigatórias, agora no formato pt-BR.
+
+    O formatador da lista passou a ser o de `units.js`, único no app — o que
+    mudou é o separador decimal (vírgula) e o de milhar (ponto), não a
+    quantidade de casas, que segue fixa para a coluna não dançar.
+    """
     def run(url, playwright):
         with _vip_modal_page(playwright, url) as page:
             values = page.locator("#site-list .site-util").all_inner_texts()
             assert values
-            assert all(
-                value.replace(" ", "").strip().removesuffix("%").replace("-", "", 1)
-                .replace(".", "", 1).isdigit()
-                and len(value.replace(" ", "").strip().removesuffix("%").split(".")[-1]) == 2
-                for value in values
-            )
+            for value in values:
+                numero = value.strip().removesuffix("%").split(" ")[0]
+                inteiro, _, decimais = numero.partition(",")
+                assert len(decimais) == 2, value
+                assert inteiro.replace("-", "", 1).replace(".", "").isdigit(), value
 
     _run(lambda: _frontend_server(), run)
 

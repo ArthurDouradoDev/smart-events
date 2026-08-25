@@ -34,6 +34,21 @@ class NotApplicable(InvalidKpi):
 THP_TIME_TO_SECONDS = 1e-6
 
 
+# B1 — unidade canônica por unidade do OSS. O valor gravado continua sendo
+# exatamente o que o OSS entrega (para que o `kpi_crosscheck.py` siga auditável
+# contra o CSV); a base comum é aplicada na leitura. Cada entrada é
+# ``unidade do OSS -> (unidade canônica, fator para chegar nela)``.
+_UNIT_TO_BASE: dict[str, tuple[str, float]] = {
+    "%": ("%", 1.0),
+    "dBm": ("dBm", 1.0),
+    "ms": ("ms", 1.0),
+    "usuários": ("usuários", 1.0),
+    "bit": ("bit", 1.0),
+    "kbit": ("bit", 1e3),
+    "Mbit/s": ("bit/s", 1e6),
+}
+
+
 @dataclass(frozen=True)
 class KpiDefinition:
     id: str
@@ -45,6 +60,26 @@ class KpiDefinition:
     calculator: Callable[[dict[str, float], float | None], float]
     production_ready: bool = True
     monitoring_available: bool = True
+    base_unit: str = ""   # unidade canônica exposta ao frontend
+    to_base: float = 1.0  # fator do valor gravado para a unidade canônica
+
+    def __post_init__(self):
+        """Deriva a base de ``unit`` em vez de repeti-la em 26 linhas.
+
+        Uma unidade nova sem base declarada quebra o import, não a leitura: é
+        preferível não subir a definir unidade canônica por suposição — foi
+        exatamente esse silêncio que deixou 4G em bit, 5G em kbit e o banco
+        legado em MB sob o mesmo ``metric``.
+        """
+        if self.base_unit:
+            return
+        base = _UNIT_TO_BASE.get(self.unit)
+        if base is None:
+            raise ValueError(
+                f"{self.id}/{self.technology}: unidade '{self.unit}' sem base "
+                f"canônica em _UNIT_TO_BASE")
+        object.__setattr__(self, "base_unit", base[0])
+        object.__setattr__(self, "to_base", base[1])
 
 
 def _need(c: dict[str, float], *names: str) -> tuple[float, ...]:
@@ -181,8 +216,11 @@ CATALOG: tuple[KpiDefinition, ...] = (
     # criar uma task PM dedicada com esses contadores.
     KpiDefinition("ran_rtt", "4G", "Wireless RTT", "ms", ("L.PDCP.TCP.time.RANRtt.ConnSetup", "L.PDCP.TCP.RANRtt.ConnSetup"), "mean", _ratio_formula("L.PDCP.TCP.time.RANRtt.ConnSetup", "L.PDCP.TCP.RANRtt.ConnSetup", 1), monitoring_available=False),
     KpiDefinition("terrestrial_rtt", "4G", "Terrestrial RTT", "ms", ("L.PDCP.TCP.Time.TerrestrialRtt.ConnSetup", "L.PDCP.TCP.TerrestrialRtt.ConnSetup"), "mean", _ratio_formula("L.PDCP.TCP.Time.TerrestrialRtt.ConnSetup", "L.PDCP.TCP.TerrestrialRtt.ConnSetup", 1), monitoring_available=False),
-    KpiDefinition("traffic_volume_dl", "4G", "Volume de Tráfego DL (legado)", "contador OSS", ("L.Thrp.bits.DL",), "sum", _single("L.Thrp.bits.DL")),
-    KpiDefinition("traffic_volume_ul", "4G", "Volume de Tráfego UL (legado)", "contador OSS", ("L.Thrp.bits.UL",), "sum", _single("L.Thrp.bits.UL")),
+    # B8 — "legado" descrevia a origem do código, não o dado, e "contador OSS"
+    # não é unidade: L.Thrp.bits.* é volume em bit. Continuam no seletor porque
+    # a coluna "Participação" da lista de sites só existe com elas selecionadas.
+    KpiDefinition("traffic_volume_dl", "4G", "Volume de Tráfego DL", "bit", ("L.Thrp.bits.DL",), "sum", _single("L.Thrp.bits.DL")),
+    KpiDefinition("traffic_volume_ul", "4G", "Volume de Tráfego UL", "bit", ("L.Thrp.bits.UL",), "sum", _single("L.Thrp.bits.UL")),
     KpiDefinition("accessibility", "5G_NRCELL", "Acessibilidade considerando RRC Inactive", "%", ("N.RRC.SetupReq.Succ", "N.RRC.ResumeReq.Succ", "N.RRC.SetupReq.Att", "N.RRC.ResumeReq.Att", "N.NGSig.ConnEst.Succ", "N.NGSig.ConnEst.Att", "N.QosFlow.Est.Succ", "N.QosFlow.Est.Att.EPSFB", "N.QosFlow.Est.Att.EmcFB", "N.QosFlow.FailEst.Conflict", "N.QosFlow.Resume.Succ", "N.QosFlow.Est.Att", "N.QosFlow.FailEst.AMF.SyntaxError", "N.QosFlow.Resume.Att"), "recalculate", _n_access),
     KpiDefinition("drop_rate", "5G_NRCELL", "Drop considerando RRC Inactive", "%", ("N.QosFlow.AbnormRel", "N.QosFlow.NormRel", "N.QosFlow.RrcInactiveToIdle.Rel", "N.QosFlow.RrcConnToInactive.Suspend"), "recalculate", _n_drop),
     KpiDefinition("utilization_dl", "5G_NRDUCELL", "DL PRB Utility", "%", ("N.PRB.DL.Used.Avg", "N.PRB.DL.Avail.Avg"), "recalculate", _ratio_formula("N.PRB.DL.Used.Avg", "N.PRB.DL.Avail.Avg")),
@@ -207,6 +245,28 @@ def definition(metric: str, technology: str | None = None) -> KpiDefinition | No
     return next((item for item in CATALOG if item.id == metric and (technology is None or item.technology == technology)), None)
 
 
+def to_canonical(metric: str, technology: str | None, value: float) -> float:
+    """Converte um valor gravado para a unidade canônica do catálogo (B1).
+
+    O banco guarda o que o OSS entregou: ``traffic_volume_dl`` do 4G em bit, os
+    ``traffic_volume_*`` do 5G em kbit, o throughput das duas em Mbit/s. A base
+    comum é aplicada aqui, na leitura, e o histórico não é migrado.
+
+    Linhas **sem** ``technology`` não são normalizáveis e voltam intactas: o
+    par ``(metric, technology)`` é o que identifica a base, e bancos anteriores
+    à coluna — como o ``smart_events_vips-rio-tim-jun-2026.db``, que guarda
+    volume em MB — não têm como ser desambiguados. Ficam fora do contrato de
+    unidade canônica, por decisão explícita, em vez de receber o fator do 4G
+    por engano.
+    """
+    if not technology:
+        return value
+    item = definition(metric, technology)
+    if item is None:
+        return value
+    return value * item.to_base
+
+
 def catalog_for_api() -> list[dict]:
     seen = set()
     rows = []
@@ -217,8 +277,12 @@ def catalog_for_api() -> list[dict]:
         if key in seen:
             continue
         seen.add(key)
+        # ``unit`` é a unidade que o frontend exibe, e o que ele recebe já vem
+        # convertido pela camada de banco. A unidade crua do OSS segue no
+        # payload como ``oss_unit``, para diagnóstico.
         rows.append({"id": item.id, "technology": item.technology, "name": item.name,
-                     "unit": item.unit, "site_aggregation": item.site_aggregation,
+                     "unit": item.base_unit, "oss_unit": item.unit,
+                     "site_aggregation": item.site_aggregation,
                      "production_ready": item.production_ready})
     return rows
 
