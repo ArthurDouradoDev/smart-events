@@ -134,6 +134,12 @@ export function initKpi() {
     });
   }
 
+  document.getElementById("popup-chart-clear-cells")?.addEventListener("click", () => {
+    if (!_popupChart) return;
+    _popupChart.data.datasets.forEach((_, index) => _popupChart.setDatasetVisibility(index, false));
+    _popupChart.update();
+  });
+
   State.on("change:sites",          _renderSiteList);
   State.on("change:vips",           () => _renderSiteList(State.sites || []));
   State.on("change:alarms",         () => _renderSiteList(State.sites || []));
@@ -634,6 +640,10 @@ function _updateChartInstance(chart, labels, datasets, legendDisplay, annotation
   chart.options.plugins.legend.display = legendDisplay;
   chart.options.plugins.annotation.annotations = annotations;
   chart.update("none");
+
+  if (chart === _popupChart) {
+    document.getElementById("popup-chart-clear-cells")?.classList.toggle("hidden", !legendDisplay);
+  }
 }
 
 function _initPopupChart() {

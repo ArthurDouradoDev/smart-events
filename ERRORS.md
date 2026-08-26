@@ -559,3 +559,44 @@ reintroduz o efeito colateral (a reseed) em contextos onde "seleção vazia" é 
 um estado inicial. Extrair a fatia específica do refresh é mais barato que o bug. E: quando o
 projeto já tem uma suite Playwright cobrindo a superfície mexida, rodá-la é o jeito de pegar
 isso — os testes de API sozinhos (backend) não veem timing/estado assíncrono de UI.
+
+---
+
+## 2026-08-26 — Alterações no frontend não apareciam nem após reiniciar `python main.py`
+
+**Como apareceu:** usuário reportou que um botão novo em `frontend/index.html`
+(`popup-chart-clear-cells`) não aparecia no app, mesmo depois de fechar e reabrir o `python
+main.py` várias vezes. O código em disco estava correto (`node --check` limpo, HTML
+verificado à mão).
+
+**Causa raiz:** a janela roda em WebView2, e `main.py` fixa `storage_path` em
+`data/webview` com `private_mode=False` (proposital — evita relogar a cada fechamento). Isso
+persiste **todo** o profile do WebView2 entre execuções, inclusive o cache HTTP em disco
+(`data/EBWebView/Default/Cache`), não só cookies/sessão. O servidor local (`webview/http.py`
+do pywebview, via Bottle) tenta desabilitar cache manualmente com
+`bottle.response.set_header('Cache-Control', 'no-cache', ...)`, mas a rota devolve
+`bottle.static_file(...)` — um `HTTPResponse` próprio que não herda os headers setados no
+`bottle.response` global, então o cache nunca é de fato desabilitado. Resultado: o WebView2
+guarda `index.html`, `main.css` e qualquer asset sem query string de versão e não busca de
+novo por dias (confirmado: arquivos de cache com mtime de 10 dias antes do teste), mesmo com o
+servidor local sempre servindo o conteúdo atual do disco quando consultado direto (via
+`curl`).
+
+**Como foi confirmado:** subiu uma instância com `SMARTEVENTS_DATA_DIR` apontando para uma
+pasta de dados nova (profile do WebView2 limpo) e o botão apareceu — provando que o código
+estava certo e o problema era só o cache persistido. Inspeção via CDP
+(`WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS=--remote-debugging-port=...`) confirmou o DOM real
+sem o botão na pasta de dados antiga.
+
+**Correção:** `main.py` agora seta
+`os.environ.setdefault("WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS", "--disk-cache-size=1")` antes
+de criar a janela — reduz o cache HTTP do WebView2 a praticamente zero, forçando busca no
+disco a cada carga, sem tocar em cookies/Local Storage (guardados em outro lugar do profile,
+a sessão de login continua persistindo). Testado com a pasta `data/webview` real (já com
+cache de dias) e o conteúdo atualizado passou a aparecer.
+
+**Regra:** `storage_path` persistente no WebView2 persiste o profile inteiro, não só o que se
+quer manter (sessão). Qualquer arquivo servido sem query string de cache-busting
+(`index.html`, `main.css`, `lib/*.js`) pode ficar preso em cache por tempo indefinido depois
+dessa mudança — ao depurar "editei mas não aparece" neste app, isso é suspeito #1 antes de
+desconfiar do código.

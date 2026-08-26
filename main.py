@@ -269,6 +269,15 @@ def main():
         # Injeta flag para que o frontend saiba que está em modo mock
         api._mock_mode = True
 
+    # O WebView2 (via pywebview) tenta desabilitar o cache HTTP do servidor local
+    # (Cache-Control: no-cache), mas o bottle.static_file() descarta esse header —
+    # e como storage_path é persistente entre execuções (ver private_mode=False
+    # abaixo), o cache em disco do WebView2 pode servir HTML/CSS/JS desatualizados
+    # por dias, mesmo após reiniciar o app. Reduzir o disk-cache a praticamente
+    # zero força o WebView2 a sempre buscar os arquivos do disco; cookies/sessão
+    # (Cookies, Local Storage) ficam em outro lugar do profile e não são afetados.
+    os.environ.setdefault("WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS", "--disk-cache-size=1")
+
     window = webview.create_window(
         title="Smart Events",
         url=str(FRONTEND) + "#desktop",
