@@ -485,19 +485,53 @@ function _renderCellPicker() {
   _renderCellOptions();
 }
 
+/**
+ * Ids dos sites que balizam a lista de células oferecida no seletor.
+ *
+ * Com cluster e/ou site selecionados na comparação, a lista se restringe às
+ * células desses sites — inclui o site direto e todo site que toca algum dos
+ * clusters escolhidos (mesma granularidade de `site.cluster_ids` que o filtro
+ * de cluster do dashboard já usa; não desce a seleção parcial de célula do
+ * cluster). Sem nada selecionado, cai para as células de qualquer cluster do
+ * evento — é o recorte "o que já está organizado", não o evento inteiro.
+ */
+function _cellScopeSiteIds() {
+  const ids = new Set();
+  if (_selection.site.size || _selection.cluster.size) {
+    _selection.site.forEach(id => ids.add(id));
+    _scopeSites.forEach(site => {
+      if ((site.cluster_ids || []).some(id => _selection.cluster.has(id))) ids.add(site.id);
+    });
+  } else {
+    _scopeSites.forEach(site => {
+      if ((site.cluster_ids || []).length) ids.add(site.id);
+    });
+  }
+  return ids;
+}
+
 function _renderCellOptions() {
   const menu = document.querySelector("#kpi-overview-cell-picker .scope-picker-menu");
   const options = menu?.querySelector(".scope-picker-options");
   if (!options) return;
   const term = (menu.querySelector(".scope-picker-search")?.value || "").trim().toLowerCase();
-  const matches = _scopeCells.filter(cell =>
+  const scopeSiteIds = _cellScopeSiteIds();
+  // Célula já escolhida continua oferecida mesmo se o site dela sair do
+  // recorte depois — senão o usuário perderia o único jeito de desmarcá-la.
+  const pool = _scopeCells.filter(cell =>
+    scopeSiteIds.has(cell.site_id) || _selection.cell.has(cell.id));
+  const matches = pool.filter(cell =>
     !term || `${cell.name || ""} ${cell.id} ${cell.site_name || ""}`.toLowerCase().includes(term));
 
   options.innerHTML = "";
   if (!matches.length) {
     const empty = document.createElement("div");
     empty.className = "scope-picker-empty";
-    empty.textContent = _scopeCells.length ? "Nenhuma célula encontrada." : "Nenhuma célula nesta tecnologia.";
+    empty.textContent = !scopeSiteIds.size
+      ? "Nenhum cluster cadastrado nem site selecionado."
+      : term
+        ? "Nenhuma célula encontrada."
+        : "Nenhuma célula nesta tecnologia.";
     options.appendChild(empty);
     return;
   }

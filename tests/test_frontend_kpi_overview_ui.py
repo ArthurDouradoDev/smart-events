@@ -154,6 +154,105 @@ def test_toolbar_tem_dropdowns_separados_de_clusters_e_sites():
         _skip_if_no_browser(exc)
 
 
+def _cell_option_texts(page):
+    page.locator("#kpi-overview-cell-picker .scope-picker-trigger").click()
+    texts = page.locator("#kpi-overview-cell-picker .scope-picker-option").all_inner_texts()
+    page.locator("#kpi-overview-cell-picker .scope-picker-trigger").click()
+    return texts
+
+
+def test_celulas_sem_selecao_mostram_apenas_as_dos_clusters_do_evento():
+    """Sem cluster/site selecionado, a lista cai para as células que já estão
+    organizadas em algum cluster — não o evento inteiro."""
+    sync_api = pytest.importorskip("playwright.sync_api")
+    try:
+        with _frontend_server() as url, sync_api.sync_playwright() as playwright:
+            with _overview(playwright) as (page, _browser):
+                _open_overview(page, url)
+                _clear_selection(page)
+
+                options = _cell_option_texts(page)
+
+                # ERB-07 e ERB-03 estão no cluster "sul"; SPSMG7 está no "campo".
+                assert any("ERB-07-A1" in o for o in options)
+                assert any("ERB-03-A1" in o for o in options)
+                assert any("4G-SPSMG7-1" in o for o in options)
+                # ERB-11 e ERB-15 não pertencem a nenhum cluster.
+                assert not any("ERB-11" in o for o in options)
+                assert not any("ERB-15" in o for o in options)
+                assert len(options) == 3 + 3 + 12
+    except Exception as exc:  # pragma: no cover
+        _skip_if_no_browser(exc)
+
+
+def test_celulas_recorta_pelo_cluster_selecionado():
+    sync_api = pytest.importorskip("playwright.sync_api")
+    try:
+        with _frontend_server() as url, sync_api.sync_playwright() as playwright:
+            with _overview(playwright) as (page, _browser):
+                _open_overview(page, url)
+                _clear_selection(page)
+                _pick(page, "kpi-overview-cluster-picker", "Arquibancada Sul")
+
+                options = _cell_option_texts(page)
+
+                assert any("ERB-07-A1" in o for o in options)
+                assert any("ERB-03-A1" in o for o in options)
+                # Campo (5G) / SPSMG7 não foi selecionado — fica de fora.
+                assert not any("SPSMG7" in o for o in options)
+                assert len(options) == 6
+    except Exception as exc:  # pragma: no cover
+        _skip_if_no_browser(exc)
+
+
+def test_celulas_recorta_pelo_site_selecionado():
+    sync_api = pytest.importorskip("playwright.sync_api")
+    try:
+        with _frontend_server() as url, sync_api.sync_playwright() as playwright:
+            with _overview(playwright) as (page, _browser):
+                _open_overview(page, url)
+                _clear_selection(page)
+                # ERB-11 não pertence a nenhum cluster — só a seleção direta do
+                # site deve trazer as células dele para a lista.
+                _pick(page, "kpi-overview-site-picker", "ERB-11 Autódromo Sul")
+
+                options = _cell_option_texts(page)
+
+                assert len(options) == 3
+                assert all("ERB-11" in o for o in options)
+    except Exception as exc:  # pragma: no cover
+        _skip_if_no_browser(exc)
+
+
+def test_celula_ja_selecionada_continua_visivel_fora_do_escopo():
+    """Trocar o site selecionado não pode esconder uma célula já escolhida —
+    senão o usuário perde o único jeito de desmarcá-la pelo dropdown."""
+    sync_api = pytest.importorskip("playwright.sync_api")
+    try:
+        with _frontend_server() as url, sync_api.sync_playwright() as playwright:
+            with _overview(playwright) as (page, _browser):
+                _open_overview(page, url)
+                _clear_selection(page)
+                _pick(page, "kpi-overview-site-picker", "ERB-11 Autódromo Sul")
+                _pick(page, "kpi-overview-cell-picker", "ERB-11-A1")
+
+                # Troca o site selecionado: ERB-11 sai do recorte, ERB-15 entra.
+                _pick(page, "kpi-overview-site-picker", "ERB-11 Autódromo Sul", checked=False)
+                _pick(page, "kpi-overview-site-picker", "ERB-15 Buffer Norte")
+
+                options = _cell_option_texts(page)
+
+                assert any("ERB-11-A1" in o for o in options)
+                assert not any("ERB-11-A2" in o for o in options)
+                assert any("ERB-15-A1" in o for o in options)
+                assert page.locator(
+                    "#kpi-overview-cell-picker .scope-picker-option",
+                    has_text="ERB-11-A1",
+                ).first.locator("input").is_checked()
+    except Exception as exc:  # pragma: no cover
+        _skip_if_no_browser(exc)
+
+
 def test_comparar_todos_os_clusters_gera_uma_serie_por_cluster():
     sync_api = pytest.importorskip("playwright.sync_api")
     try:

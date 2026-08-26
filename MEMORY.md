@@ -1045,3 +1045,35 @@ semente.
 **Gate:** `pytest tests/ -q` → **499 passed, 10 skipped** no arquivo cheio (mais os 11 de
 `test_frontend_kpi_overview_ui.py`, rodados à parte com Playwright) + 5 testes novos de
 backend (`TestEventCells`, `TestCellScope`) — sem regressão na baseline.
+
+---
+
+## 2026-08-25 — Seletor de células recorta pelo que já está selecionado
+
+**A lista de células oferecida não é mais o evento inteiro.** Com dezenas de células por
+site, listar todas misturava o que importa com o resto. `_cellScopeSiteIds()`
+(`kpi_overview.js`) calcula os sites que baliza a lista: com cluster e/ou site já
+selecionados na comparação, é a união deles (site direto + todo site cujo `cluster_ids`
+toca algum cluster escolhido — mesma granularidade que o filtro de cluster do dashboard já
+usa, não desce a seleção parcial de célula do cluster). **Sem nada selecionado**, cai para as
+células de qualquer cluster do evento — não para o evento inteiro; é "o que já está
+organizado", pedido explícito do usuário. Sem clusters cadastrados nem site selecionado, o
+dropdown mostra "Nenhum cluster cadastrado nem site selecionado." em vez de aparecer vazio
+sem explicação.
+
+**Célula já escolhida nunca some da lista, mesmo fora do recorte atual.** Trocar o site
+selecionado (ou o cluster) muda o recorte de células oferecidas; se isso escondesse uma
+célula que já estava marcada, o usuário perderia o único jeito de desmarcá-la pelo dropdown.
+`_renderCellOptions` sempre inclui `_selection.cell` no pool, independente do recorte
+calculado.
+
+**Não usa dado de célula-parcial do cluster (`cluster_ids` no nível de site, não de
+célula).** Um cluster com seleção parcial (só algumas células de um site) ainda libera
+*todas* as células daquele site no seletor, não só as escolhidas no cluster. Fiel ao que o
+filtro de cluster do dashboard (Fase 4) já faz — não existe hoje um endpoint que exponha
+célula→cluster no nível de célula, e criar um só para isso seria escopo maior do que o
+pedido.
+
+**Gate:** `pytest tests/test_frontend_kpi_overview_ui.py -q` → **15 passed** (11 + 4 novos:
+sem seleção cai para células dos clusters; recorta por cluster selecionado; recorta por site
+selecionado; célula já escolhida sobrevive à troca de site).
