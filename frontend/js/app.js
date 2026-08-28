@@ -8,9 +8,9 @@ import State   from "./state.js";
 import { initMap, renderSites, renderEventPolygon, fitToEvent } from "./map.js?v=20260820-cluster-compare-r2";
 import { initVip }    from "./vip.js";
 import { initKpi, refreshChart }    from "./kpi.js?v=20260826-popup-clear-cells";
-import { initKpiOverview } from "./kpi_overview.js?v=20260825-kpi-overview-cell-scope-filter";
-import { initAlerts, injectAlerts } from "./alerts.js";
-import { initAlarms, injectAlarms } from "./alarms.js";
+import { initKpiOverview } from "./kpi_overview.js?v=20260826-earfcn-clusters";
+import { initAlerts, injectAlerts } from "./alerts.js?v=20260826-site-filter";
+import { initAlarms, injectAlarms } from "./alarms.js?v=20260826-site-filter";
 import { initLogs } from "./logs.js";
 import { initCredentials, promptCredentials } from "./credentials.js";
 

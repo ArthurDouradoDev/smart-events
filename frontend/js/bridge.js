@@ -240,8 +240,21 @@ const MOCK_CLUSTERS = [
   { id: "campo", name: "Campo (5G)", color: "#388BFD", site_ids: ["SPSMG7"], polygon: [] },
 ];
 
+const MOCK_EARFCN_CLUSTERS = [
+  { id: "earfcn-1276", name: "Portadora 1276", color: "#3FB950", source: "earfcn",
+    site_ids: ["ERB-07", "ERB-03"] },
+  { id: "earfcn-1700", name: "Portadora 1700", color: "#D29922", source: "earfcn",
+    site_ids: ["ERB-07", "ERB-03"] },
+];
+
+function _allMockClusters() {
+  return _kpiOverviewScenario === "earfcn"
+    ? [...MOCK_CLUSTERS, ...MOCK_EARFCN_CLUSTERS]
+    : MOCK_CLUSTERS;
+}
+
 function _clusterIdsFor(siteId) {
-  return MOCK_CLUSTERS.filter(c => c.site_ids.includes(siteId)).map(c => c.id);
+  return _allMockClusters().filter(c => c.site_ids.includes(siteId)).map(c => c.id);
 }
 
 const _mock = {
@@ -280,13 +293,14 @@ const _mock = {
       };
     }).filter(s => !family || (s.cells && s.cells.length) || !(s.tech_families || []).length);
   },
-  get_clusters: (_eventId) => MOCK_CLUSTERS.map(c => (
+  get_clusters: (_eventId) => _allMockClusters().map(c => (
     {
       id: c.id, name: c.name, color: c.color, site_count: c.site_ids.length,
       cell_count: MOCK_SITES.filter(site => c.site_ids.includes(site.id))
         .reduce((total, site) => total + (site.cells || []).length, 0),
       has_partial_selection: false,
       polygon: c.polygon || [],
+      ...(c.source ? { source: c.source } : {}),
     }
   )),
   get_kpi_catalog: (_eventId=null) => _mockKpiCatalog(),
@@ -338,7 +352,7 @@ const _mock = {
     const family = technology_family === "4G" || technology_family === "5G" ? technology_family : null;
 
     if (scope === "cluster") {
-      const cluster = MOCK_CLUSTERS.find(c => c.id === scope_id);
+      const cluster = _allMockClusters().find(c => c.id === scope_id);
       const memberSites = cluster ? MOCK_SITES.filter(s => cluster.site_ids.includes(s.id)) : [];
       const availableFamilies = [...new Set(memberSites.flatMap(s => s.tech_families || []))];
       const families = family
@@ -494,8 +508,15 @@ const _mock = {
     };
   },
   get_alerts: (event_id, timestamp=null) => ([
-    { id:1, severity:"CRITICAL", site_id:"ERB-07", cell_id:"ERB-07-A2", message:"Utilização crítica: 91% em ERB-07", timestamp:new Date().toISOString() },
-    { id:2, severity:"WARNING",  site_id:"ERB-07", cell_id:"ERB-07",    message:"RSRP baixo para Ana Rodrigues: -97 dBm", timestamp:new Date().toISOString() },
+    { id:1, severity:"CRITICAL", site_id:"ERB-07", cell_id:"ERB-07-A2",
+      site_name:"ERB-07 Interlagos", display_name:"ERB-07 Interlagos", serving_site:"ERB-07",
+      message:"Utilização crítica: 91% em ERB-07 Interlagos", timestamp:new Date().toISOString() },
+    { id:2, severity:"WARNING",  site_id:"ERB-07", cell_id:"ERB-07-A1",
+      site_name:"ERB-07 Interlagos", display_name:"ERB-07-A1", serving_site:"ERB-07",
+      message:"RSRP baixo para Ana Rodrigues: -97 dBm", timestamp:new Date().toISOString() },
+    { id:3, severity:"WARNING",  site_id:"ERB-03", cell_id:"ERB-03-A1",
+      site_name:"ERB-03 Av. Interlagos", display_name:"ERB-03 Av. Interlagos", serving_site:"ERB-03",
+      message:"Utilização elevada: 78% em ERB-03 Av. Interlagos", timestamp:new Date().toISOString() },
   ]),
   get_alarms: (event_id, timestamp=null) => {
     const now = Date.now();

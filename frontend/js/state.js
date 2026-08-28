@@ -91,6 +91,41 @@ const State = {
     const outEvent = this.vips.length - inEvent;
     return { inEvent, outEvent };
   },
+
+  /**
+   * Ids do site/cluster selecionado na lista inferior esquerda.
+   * Inclui o id fundido e os ids crus 4G/5G dos membros, para casar
+   * tanto `serving_site` (já fundido) quanto `site_id` cru do alerta.
+   * `null` = nada selecionado.
+   */
+  get selectedScopeIds() {
+    const selected = this.selectedSite;
+    if (!selected) return null;
+    const ids = new Set();
+    const addSite = (site) => {
+      if (!site) return;
+      ids.add(site.id);
+      (site.members || []).forEach(member => {
+        if (member.site_id) ids.add(String(member.site_id));
+      });
+    };
+    if (selected === "clusters:compare") {
+      this.sites.forEach(site => {
+        if ((site.cluster_ids || []).length) addSite(site);
+      });
+      return ids;
+    }
+    if (typeof selected === "string" && selected.startsWith("cluster:")) {
+      const clusterId = selected.slice("cluster:".length);
+      this.sites.forEach(site => {
+        if ((site.cluster_ids || []).includes(clusterId)) addSite(site);
+      });
+      return ids;
+    }
+    addSite(this.sites.find(site => site.id === selected));
+    if (!ids.size) ids.add(selected);
+    return ids;
+  },
 };
 
 export default State;

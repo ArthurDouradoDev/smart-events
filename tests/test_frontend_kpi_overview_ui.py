@@ -123,6 +123,13 @@ def test_paleta_de_series_nao_e_reordenada_sem_revalidar():
     assert '"#00d2ff", "#D29922", "#f692cc", "#FF7B00",' in source
 
 
+def test_visao_4g_prefere_clusters_de_portadora_quando_existem():
+    source = OVERVIEW_JS.read_text(encoding="utf-8")
+
+    assert 'cluster.source === "earfcn"' in source
+    assert '_family === "4G" && carriers.length' in source
+
+
 def test_toolbar_tem_dropdowns_separados_de_clusters_e_sites():
     sync_api = pytest.importorskip("playwright.sync_api")
     try:
@@ -551,5 +558,35 @@ def test_empty_panel_distinguishes_no_traffic_from_no_data():
                 ).all_inner_texts()
                 assert len(textos) == 9
                 assert set(textos) == {"Sem dados no período"}
+    except Exception as exc:  # pragma: no cover
+        _skip_if_no_browser(exc)
+
+
+def test_visao_4g_abre_com_clusters_por_portadora_marcados():
+    sync_api = pytest.importorskip("playwright.sync_api")
+    try:
+        with _frontend_server() as url, sync_api.sync_playwright() as playwright:
+            with _overview(playwright) as (page, _browser):
+                _open_overview(page, url, "?kpiOverview=earfcn")
+                page.wait_for_function(
+                    """() => {
+                      const chips = [...document.querySelectorAll(
+                        '#kpi-overview-context .kpi-overview-chip')]
+                        .map(el => el.textContent.trim());
+                      return chips.includes('Portadora 1276')
+                        && chips.includes('Portadora 1700');
+                    }""",
+                    timeout=8000,
+                )
+                chips = page.locator(
+                    "#kpi-overview-context .kpi-overview-chip").all_inner_texts()
+                assert "Portadora 1276" in chips
+                assert "Portadora 1700" in chips
+                assert "ERB-07" not in chips
+                _open_picker(page, "kpi-overview-cluster-picker")
+                assert page.locator(
+                    "#kpi-overview-cluster-picker .scope-picker-option",
+                    has_text="Portadora 1276",
+                ).first.locator("input").is_checked()
     except Exception as exc:  # pragma: no cover
         _skip_if_no_browser(exc)

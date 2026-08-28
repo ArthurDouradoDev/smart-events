@@ -22,9 +22,14 @@ let _catalog = [];            // nomes disponíveis (do catálogo)
 let _selected = new Set();    // tipos atualmente selecionados
 let _filterLoadedFor = null;  // eventId para o qual o filtro foi carregado
 let _eventOnly = true;        // mostrar só alarmes correlacionados a sites do evento
+let _selectedOnly = false;    // mostrar só alarmes do site/cluster selecionado
 
 export function initAlarms() {
   State.on("change:alarms", _render);
+  State.on("change:selectedSite", () => _render(State.alarms));
+  State.on("change:sites", () => {
+    if (_selectedOnly) _render(State.alarms);
+  });
 
   document.getElementById("alarms-btn")?.addEventListener("click", _toggleDrawer);
   document.getElementById("alarms-drawer-close")?.addEventListener("click", _closeDrawer);
@@ -33,6 +38,12 @@ export function initAlarms() {
   const eventOnly = document.getElementById("alarms-event-only");
   eventOnly?.addEventListener("change", () => {
     _eventOnly = eventOnly.checked;
+    _render(State.alarms);
+  });
+
+  const selectedOnly = document.getElementById("alarms-selected-only");
+  selectedOnly?.addEventListener("change", () => {
+    _selectedOnly = selectedOnly.checked;
     _render(State.alarms);
   });
 
@@ -155,6 +166,11 @@ async function _onToggleType(name, checked) {
 
 // ── Renderização da lista ─────────────────────────────────────────
 
+function _inSelectedScope(alarm, ids) {
+  if (!ids) return false;
+  return [alarm.serving_site, alarm.source].some(value => value && ids.has(value));
+}
+
 function _render(alarms) {
   alarms = alarms || [];
   const list    = document.getElementById("alarms-list");
@@ -162,7 +178,11 @@ function _render(alarms) {
   if (!list) return;
 
   const inEvent = alarms.filter(a => a.in_event);
-  const shown   = _eventOnly ? inEvent : alarms;
+  let shown = _eventOnly ? inEvent : alarms;
+  const scopeIds = _selectedOnly ? State.selectedScopeIds : null;
+  if (_selectedOnly) {
+    shown = shown.filter(alarm => _inSelectedScope(alarm, scopeIds));
+  }
 
   if (summary) {
     summary.textContent = `${inEvent.length} no evento · ${alarms.length} na rede`;
@@ -171,9 +191,14 @@ function _render(alarms) {
   _updateBadge(_severityCounts(inEvent).Critical || 0);
 
   if (!shown.length) {
-    const msg = _eventOnly && alarms.length
-      ? `Nenhum alarme nos sites do evento (${alarms.length} na rede).`
-      : "Nenhum alarme dos tipos selecionados.";
+    let msg = "Nenhum alarme dos tipos selecionados.";
+    if (_selectedOnly && !scopeIds) {
+      msg = "Selecione um site ou cluster na lista.";
+    } else if (_selectedOnly) {
+      msg = "Nenhum alarme no site/cluster selecionado.";
+    } else if (_eventOnly && alarms.length) {
+      msg = `Nenhum alarme nos sites do evento (${alarms.length} na rede).`;
+    }
     list.innerHTML = `<div class="alarms-empty">${msg}</div>`;
     return;
   }

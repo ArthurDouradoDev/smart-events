@@ -14,7 +14,7 @@
   <script src="lib/chart.umd.min.js"></script>
   <script src="lib/chartjs-plugin-annotation.min.js"></script>
 
-  <link rel="stylesheet" href="css/main.css?v=20260821-kpi-overview-r2">
+  <link rel="stylesheet" href="css/main.css?v=20260826-alert-site-filter">
 </head>
 
 <body>
@@ -303,6 +303,12 @@
         <button id="alert-drawer-close" class="icon-btn">&#10005;</button>
       </div>
     </div>
+    <div id="alert-filter">
+      <label class="alarms-scope">
+        <input type="checkbox" id="alerts-selected-only">
+        Somente site/cluster selecionado
+      </label>
+    </div>
     <div id="alert-list">
       <!-- Renderizado por alerts.js -->
     </div>
@@ -324,10 +330,16 @@
       </div>
     </div>
     <div id="alarms-filter">
-      <label class="alarms-scope">
-        <input type="checkbox" id="alarms-event-only" checked>
-        Somente sites do evento
-      </label>
+      <div class="alarms-scope-stack">
+        <label class="alarms-scope">
+          <input type="checkbox" id="alarms-event-only" checked>
+          Somente sites do evento
+        </label>
+        <label class="alarms-scope">
+          <input type="checkbox" id="alarms-selected-only">
+          Somente site/cluster selecionado
+        </label>
+      </div>
       <button id="alarms-filter-toggle" class="btn btn-ghost btn-sm">Tipos de alarme ▾</button>
       <div id="alarms-filter-panel" class="hidden">
         <input type="text" id="alarms-filter-search" class="site-search-input" placeholder="Filtrar tipos...">
@@ -606,7 +618,7 @@
   </div>
 
   <!-- Scripts (ES Modules) -->
-  <script type="module" src="js/app.js?v=20260821-kpi-overview-r2"></script>
+  <script type="module" src="js/app.js?v=20260826-earfcn-alert-filter"></script>
 </body>
 
 </html>

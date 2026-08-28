@@ -51,6 +51,14 @@ KPI_OVERVIEW_METRICS = {
 # oito cores estaveis — acima disso as linhas deixam de ser distinguiveis.
 KPI_OVERVIEW_MAX_SCOPES = 8
 
+# Paleta dos clusters automáticos por portadora, defasada da do cadastro
+# (que começa em vermelho/azul) para não colidir quando os dois tipos
+# aparecem juntos na visão geral.
+_EARFCN_CLUSTER_COLORS = (
+    "#3FB950", "#D29922", "#ab7df6", "#f692cc",
+    "#00d2ff", "#FF7B00", "#F85149", "#388BFD",
+)
+
 
 # Consolidacao entre escopos: o melhor motivo vence (ver get_kpi_overview_multi).
 _REASON_RANK = {"ok": 0, "no_traffic": 1, "no_data": 2}
@@ -749,11 +757,82 @@ class Api:
             for site_id, cell_ids in selections.items()
         ]
 
-    @staticmethod
-    def _find_cluster(config: dict, cluster_id: str) -> dict | None:
+    @classmethod
+    def _cell_earfcn(cls, cell) -> str | None:
+        if not isinstance(cell, dict):
+            return None
+        value = cell.get("earfcn")
+        if value is None or value == "":
+            return None
+        try:
+            numeric = float(value)
+            if not math.isfinite(numeric) or not numeric.is_integer() or numeric < 0:
+                return None
+            return str(int(numeric))
+        except (TypeError, ValueError):
+            text = str(value).strip()
+            return text if text.isdigit() else None
+
+    @classmethod
+    def _earfcn_clusters(cls, config: dict) -> list[dict]:
+        """Clusters sintéticos: uma portadora LTE (DLEARFCN) = um recorte de células.
+
+        Só entram células 4G (ou sem família declarada) que tenham ``earfcn``.
+        Células 5G ficam de fora — NRARFCN não é DLEARFCN. O id é estável
+        (``earfcn-<valor>``) para o dashboard e a visão geral reencontrarem
+        o mesmo escopo entre ciclos.
+        """
+        grouped: dict[str, dict[str, list[str]]] = {}
+        for site in (config or {}).get("sites") or []:
+            site_id = site.get("id")
+            if site_id is None:
+                continue
+            site_id = str(site_id)
+            for cell in site.get("cells") or []:
+                if cls._cell_technology_family(cell) == "5G":
+                    continue
+                earfcn = cls._cell_earfcn(cell)
+                if not earfcn:
+                    continue
+                cell_id = cell if isinstance(cell, str) else cell.get("id")
+                if not cell_id:
+                    continue
+                grouped.setdefault(earfcn, {}).setdefault(site_id, []).append(str(cell_id))
+
+        clusters = []
+        ordered = sorted(grouped, key=lambda value: (0, int(value)) if value.isdigit() else (1, value))
+        for index, earfcn in enumerate(ordered):
+            members = [
+                {"site_id": site_id, "cell_ids": cell_ids}
+                for site_id, cell_ids in grouped[earfcn].items()
+            ]
+            clusters.append({
+                "id": f"earfcn-{earfcn}",
+                "name": f"Portadora {earfcn}",
+                "color": _EARFCN_CLUSTER_COLORS[index % len(_EARFCN_CLUSTER_COLORS)],
+                "source": "earfcn",
+                "members": members,
+                "polygon": [],
+            })
+        return clusters
+
+    @classmethod
+    def _clusters_of(cls, config: dict) -> list[dict]:
+        """Clusters cadastrados + portadoras geradas a partir do DLEARFCN.
+
+        Um cluster salvo com o mesmo id (``earfcn-1276``) ganha da geração
+        automática — o operador pode ter editado nome/cor.
+        """
+        configured = [c for c in (config or {}).get("clusters") or [] if c.get("id")]
+        seen = {c["id"] for c in configured}
+        extra = [c for c in cls._earfcn_clusters(config) if c["id"] not in seen]
+        return configured + extra
+
+    @classmethod
+    def _find_cluster(cls, config: dict, cluster_id: str) -> dict | None:
         if not cluster_id:
             return None
-        for cluster in (config or {}).get("clusters") or []:
+        for cluster in cls._clusters_of(config):
             if cluster.get("id") == cluster_id:
                 return cluster
         return None
@@ -870,7 +949,7 @@ class Api:
             crit = threshold_value(thresholds.get("utilization_critical"), 95)
 
             cluster_membership: dict[str, list[str]] = {}
-            for cluster in config.get("clusters") or []:
+            for cluster in self._clusters_of(config):
                 cluster_id = cluster.get("id")
                 if not cluster_id:
                     continue
@@ -1015,7 +1094,7 @@ class Api:
                 return []
             merged = self._merged_sites(config)
             out = []
-            for cluster in config.get("clusters") or []:
+            for cluster in self._clusters_of(config):
                 if not cluster.get("id"):
                     continue
                 selections = self._cluster_raw_selections(cluster, merged, config)
@@ -1032,7 +1111,7 @@ class Api:
                     else:
                         cell_count += len(selected_cells)
                         has_partial = has_partial or len(selected_cells) < len(available)
-                out.append({
+                entry = {
                     "id":         cluster["id"],
                     "name":       cluster.get("name") or cluster["id"],
                     "color":      cluster.get("color"),
@@ -1040,7 +1119,10 @@ class Api:
                     "cell_count": cell_count,
                     "has_partial_selection": has_partial,
                     "polygon":    cluster.get("polygon") or [],
-                })
+                }
+                if cluster.get("source"):
+                    entry["source"] = cluster["source"]
+                out.append(entry)
             return out
         except Exception as e:
             logger.error(f"get_clusters error: {e}")
@@ -2129,9 +2211,54 @@ class Api:
 
     # ── Alertas ──────────────────────────────────────────────────────
 
+    @staticmethod
+    def _alert_is_cell_level(alert: dict) -> bool:
+        message = str(alert.get("message") or "").lower()
+        if "célula" in message or "celula" in message:
+            return True
+        if "rsrp" in message:
+            return True
+        site_id = str(alert.get("site_id") or "")
+        cell_id = str(alert.get("cell_id") or "")
+        return bool(cell_id) and cell_id == site_id and not site_id.isdigit()
+
+    def _enrich_alerts(self, event_id: str, alerts: list) -> list:
+        """Resolve enodebID cru para nome de site/célula e o site fundido dono.
+
+        O banco guarda o id técnico da medição. A tela e o log de download
+        mostram o nome: site nas alertas de utilização, célula nas de
+        acessibilidade e de RSRP do VIP.
+        """
+        config = db.get_event(event_id) or _active_event or {}
+        merged = self._merged_sites(config) if config else []
+        resolve = self._create_cell_resolver(merged)
+        for alert in alerts:
+            site_id = str(alert.get("site_id") or "")
+            cell_id = str(alert.get("cell_id") or "")
+            site = self._find_merged_site(merged, site_id)
+            if not site:
+                resolved = resolve(site_id) or resolve(cell_id)
+                site = self._find_merged_site(merged, resolved) if resolved else None
+            site_name = (site or {}).get("name") or None
+            serving = (site or {}).get("id")
+            cell_name = cell_id or None
+            if self._alert_is_cell_level(alert):
+                display = cell_name or site_name or site_id
+            else:
+                display = site_name or site_id
+            alert["site_name"] = site_name
+            alert["cell_name"] = cell_name
+            alert["display_name"] = display or site_id or "GLOBAL"
+            alert["serving_site"] = serving
+            message = alert.get("message") or ""
+            if site_id and site_name and site_id != site_name and site_id.isdigit():
+                message = message.replace(site_id, site_name)
+                alert["message"] = message
+        return alerts
+
     def get_alerts(self, event_id: str, timestamp: Optional[str] = None) -> list:
         try:
-            return db.get_active_alerts(event_id, timestamp)
+            return self._enrich_alerts(event_id, db.get_active_alerts(event_id, timestamp))
         except Exception as e:
             logger.error(f"get_alerts error: {e}")
             return []
@@ -2177,7 +2304,7 @@ class Api:
 
     def download_alerts_log(self, event_id: str) -> dict:
         try:
-            alerts = db.get_all_alerts(event_id)
+            alerts = self._enrich_alerts(event_id, db.get_all_alerts(event_id))
             if not alerts:
                 return {"ok": False, "error": "Nenhum alerta disponível para download neste evento."}
 
@@ -2200,7 +2327,7 @@ class Api:
             with open(file_path, "w", encoding="utf-8") as f:
                 for a in alerts:
                     ack_status = "LIDO" if a.get("acknowledged") else "ATIVO"
-                    site = a.get("site_id") or "GLOBAL"
+                    site = a.get("display_name") or a.get("site_name") or a.get("site_id") or "GLOBAL"
                     cell = f"/{a.get('cell_id')}" if a.get("cell_id") else ""
                     f.write(
                         f"[{a.get('timestamp')}] [{a.get('severity')}] [{a.get('level')}] "

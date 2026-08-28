@@ -7,15 +7,27 @@ import API   from "./bridge.js";
 
 // ── Inicialização ─────────────────────────────────────────────────
 
+let _selectedOnly = false;
+
 export function initAlerts() {
   State.on("change:alerts", _renderDrawer);
   State.on("change:alerts", _updateBadge);
+  State.on("change:selectedSite", () => _renderDrawer(State.alerts));
+  State.on("change:sites", () => {
+    if (_selectedOnly) _renderDrawer(State.alerts);
+  });
 
   document.getElementById("alert-btn").addEventListener("click", _toggleDrawer);
   document.getElementById("alert-drawer-close")?.addEventListener("click", _closeDrawer);
   document.getElementById("alert-mark-read-btn")?.addEventListener("click", _markAllAsRead);
   document.getElementById("alert-delete-all-btn")?.addEventListener("click", _deleteAllAlerts);
   document.getElementById("alert-download-btn")?.addEventListener("click", _downloadAlertsLog);
+
+  const selectedOnly = document.getElementById("alerts-selected-only");
+  selectedOnly?.addEventListener("change", () => {
+    _selectedOnly = selectedOnly.checked;
+    _renderDrawer(State.alerts);
+  });
 }
 
 // ── Badge do header ───────────────────────────────────────────────
@@ -29,7 +41,17 @@ function _updateBadge(alerts) {
 
 // ── Drawer ────────────────────────────────────────────────────────
 
+function _inSelectedScope(alert, ids) {
+  if (!ids) return false;
+  return [alert.serving_site, alert.site_id].some(value => value && ids.has(value));
+}
+
+function _alertTitle(alert) {
+  return alert.display_name || alert.site_name || alert.cell_name || alert.site_id || "";
+}
+
 function _renderDrawer(alerts) {
+  alerts = alerts || [];
   const list = document.getElementById("alert-list");
   if (!list) return;
 
@@ -44,13 +66,26 @@ function _renderDrawer(alerts) {
   if (deleteBtn) deleteBtn.classList.toggle("hidden", hideButtons);
   if (downloadBtn) downloadBtn.classList.toggle("hidden", alerts.length === 0);
 
+  const scopeIds = _selectedOnly ? State.selectedScopeIds : null;
+  const shown = _selectedOnly
+    ? alerts.filter(alert => _inSelectedScope(alert, scopeIds))
+    : alerts;
+
   if (!alerts.length) {
     list.innerHTML = `<div style="padding:16px;color:#484F58;font-size:12px">Nenhum alerta ativo.</div>`;
     return;
   }
+  if (_selectedOnly && !scopeIds) {
+    list.innerHTML = `<div style="padding:16px;color:#484F58;font-size:12px">Selecione um site ou cluster na lista.</div>`;
+    return;
+  }
+  if (!shown.length) {
+    list.innerHTML = `<div style="padding:16px;color:#484F58;font-size:12px">Nenhum alerta no site/cluster selecionado.</div>`;
+    return;
+  }
 
   list.innerHTML = "";
-  [...alerts].sort((a, b) => {
+  [...shown].sort((a, b) => {
     const sev = { CRITICAL: 0, WARNING: 1 };
     return (sev[a.severity] ?? 2) - (sev[b.severity] ?? 2);
   }).forEach(alert => {
@@ -62,7 +97,7 @@ function _renderDrawer(alerts) {
       : "";
     item.innerHTML = `
       <div class="alert-item-body">
-        <div class="alert-item-title">${_severityLabel(alert.severity)} ${_esc(alert.site_id)}</div>
+        <div class="alert-item-title">${_severityLabel(alert.severity)} ${_esc(_alertTitle(alert))}</div>
         <div class="alert-item-msg">${_esc(_displayMessage(alert))}</div>
         <div class="alert-item-time">${_formatTime(alert.timestamp)}</div>
       </div>

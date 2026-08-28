@@ -1474,6 +1474,12 @@ input[type="range"] {
   border-bottom: 1px solid var(--border);
   flex-shrink: 0;
 }
+.alarms-scope-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 8px;
+}
 .alarms-scope {
   display: flex;
   align-items: center;
@@ -1483,7 +1489,14 @@ input[type="range"] {
   cursor: pointer;
   margin-bottom: 8px;
 }
+.alarms-scope-stack .alarms-scope { margin-bottom: 0; }
 .alarms-scope input { width: auto; accent-color: var(--accent); }
+#alert-filter {
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+#alert-filter .alarms-scope { margin-bottom: 0; }
 #alarms-filter-toggle { width: 100%; text-align: left; }
 .alarm-site { color: var(--text-secondary); margin-left: 6px; }
 #alarms-filter-panel { margin-top: 8px; }

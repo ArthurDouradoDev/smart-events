@@ -52,6 +52,26 @@ def _normalize_frequency(value) -> Optional[str]:
     return str(int(match.group(1))) if match else None
 
 
+def _normalize_earfcn(value) -> Optional[str]:
+    """Normaliza DLEARFCN/EARFCN da EP para um inteiro em texto.
+
+    EARFCN cabe em 0–65535 (1 a 5 dígitos). Não reusa o parser de banda,
+    que exige 3/4 dígitos e rejeitaria portadoras baixas da banda 1.
+    """
+    if _is_missing_cell_value(value):
+        return None
+
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        numeric = float(value)
+        if not math.isfinite(numeric) or not numeric.is_integer() or numeric < 0:
+            return None
+        return str(int(numeric))
+
+    text = str(value).strip()
+    match = re.fullmatch(r"(\d+)(?:[.,]0+)?", text)
+    return str(int(match.group(1))) if match else None
+
+
 def _normalize_technology(value, frequency: Optional[str]) -> Optional[str]:
     """Converte aliases comuns para as famílias visuais do mapa.
 
@@ -187,6 +207,7 @@ async def parse_sites(file: UploadFile = File(...)):
             'frequency': ['band', 'banda', 'frequency', 'frequencia', 'frequência', 'freq'],
             'tech': ['tech', 'technology', 'tecnologia', 'tecnologia móvel', 'rat'],
             'cluster': ['cluster', 'grupo', 'agrupamento', 'setor', 'area', 'área'],
+            'earfcn': ['dlearfcn', 'dl_earfcn', 'earfcn', 'dl earfcn', 'dlearfcnid'],
         }
 
         # Rename columns if candidates match
@@ -253,6 +274,7 @@ async def parse_sites(file: UploadFile = File(...)):
             if cell_id not in existing_cells:
                 frequency = _normalize_frequency(row.get('frequency'))
                 technology = _normalize_technology(row.get('tech'), frequency)
+                earfcn = _normalize_earfcn(row.get('earfcn')) if 'earfcn' in df.columns else None
                 cell = {
                     "id": cell_id,
                     "azimuth": azimuth,
@@ -262,6 +284,8 @@ async def parse_sites(file: UploadFile = File(...)):
                     cell["tech"] = technology
                 if frequency:
                     cell["frequency"] = frequency
+                if earfcn is not None:
+                    cell["earfcn"] = earfcn
                 sites_dict[site_id]["cells"].append(cell)
 
             # Coluna opcional de cluster: valores separados por ";" atribuem o site

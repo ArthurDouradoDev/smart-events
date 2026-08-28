@@ -806,6 +806,173 @@ class TestClusters:
         }]
 
 
+class TestEarfcnClusters:
+    def test_sem_dlearfcn_nao_inventa_cluster(self, api, sample_event):
+        database.save_event(sample_event)
+
+        assert all(c.get("source") != "earfcn" for c in api.get_clusters(sample_event["id"]))
+
+    def test_agrupa_celulas_4g_pela_portadora(self, api, sample_event):
+        event = {
+            **sample_event,
+            "id": "earfcn-event",
+            "sites": [{
+                **sample_event["sites"][0],
+                "cells": [
+                    {"id": "SR-SPPNB2_1", "azimuth": 0, "beamwidth": 120,
+                     "tech": "4G", "earfcn": "1276"},
+                    {"id": "SR-SPPNB2_2", "azimuth": 120, "beamwidth": 120,
+                     "tech": "4G", "earfcn": "1276"},
+                    {"id": "SR-SPPNB2_3", "azimuth": 240, "beamwidth": 120,
+                     "tech": "4G", "earfcn": "1700"},
+                ],
+            }],
+        }
+        database.save_event(event)
+
+        clusters = {c["id"]: c for c in api.get_clusters(event["id"])}
+
+        assert clusters["earfcn-1276"]["name"] == "Portadora 1276"
+        assert clusters["earfcn-1276"]["source"] == "earfcn"
+        assert clusters["earfcn-1276"]["cell_count"] == 2
+        assert clusters["earfcn-1276"]["has_partial_selection"] is True
+        assert clusters["earfcn-1700"]["cell_count"] == 1
+        assert clusters["earfcn-1700"]["has_partial_selection"] is True
+
+        sites = {site["id"]: site for site in api.get_sites(event["id"])}
+        assert "earfcn-1276" in sites["SR-SPPNB2"]["cluster_ids"]
+        assert "earfcn-1700" in sites["SR-SPPNB2"]["cluster_ids"]
+
+    def test_nao_mistura_celulas_5g_mesmo_com_earfcn_preenchido(self, api, sample_event):
+        event = _twin_sites_event(sample_event, "earfcn-twin")
+        for site in event["sites"]:
+            for cell in site["cells"]:
+                if str(cell["id"]).startswith("4G-"):
+                    cell["earfcn"] = "1276"
+                    cell["tech"] = "4G"
+                else:
+                    cell["earfcn"] = "627264"
+                    cell["tech"] = "5G"
+        database.save_event(event)
+
+        ids = {c["id"] for c in api.get_clusters(event["id"])}
+
+        assert "earfcn-1276" in ids
+        assert "earfcn-627264" not in ids
+        clusters = {c["id"]: c for c in api.get_clusters(event["id"])}
+        # 12 + 6 + 10 células 4G dos três sites do fixture de gêmeos.
+        assert clusters["earfcn-1276"]["cell_count"] == 28
+
+    def test_serie_do_cluster_de_portadora_agrega_so_as_celulas_da_earfcn(
+            self, api, sample_event):
+        event = {
+            **sample_event,
+            "id": "earfcn-series",
+            "sites": [{
+                **sample_event["sites"][0],
+                "cells": [
+                    {"id": "SR-SPPNB2_1", "azimuth": 0, "tech": "4G", "earfcn": "1276"},
+                    {"id": "SR-SPPNB2_2", "azimuth": 120, "tech": "4G", "earfcn": "1700"},
+                ],
+            }],
+        }
+        database.save_event(event)
+        _insert_cell_kpi(event["id"], "SR-SPPNB2", "SR-SPPNB2_1", "4G", 10.0)
+        _insert_cell_kpi(event["id"], "SR-SPPNB2", "SR-SPPNB2_2", "4G", 90.0)
+
+        result = api.get_kpi_series(
+            event["id"], None, "utilization_dl", minutes=0,
+            scope="cluster", scope_id="earfcn-1276")
+
+        assert result["series"][0]["values"] == [10.0]
+
+    def test_cluster_salvo_com_mesmo_id_nao_e_duplicado(self, api, sample_event):
+        event = {
+            **sample_event,
+            "id": "earfcn-override",
+            "clusters": [{
+                "id": "earfcn-1276", "name": "Banda 1800", "color": "#ffffff",
+                "members": [{"site_id": "SR-SPPNB2", "all_cells": True}],
+            }],
+            "sites": [{
+                **sample_event["sites"][0],
+                "cells": [
+                    {"id": "SR-SPPNB2_1", "azimuth": 0, "tech": "4G", "earfcn": "1276"},
+                ],
+            }],
+        }
+        database.save_event(event)
+
+        earfcn = [c for c in api.get_clusters(event["id"]) if c["id"] == "earfcn-1276"]
+
+        assert len(earfcn) == 1
+        assert earfcn[0]["name"] == "Banda 1800"
+
+
+class TestAlertDisplayNames:
+    def _insert(self, event_id, **fields):
+        payload = {
+            "event_id": event_id,
+            "level": "EVENT",
+            "severity": "CRITICAL",
+            "timestamp": "2026-06-01T10:00:00Z",
+            **fields,
+        }
+        database.insert_alert(payload)
+
+    def test_utilizacao_mostra_nome_do_site(self, api, sample_event):
+        database.save_event(sample_event)
+        self._insert(
+            sample_event["id"],
+            site_id="SR-SPPNB2", cell_id="SR-SPPNB2_1",
+            message="Utilização DL crítica: 96% em SR-SPPNB2",
+        )
+
+        alert = api.get_alerts(sample_event["id"])[0]
+
+        assert alert["display_name"] == "SR-SPPNB2"
+        assert alert["serving_site"] == "SR-SPPNB2"
+
+    def test_acessibilidade_mostra_nome_da_celula(self, api, sample_event):
+        database.save_event(sample_event)
+        self._insert(
+            sample_event["id"],
+            site_id="SR-SPPNB2", cell_id="SR-SPPNB2_1",
+            message="Acessibilidade crítica: 50.0% na célula SR-SPPNB2_1",
+        )
+
+        assert api.get_alerts(sample_event["id"])[0]["display_name"] == "SR-SPPNB2_1"
+
+    def test_enodebid_numerico_vira_nome_do_site_fundido(self, api, sample_event):
+        event = _twin_sites_event(sample_event, "alert-merged")
+        database.save_event(event)
+        self._insert(
+            event["id"],
+            site_id="725483", cell_id="4G-SPSMG7-0",
+            message="Utilização DL crítica: 96% em 725483",
+        )
+
+        alert = api.get_alerts(event["id"])[0]
+
+        assert alert["display_name"] == "SPSMG7"
+        assert alert["serving_site"] == "SPSMG7"
+        assert "725483" not in alert["message"]
+        assert "SPSMG7" in alert["message"]
+
+    def test_rsrp_do_vip_mostra_a_celula(self, api, sample_event):
+        database.save_event(sample_event)
+        self._insert(
+            sample_event["id"],
+            site_id="SR-SPPNB2_1", cell_id="SR-SPPNB2_1",
+            message="RSRP crítico para VIP: -112 dBm",
+        )
+
+        alert = api.get_alerts(sample_event["id"])[0]
+
+        assert alert["display_name"] == "SR-SPPNB2_1"
+        assert alert["serving_site"] == "SR-SPPNB2"
+
+
 class TestEventCells:
     """`get_event_cells` alimenta o filtro por células da Visão Geral."""
 

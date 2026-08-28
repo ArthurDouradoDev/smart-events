@@ -1077,3 +1077,131 @@ pedido.
 **Gate:** `pytest tests/test_frontend_kpi_overview_ui.py -q` → **15 passed** (11 + 4 novos:
 sem seleção cai para células dos clusters; recorta por cluster selecionado; recorta por site
 selecionado; célula já escolhida sobrevive à troca de site).
+
+---
+
+## 2026-08-26 — Clusters por portadora (DLEARFCN), nomes nos alertas, filtro pelo site selecionado
+
+Três pedidos do operador, implementados juntos.
+
+### 1. Clusters automáticos por EARFCN na visão geral 4G
+
+A EP (`ep_default.xlsx`) ganhou a coluna `DLEARFCN`. `server.py::parse_sites` aceita
+`dlearfcn`/`earfcn`/`dl_earfcn` (fora do `required`) e grava `cell.earfcn` como inteiro
+em texto. Sem a coluna, a importação continua igual.
+
+`Api._earfcn_clusters` gera um cluster sintético por valor de DLEARFCN, só com células
+4G (5G fica de fora mesmo que o campo venha preenchido — NRARFCN não é DLEARFCN). O
+recorte é granular (`members[].cell_ids`), então o agregado de KPI combina só as células
+daquela portadora, não o site inteiro. Id estável: `earfcn-<valor>`; nome: `Portadora
+<valor>`; `source: "earfcn"`.
+
+Eles **não** entram no cadastro — são gerados na leitura (`_clusters_of`), para não
+misturar com os clusters geográficos que o operador monta à mão. Um cluster salvo com o
+mesmo id ganha da geração (o operador pode ter editado nome/cor). Sem `earfcn` nas
+células, nada é inventado. Eventos já importados só passam a ter portadoras depois de
+reimportar a EP.
+
+A visão geral 4G seleciona esses clusters por padrão ao abrir (até 8, o teto da paleta),
+mesmo com um site marcado na lista — o dashboard sempre deixa um site selecionado, e isso
+não pode esconder o recorte por portadora. Cluster explícito no dashboard
+(`cluster:<id>` ou `clusters:compare`) continua herdado. Aba 5G não muda.
+
+### 2. Alertas mostram nome do site/célula, não o enodebID
+
+O banco continua gravando o id técnico. `Api._enrich_alerts` (em `get_alerts` e no
+download do log) resolve para o site fundido e preenche `display_name` / `serving_site` /
+`site_name`. Utilização → nome do site; acessibilidade ("na célula") e RSRP de VIP →
+nome da célula. eNodeB numérico na mensagem (`em 725483`) é trocado pelo nome na
+resposta, sem regravar o banco.
+
+### 3. Filtro "Somente site/cluster selecionado"
+
+Mesmo padrão do checkbox "Somente sites do evento" dos alarmes: um novo em Alarmes e a
+cópia em Alertas. Desmarcado por padrão. Quando marcado, a lista recorta pelo
+`State.selectedSite` da lista inferior esquerda (site fundido + membros 4G/5G, ou os
+sites do cluster / comparativo). Sem seleção, a lista pede para escolher um site. O
+badge do header não muda (alertas não lidos / críticos no evento).
+
+**Gate:** `pytest tests/ -q --ignore=tests/test_http_vpn.py` → **546 passed**.
+
+## 2026-08-27 — Open API do MAE (V100R026C10): viabilidade como substituta da coleta
+
+Análise do *iMaster MAE-Access Open API Developer Guide*, Issue 01 (2026-04-30, 276 páginas),
+comparado contra `core/collector.py`, `core/session_renew.py` e `core/scheduler.py`.
+Relatório completo: https://claude.ai/code/artifact/6faa8daa-ca43-4751-9a83-ff245a8dc111
+
+**Fatos permanentes (não repetir a pesquisa):**
+
+1. **A Open API vive na porta 31127**, no APIGWService — não na 31943 que o projeto usa hoje
+   (`data/clientes.json`: 10.220.50.9, 10.220.30.9, 187.100.113.3). Porta diferente, liberação
+   de VPN diferente. Nada mais importa antes de provar que ela responde.
+2. **Autenticação é token puro, sem navegador.** `PUT /api/rest/securityManagement/v1/oauth/token`
+   com `{grantType,userName,value}` → `{accessSession, roaRand, expires:1800}`. Depois,
+   `X-Auth-Token: <accessSession>` em todo request; `POST /oauth/handshake` renova;
+   `DELETE /oauth/token` encerra. Sessão de 30 min, renovada a cada uso.
+   Isso tornaria `session_renew.py` (Playwright + Chromium + CAPTCHA/SSO + `bspsession`/`roarand`)
+   desnecessário para os módulos migrados.
+   ⚠ 5 senhas erradas **bloqueiam a conta** no OSS, com desbloqueio manual — proibido retry cego.
+3. **A API de PM não é o Monitoring.** Ela lê o banco de resultados de PM, não o Performance
+   Monitor em tempo real que o projeto usa (GP 1 min, cursor `preExecTime`, ciclo 120 s).
+   O guia exige que `period` da consulta seja igual ao período da subscrição; os períodos que
+   aparecem no documento são 15 e 5 minutos, `period: 10` é rejeitado como inválido, e
+   **1 minuto não aparece em lugar nenhum**. Migrar KPI = painel de 5–15 min, não de 2 min.
+   → É decisão de produto, não técnica. Não migrar KPI sem essa resposta.
+4. **Não existe API de trace / measurement report / CHR / VIP** em nenhuma das 276 páginas.
+   Enquanto o VIP existir no produto, o scraping do FARS e o Playwright continuam no código.
+   Pedido pendente ao chefe: verificar se há documento de NBI separado para trace/MR.
+5. **Filtro de alarmes não tem campo de NE.** Campos filtráveis: alarmId, alarmRaisedTime,
+   alarmClearedTime, ackTime, csn, productName, perceivedSeverity, alarmType. Fonte do alarme só
+   via `baseObjectInstance`, que aceita **um** NE. Estratégia viável: filtrar por
+   `alarmRaisedTime > cursor` + severidade e recortar por site localmente.
+6. **Ganhos estruturais se migrar:** `objectName` do PM volta estruturado
+   (`Cell Name`, `Local Cell ID`, `eNodeB ID`) — a camada `_obj_to_cell` / `_resolve_monitoring_cell`
+   / `_log_unmapped` deixa de ser necessária. `topocellsinfo` dá estado real de célula
+   (bloqueada/desativada) e DN canônico, resolvendo na origem a fusão 4G/5G por prefixo de nome.
+   `POST /performanceManagement/v1/measurement` (Subscribe/Cancel) permite o app provisionar as
+   próprias tasks de PM, eliminando a dependência de tasks criadas à mão na GUI.
+
+**Decisão recomendada: híbrido, não substituição.** Fase 0 provar a porta 31127 → Fase 1 alarmes →
+Fase 2 topologia/NE list → Fase 3 KPI só após decidir granularidade. VIP fica como está.
+
+**Pendências que dependem do cliente:** usuário third-party por regional (papel "NBI OpenAPI User
+Group", criado por SMManagers), liberação da 31127, licença de NBI (retCode 90030 = sem licença),
+certificado do APIGWService para TLS, e versão do MAE por regional (este guia é V100R026C10).
+
+### 2026-08-27 — Fase 0 EXECUTADA: a Open API está no ar em TIM OUTRAS
+
+Sondagem dos três OSS (`data/clientes.json`), comparando 31943 (GUI, usada hoje) e 31127 (APIGW):
+
+| Regional | Host | 31943 | 31127 | Leitura |
+|---|---|---|---|---|
+| TIM SP | 10.220.50.9 | aberta | **timeout** | Rota até o host OK; porta da API descartada → firewall/ACL |
+| TIM OUTRAS | 10.220.30.9 | aberta | **aberta** | Gateway no ar |
+| Vivo SP | 187.100.113.3 | timeout | timeout | GUI também não responde → VPN da Vivo desconectada; **inconclusivo** |
+
+`curl: (28)` é *timeout*, não `Connection refused` (erro 7). Timeout = pacote descartado no
+caminho (firewall). Recusa = host alcançável e serviço parado. A distinção decide a quem pedir o quê.
+
+**Confirmado em 10.220.30.9:31127, sem enviar credencial nenhuma:**
+- TLS 1.2 / ECDHE-RSA-AES128-GCM-SHA256, como manda a seção 2.4 do guia.
+- `GET /oauth/token` → 405 `99050 Method not allowed`
+- `GET /faultSupervisonManagement/v1/alarms` → 401 `99010 Invalid credentials`
+- `GET /api/rest/caminho/inexistente` → 404 `99040 Url not found: can not find api`
+
+**Técnica de auditoria sem login (reutilizável):** 404/`99040` = rota NÃO publicada;
+401 ou 405 = rota publicada. Aplicada às 20 rotas do guia em TIM OUTRAS:
+**20 de 20 publicadas** — PM v1 e v2, FM + máscaras, topologia (topocellsinfo, neList,
+lite/fullQuery), inventário, MML (comando e tasks), subscrição de medição, backup de NE,
+iSStar e contas. **Nenhum `90030`** (licença ausente).
+
+**Conclusão:** não há bloqueio de rede, deployment ou licença em TIM OUTRAS. O único
+bloqueio é **o usuário third-party**, que só um SMManagers cria. O piloto (Fase 1 — alarmes)
+pode começar por OUTRAS sem esperar a liberação de firewall de SP.
+
+**Scripts da sondagem** (reutilizáveis, sem credencial):
+`scratchpad/probe.py` (matriz host×porta) e `scratchpad/published.py` (mapa de rotas publicadas).
+Rodam com o Python da `.venv` do projeto — o Python global não tem `requests`.
+
+⚠ Não usar usuário real com senha errada para testar: 5 tentativas bloqueiam a conta no OSS.
+As sondagens acima nunca enviam credencial, justamente por isso.

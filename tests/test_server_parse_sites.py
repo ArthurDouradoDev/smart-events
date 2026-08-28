@@ -122,3 +122,50 @@ def test_valores_opcionais_invalidos_sao_ignorados():
 
     assert "frequency" not in cell
     assert "tech" not in cell
+
+
+def test_dlearfcn_da_ep_e_gravado_na_celula():
+    csv_text = (
+        f"{_BASE_COLUMNS},dlearfcn\n"
+        "SITE1,SITE1-A,SITE1-A,-23.5,-46.6,0,111,1276\n"
+        "SITE1,SITE1-B,SITE1-B,-23.5,-46.6,120,111,1700.0\n"
+    )
+
+    cells = _parse(csv_text)["sites"][0]["cells"]
+
+    assert cells[0]["earfcn"] == "1276"
+    assert cells[1]["earfcn"] == "1700"
+
+
+@pytest.mark.parametrize("header", ["dlearfcn", "earfcn", "dl_earfcn"])
+def test_aliases_de_earfcn_sao_aceitos(header):
+    csv_text = (
+        f"{_BASE_COLUMNS},{header}\n"
+        "SITE1,SITE1-A,SITE1-A,-23.5,-46.6,0,111,12345\n"
+    )
+
+    cell = _parse(csv_text)["sites"][0]["cells"][0]
+
+    assert cell["earfcn"] == "12345"
+
+
+def test_coluna_dlearfcn_ausente_nao_quebra_importacao():
+    csv_text = (
+        f"{_BASE_COLUMNS}\n"
+        "SITE1,SITE1-A,SITE1-A,-23.5,-46.6,0,111\n"
+    )
+
+    cell = _parse(csv_text)["sites"][0]["cells"][0]
+
+    assert "earfcn" not in cell
+
+
+def test_dlearfcn_invalido_e_ignorado():
+    csv_text = (
+        f"{_BASE_COLUMNS},dlearfcn\n"
+        "SITE1,SITE1-A,SITE1-A,-23.5,-46.6,0,111,nao-e-numero\n"
+    )
+
+    cell = _parse(csv_text)["sites"][0]["cells"][0]
+
+    assert "earfcn" not in cell

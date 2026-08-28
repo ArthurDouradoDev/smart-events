@@ -197,6 +197,11 @@ function _syncTimeTabs() {
 
 // ── Seleção de escopos ─────────────────────────────────────────────
 
+/** Clusters gerados automaticamente a partir do DLEARFCN das células 4G. */
+function _carrierClusters() {
+  return _scopeClusters.filter(cluster => cluster.source === "earfcn");
+}
+
 /** Herda o recorte que o usuário já tinha no dashboard ao abrir a visão geral. */
 function _applyPreferredSelection() {
   _selection.cluster.clear();
@@ -204,12 +209,17 @@ function _applyPreferredSelection() {
   _selection.cell.clear();
   const clusterIds = new Set(_scopeClusters.map(cluster => cluster.id));
   const siteIds = new Set(_scopeSites.map(site => site.id));
+  const carriers = _carrierClusters();
 
   if (State.selectedSite === "clusters:compare") {
     _scopeClusters.slice(0, MAX_SCOPES).forEach(cluster => _selection.cluster.add(cluster.id));
   } else if (typeof State.selectedSite === "string" && State.selectedSite.startsWith("cluster:")) {
     const id = State.selectedSite.slice("cluster:".length);
     if (clusterIds.has(id)) _selection.cluster.add(id);
+  } else if (_family === "4G" && carriers.length) {
+    // Visão geral 4G: portadoras (EARFCN) são o recorte padrão, à frente do
+    // site que o dashboard sempre deixa selecionado na lista.
+    carriers.slice(0, MAX_SCOPES).forEach(cluster => _selection.cluster.add(cluster.id));
   } else if (siteIds.has(State.selectedSite)) {
     _selection.site.add(State.selectedSite);
   }
