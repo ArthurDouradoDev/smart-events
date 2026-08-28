@@ -476,10 +476,11 @@ class Api:
         return [cell for cell in (cells or [])
                 if cls._cell_technology_family(cell) in (family, None)]
 
-    def _single_configured_family(self, config: dict) -> str | None:
+    @classmethod
+    def _single_configured_family(cls, config: dict) -> str | None:
         families = {
-            family for technology in self._configured_kpi_technologies(config)
-            if (family := self._technology_family(technology))
+            family for technology in cls._configured_kpi_technologies(config)
+            if (family := cls._technology_family(technology))
         }
         return next(iter(families)) if len(families) == 1 else None
 
@@ -495,6 +496,20 @@ class Api:
     def _normalize_site_name(cls, name) -> str:
         normalized = str(name or "").strip().upper()
         return cls._SITE_NAME_PREFIX_RE.sub("", normalized, count=1)
+
+    @staticmethod
+    def _display_site_name(name) -> str:
+        """Nome de exibição a partir do ``nename`` da EP (convenção TIM).
+
+        A rede usa duas formas de nomear site: sem hífen, o nome já é o do site;
+        com hífen, o que vem antes é o indicador de tecnologia e o que vem depois
+        é o nome (``5D-SACEO1`` → ``SACEO1``). O nome bruto não se perde — segue
+        em ``original_name`` no site fundido e intacto no banco.
+        """
+        text = str(name or "").strip()
+        if "-" not in text:
+            return text
+        return text.rsplit("-", 1)[-1].strip() or text
 
     @staticmethod
     def _distance_m(a: dict, b: dict) -> float | None:
@@ -533,7 +548,8 @@ class Api:
     @classmethod
     def _as_merged_site(cls, cluster: list[dict], site_id: str) -> dict:
         first = cluster[0]
-        name = first.get("name") or site_id
+        raw_name = first.get("name") or site_id
+        name = cls._display_site_name(raw_name) or raw_name
         cells = []
         members = []
         lats: list[float] = []
@@ -558,6 +574,7 @@ class Api:
         return {
             "id": site_id,
             "name": name,
+            "original_name": raw_name,
             "lat": (sum(lats) / len(lats)) if lats else first.get("lat"),
             "lng": (sum(lngs) / len(lngs)) if lngs else first.get("lng"),
             "members": members,
@@ -757,6 +774,34 @@ class Api:
             for site_id, cell_ids in selections.items()
         ]
 
+    def _site_carrier_selections(
+            self, config: dict, merged: list[dict], site_id: str, earfcn: str,
+            family: str | None) -> list[dict]:
+        """Recorta um site fundido pelas células de uma portadora (EARFCN).
+
+        Devolve seleções com ids de site **brutos** (membros), como
+        :meth:`_cluster_series_by_family` espera — nunca o id fundido.
+        """
+        site = self._find_merged_site(merged, site_id)
+        if not site:
+            return []
+        by_owner: dict[str, list[str]] = {}
+        for cell in site.get("cells") or []:
+            if self._cell_earfcn(cell) != earfcn:
+                continue
+            cell_family = cell.get("family") or self._single_configured_family(config)
+            if family and cell_family and cell_family != family:
+                continue
+            cell_id = cell.get("id")
+            if not cell_id:
+                continue
+            owner = self._owner_site_id_for_cell(site, cell_id, site_id)
+            by_owner.setdefault(owner, []).append(str(cell_id))
+        return [
+            {"site_id": owner, "cell_ids": cell_ids}
+            for owner, cell_ids in by_owner.items()
+        ]
+
     @classmethod
     def _cell_earfcn(cls, cell) -> str | None:
         if not isinstance(cell, dict):
@@ -775,22 +820,21 @@ class Api:
 
     @classmethod
     def _earfcn_clusters(cls, config: dict) -> list[dict]:
-        """Clusters sintéticos: uma portadora LTE (DLEARFCN) = um recorte de células.
+        """Clusters sintéticos: uma portadora (DLEARFCN/NR-ARFCN) = um recorte de células.
 
-        Só entram células 4G (ou sem família declarada) que tenham ``earfcn``.
-        Células 5G ficam de fora — NRARFCN não é DLEARFCN. O id é estável
-        (``earfcn-<valor>``) para o dashboard e a visão geral reencontrarem
-        o mesmo escopo entre ciclos.
+        4G e 5G entram — o NR-ARFCN chega na mesma coluna ``DLEARFCN`` da EP.
+        O id é estável (``earfcn-<valor>``) para o dashboard e a visão geral
+        reencontrarem o mesmo escopo entre ciclos; o pressuposto é que os
+        espaços numéricos de LTE EARFCN e NR-ARFCN não colidem.
         """
         grouped: dict[str, dict[str, list[str]]] = {}
+        families: dict[str, set[str]] = {}
         for site in (config or {}).get("sites") or []:
             site_id = site.get("id")
             if site_id is None:
                 continue
             site_id = str(site_id)
             for cell in site.get("cells") or []:
-                if cls._cell_technology_family(cell) == "5G":
-                    continue
                 earfcn = cls._cell_earfcn(cell)
                 if not earfcn:
                     continue
@@ -798,23 +842,58 @@ class Api:
                 if not cell_id:
                     continue
                 grouped.setdefault(earfcn, {}).setdefault(site_id, []).append(str(cell_id))
+                family = cls._cell_technology_family(cell) or cls._single_configured_family(config)
+                if family:
+                    families.setdefault(earfcn, set()).add(family)
 
         clusters = []
         ordered = sorted(grouped, key=lambda value: (0, int(value)) if value.isdigit() else (1, value))
-        for index, earfcn in enumerate(ordered):
+        color_index: dict[str | None, int] = {}
+        for earfcn in ordered:
             members = [
                 {"site_id": site_id, "cell_ids": cell_ids}
                 for site_id, cell_ids in grouped[earfcn].items()
             ]
+            earfcn_families = families.get(earfcn) or set()
+            family = next(iter(earfcn_families)) if len(earfcn_families) == 1 else None
+            index = color_index.get(family, 0)
+            color_index[family] = index + 1
             clusters.append({
                 "id": f"earfcn-{earfcn}",
                 "name": f"Portadora {earfcn}",
                 "color": _EARFCN_CLUSTER_COLORS[index % len(_EARFCN_CLUSTER_COLORS)],
                 "source": "earfcn",
+                "family": family,
                 "members": members,
                 "polygon": [],
             })
         return clusters
+
+    @classmethod
+    def _site_carriers(cls, cells: list, config: dict) -> list[dict]:
+        """Portadoras (EARFCN) presentes num conjunto de células, para `get_sites`."""
+        grouped: dict[str, list] = {}
+        for cell in cells or []:
+            earfcn = cls._cell_earfcn(cell)
+            if not earfcn:
+                continue
+            grouped.setdefault(earfcn, []).append(cell)
+        ordered = sorted(grouped, key=lambda value: (0, int(value)) if value.isdigit() else (1, value))
+        carriers = []
+        for earfcn in ordered:
+            group_cells = grouped[earfcn]
+            families = {
+                cell.get("family") or cls._single_configured_family(config)
+                for cell in group_cells
+            }
+            families.discard(None)
+            family = next(iter(families)) if len(families) == 1 else None
+            carriers.append({
+                "earfcn": earfcn,
+                "family": family,
+                "cell_count": len(group_cells),
+            })
+        return carriers
 
     @classmethod
     def _clusters_of(cls, config: dict) -> list[dict]:
@@ -976,6 +1055,7 @@ class Api:
                 sites_out.append({
                     "id":              site["id"],
                     "name":            site["name"],
+                    "original_name":   site.get("original_name") or site["name"],
                     "lat":             site["lat"],
                     "lng":             site["lng"],
                     "cells":           visible_cells,
@@ -989,6 +1069,7 @@ class Api:
                     "metric_is_share": False,
                     "is_event_site":   site.get("is_event_site", True),
                     "cluster_ids":     cluster_membership.get(site["id"], []),
+                    "carriers":        self._site_carriers(visible_cells, config),
                 })
 
             self._sites_cache[event_id] = sites_out
@@ -1003,6 +1084,7 @@ class Api:
                 for site in self._merged_sites(config):
                     fallback.append({
                         "id": site["id"], "name": site["name"],
+                        "original_name": site.get("original_name") or site["name"],
                         "lat": site["lat"], "lng": site["lng"],
                         "cells": site.get("cells", []), "status": "unknown",
                         "members": site.get("members") or [],
@@ -1011,6 +1093,7 @@ class Api:
                         "metric_is_share": False,
                         "is_event_site": site.get("is_event_site", True),
                         "cluster_ids": [],
+                        "carriers": self._site_carriers(site.get("cells", []), config),
                     })
                 self._sites_cache[event_id] = fallback
                 return fallback
@@ -1122,6 +1205,8 @@ class Api:
                 }
                 if cluster.get("source"):
                     entry["source"] = cluster["source"]
+                if cluster.get("family"):
+                    entry["family"] = cluster["family"]
                 out.append(entry)
             return out
         except Exception as e:
@@ -1425,6 +1510,8 @@ class Api:
         cluster contém uma seleção parcial, somente as linhas CELL explicitamente
         escolhidas entram no agregado. ``scope="cell"`` acha o site dono de
         ``scope_id`` no evento inteiro e cai no caminho de célula única.
+        ``scope="site_carrier"`` recorta um site por portadora — ``scope_id`` é
+        ``<site_id>::<earfcn>`` — e reaproveita a mesma agregação do cluster.
         """
         try:
             config = db.get_event(event_id) or _active_event
@@ -1451,6 +1538,33 @@ class Api:
                         "cells_data": {}, "gaps": [], "thresholds": thresholds,
                     }
                 selections = self._cluster_raw_selections(cluster, merged, config)
+                series = self._cluster_series_by_family(
+                    event_id, selections, metric, minutes, technology, family)
+                if not series:
+                    return {
+                        "ok": True, "labels": [], "values": [], "series": [],
+                        "cells_data": {}, "gaps": [], "thresholds": thresholds,
+                    }
+                aligned, common = self._align_kpi_series(series)
+                axis = aligned[0]["labels"] if len(aligned) == 1 else common
+                return {
+                    "ok": True,
+                    "labels": axis,
+                    "values": aligned[0]["values"] if len(aligned) == 1 else [],
+                    "series": aligned,
+                    "cells_data": {},
+                    "gaps": self._detect_gaps(axis, max_gap_seconds=90),
+                    "thresholds": thresholds,
+                }
+
+            if scope == "site_carrier":
+                family = technology_family if technology_family in ("4G", "5G") else None
+                thresholds = self._metric_thresholds(event_id, metric)
+                parts = (scope_id or "").rsplit("::", 1)
+                selections = (
+                    self._site_carrier_selections(config, merged, parts[0], parts[1], family)
+                    if len(parts) == 2 and parts[0] and parts[1] else []
+                )
                 series = self._cluster_series_by_family(
                     event_id, selections, metric, minutes, technology, family)
                 if not series:
@@ -1572,7 +1686,7 @@ class Api:
         serie e quebrar a sincronizacao dos graficos.
         """
         family = technology_family if technology_family in KPI_OVERVIEW_METRICS else None
-        normalized_scope = scope if scope in ("site", "cluster", "cell") else None
+        normalized_scope = scope if scope in ("site", "cluster", "cell", "site_carrier") else None
         if not family:
             return {
                 "ok": False, "error": "technology_family deve ser 4G ou 5G",
@@ -1581,7 +1695,8 @@ class Api:
             }
         if not normalized_scope or not scope_id:
             return {
-                "ok": False, "error": "scope deve ser site, cluster ou cell e possuir scope_id",
+                "ok": False,
+                "error": "scope deve ser site, cluster, cell ou site_carrier e possuir scope_id",
                 "labels": [], "metrics": {}, "units": {}, "thresholds": {},
                 "reasons": {},
             }
@@ -1600,8 +1715,10 @@ class Api:
                     "__all__",
                     None,
                     family,
-                    normalized_scope if normalized_scope in ("cluster", "cell") else None,
-                    scope_id if normalized_scope in ("cluster", "cell") else None,
+                    normalized_scope if normalized_scope in ("cluster", "cell", "site_carrier")
+                    else None,
+                    scope_id if normalized_scope in ("cluster", "cell", "site_carrier")
+                    else None,
                 )
                 if not result.get("ok", False):
                     raise RuntimeError(
@@ -1684,7 +1801,7 @@ class Api:
                 continue
             scope = entry.get("scope")
             scope_id = entry.get("scope_id") or entry.get("id")
-            if scope not in ("site", "cluster", "cell") or not scope_id:
+            if scope not in ("site", "cluster", "cell", "site_carrier") or not scope_id:
                 continue
             key = (scope, str(scope_id))
             if key not in seen:

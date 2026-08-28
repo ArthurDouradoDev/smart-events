@@ -58,8 +58,13 @@ let _hoveredPanelId = null;
 let _scopeSites = [];
 let _scopeClusters = [];
 let _scopeCells = [];
-const _selection = { cluster: new Set(), site: new Set(), cell: new Set() };
+const _selection = { cluster: new Set(), site: new Set(), cell: new Set(), siteCarrier: new Set() };
 const _hiddenScopes = new Set();
+// Sites com a expansão "separar por portadora" aberta no seletor de sites.
+const _expandedSites = new Set();
+// Marca sites cuja expansão já selecionou as portadoras automaticamente uma
+// vez nesta sessão da visão geral — reabrir depois de recolher não repete.
+const _autoMarkedCarrierSites = new Set();
 const _charts = new Map();
 // Escala vigente de cada painel: o tooltip e os ticks precisam da mesma.
 const _panelScales = new Map();
@@ -165,6 +170,8 @@ function _open() {
   _scopeClusters = State.clusters || [];
   _scopeCells = [];
   _hiddenScopes.clear();
+  _expandedSites.clear();
+  _autoMarkedCarrierSites.clear();
   _pendingSeed = true;
   _applyPreferredSelection();
   modal.classList.remove("hidden");
@@ -197,9 +204,20 @@ function _syncTimeTabs() {
 
 // ── Seleção de escopos ─────────────────────────────────────────────
 
-/** Clusters gerados automaticamente a partir do DLEARFCN das células 4G. */
+/** Clusters gerados automaticamente a partir do DLEARFCN, da família ativa. */
 function _carrierClusters() {
-  return _scopeClusters.filter(cluster => cluster.source === "earfcn");
+  return _familyFilteredClusters().filter(cluster => cluster.source === "earfcn");
+}
+
+/**
+ * Clusters visíveis na aba ativa: portadoras (EARFCN) de família diferente da
+ * aba ficam de fora — senão "Todos os clusters" marcaria portadoras que
+ * renderizariam vazias na família errada. Cluster manual ou de família
+ * indeterminada continua visível nas duas abas.
+ */
+function _familyFilteredClusters() {
+  return _scopeClusters.filter(cluster =>
+    cluster.source !== "earfcn" || !cluster.family || cluster.family === _family);
 }
 
 /** Herda o recorte que o usuário já tinha no dashboard ao abrir a visão geral. */
@@ -207,6 +225,7 @@ function _applyPreferredSelection() {
   _selection.cluster.clear();
   _selection.site.clear();
   _selection.cell.clear();
+  _selection.siteCarrier.clear();
   const clusterIds = new Set(_scopeClusters.map(cluster => cluster.id));
   const siteIds = new Set(_scopeSites.map(site => site.id));
   const carriers = _carrierClusters();
@@ -216,9 +235,9 @@ function _applyPreferredSelection() {
   } else if (typeof State.selectedSite === "string" && State.selectedSite.startsWith("cluster:")) {
     const id = State.selectedSite.slice("cluster:".length);
     if (clusterIds.has(id)) _selection.cluster.add(id);
-  } else if (_family === "4G" && carriers.length) {
-    // Visão geral 4G: portadoras (EARFCN) são o recorte padrão, à frente do
-    // site que o dashboard sempre deixa selecionado na lista.
+  } else if (carriers.length) {
+    // Portadoras (EARFCN) são o recorte padrão em qualquer família, à frente
+    // do site que o dashboard sempre deixa selecionado na lista.
     carriers.slice(0, MAX_SCOPES).forEach(cluster => _selection.cluster.add(cluster.id));
   } else if (siteIds.has(State.selectedSite)) {
     _selection.site.add(State.selectedSite);
@@ -238,7 +257,8 @@ function _plural(count, singular) {
 }
 
 function _selectionSize() {
-  return _selection.cluster.size + _selection.site.size + _selection.cell.size;
+  return _selection.cluster.size + _selection.site.size + _selection.cell.size
+    + _selection.siteCarrier.size;
 }
 
 /** Assinatura estável da seleção — usada para decidir se vale recarregar. */
@@ -256,6 +276,29 @@ function _siteBaseColors() {
 
 function _clusterColor(cluster, index) {
   return cluster.color || SERIES_COLORS[index % SERIES_COLORS.length];
+}
+
+/** Cor da portadora cadastrada (`earfcn-<v>`) por valor de EARFCN — a mesma
+ * cor que `Portadora <v>` usa no cluster global, para o site×portadora sair
+ * pareado com ela quando ela está na comparação. */
+function _carrierClusterColorMap() {
+  const map = new Map();
+  _scopeClusters.forEach((cluster, index) => {
+    if (cluster.source === "earfcn") map.set(cluster.id, _clusterColor(cluster, index));
+  });
+  return map;
+}
+
+function _siteCarrierName(siteId, earfcn) {
+  const site = _scopeSites.find(candidate => String(candidate.id) === String(siteId));
+  return `${site?.name || siteId} · ${earfcn}`;
+}
+
+/** `key` no formato `<site_id>::<earfcn>` — earfcn é sempre o último segmento. */
+function _siteCarrierLabel(key) {
+  const index = key.lastIndexOf("::");
+  if (index === -1) return key;
+  return _siteCarrierName(key.slice(0, index), key.slice(index + 2));
 }
 
 /** Cor-base da célula: mesma ideia do site, índice estável na lista do evento. */
@@ -304,6 +347,25 @@ function _selectedScopes() {
       scopeId: site.id,
       name: site.name || site.id,
       color,
+    });
+  });
+  const carrierColors = _carrierClusterColorMap();
+  _scopeSites.forEach(site => {
+    (site.carriers || []).forEach(carrier => {
+      const key = `${site.id}::${carrier.earfcn}`;
+      if (!_selection.siteCarrier.has(key)) return;
+      const base = carrierColors.get(`earfcn-${carrier.earfcn}`) || SERIES_COLORS[0];
+      const color = taken.has(base.toLowerCase())
+        ? (SERIES_COLORS.find(candidate => !taken.has(candidate.toLowerCase())) || base)
+        : base;
+      taken.add(color.toLowerCase());
+      scopes.push({
+        key: `site_carrier:${key}`,
+        scope: "site_carrier",
+        scopeId: key,
+        name: _siteCarrierName(site.id, carrier.earfcn),
+        color,
+      });
     });
   });
   const cellBaseColors = _cellBaseColors();
@@ -381,23 +443,25 @@ function _renderClusterPicker() {
   const menu = document.querySelector("#kpi-overview-cluster-picker .scope-picker-menu");
   if (!menu) return;
   menu.innerHTML = "";
-  if (!_scopeClusters.length) {
+  const clusters = _familyFilteredClusters();
+  if (!clusters.length) {
     menu.innerHTML = `<div class="scope-picker-empty">Nenhum cluster cadastrado neste evento.</div>`;
     return;
   }
 
   const options = document.createElement("div");
   options.className = "scope-picker-options";
-  const allSelected = _scopeClusters.every(cluster => _selection.cluster.has(cluster.id));
-  const fitsAll = _scopeClusters.length + _selection.site.size + _selection.cell.size <= MAX_SCOPES;
+  const allSelected = clusters.every(cluster => _selection.cluster.has(cluster.id));
+  const fitsAll = clusters.length + _selection.site.size + _selection.cell.size
+    + _selection.siteCarrier.size <= MAX_SCOPES;
   options.appendChild(_optionRow({
     checked: allSelected,
     blocked: !allSelected && !fitsAll,
     name: "Todos os clusters",
-    meta: _plural(_scopeClusters.length, "cluster"),
+    meta: _plural(clusters.length, "cluster"),
     onToggle: checked => {
       _selection.cluster.clear();
-      if (checked) _scopeClusters.forEach(cluster => _selection.cluster.add(cluster.id));
+      if (checked) clusters.forEach(cluster => _selection.cluster.add(cluster.id));
       _onSelectionChanged();
     },
   }));
@@ -405,7 +469,7 @@ function _renderClusterPicker() {
   divider.className = "scope-picker-divider";
   options.appendChild(divider);
 
-  _scopeClusters.forEach((cluster, index) => {
+  clusters.forEach((cluster, index) => {
     const checked = _selection.cluster.has(cluster.id);
     options.appendChild(_optionRow({
       checked,
@@ -442,13 +506,25 @@ function _renderSitePicker() {
   _renderSiteOptions();
 }
 
+/**
+ * Meta da linha de site no seletor: famílias + quantas portadoras o site tem
+ * na aba ativa. Quais são elas fica para as sub-linhas da expansão — enumerar
+ * os EARFCNs aqui empurrava o nome do site para fora da linha.
+ */
+function _siteOptionMeta(site, carriers) {
+  const parts = [(site.tech_families || []).join("/")];
+  if (carriers.length) parts.push(_plural(carriers.length, "portadora"));
+  return parts.filter(Boolean).join(" · ");
+}
+
 function _renderSiteOptions() {
   const menu = document.querySelector("#kpi-overview-site-picker .scope-picker-menu");
   const options = menu?.querySelector(".scope-picker-options");
   if (!options) return;
   const term = (menu.querySelector(".scope-picker-search")?.value || "").trim().toLowerCase();
   const matches = _scopeSites.filter(site =>
-    !term || `${site.name || ""} ${site.id}`.toLowerCase().includes(term));
+    !term || `${site.name || ""} ${site.original_name || ""} ${site.id}`
+      .toLowerCase().includes(term));
 
   options.innerHTML = "";
   if (!matches.length) {
@@ -459,21 +535,99 @@ function _renderSiteOptions() {
     return;
   }
   const baseColors = _siteBaseColors();
+  const carrierColors = _carrierClusterColorMap();
   matches.forEach(site => {
     const checked = _selection.site.has(site.id);
-    options.appendChild(_optionRow({
+    const carriers = (site.carriers || []).filter(carrier =>
+      !carrier.family || carrier.family === _family);
+    const row = _optionRow({
       checked,
       blocked: !checked && _selectionSize() >= MAX_SCOPES,
       color: baseColors.get(String(site.id)),
       name: site.name || site.id,
-      meta: (site.tech_families || []).join("/"),
+      meta: _siteOptionMeta(site, carriers),
       onToggle: enabled => {
         if (enabled) _selection.site.add(site.id);
         else _selection.site.delete(site.id);
         _onSelectionChanged();
       },
-    }));
+    });
+
+    // Basta uma portadora para o site ganhar o chevron: com uma só a expansão
+    // não separa nada, mas é o que informa ao usuário que o recorte por
+    // portadora existe — sem isso a funcionalidade fica invisível nos eventos
+    // com uma portadora por família.
+    if (!carriers.length) {
+      options.appendChild(row);
+      return;
+    }
+
+    const expanded = _expandedSites.has(site.id);
+    const chevron = document.createElement("button");
+    chevron.type = "button";
+    chevron.className = `scope-picker-chevron${expanded ? " is-open" : ""}`;
+    chevron.title = expanded ? "Recolher portadoras"
+      : (carriers.length > 1 ? "Separar por portadora" : "Ver a portadora do site");
+    chevron.setAttribute("aria-expanded", String(expanded));
+    chevron.textContent = "›";
+    chevron.addEventListener("click", event => {
+      event.preventDefault();
+      event.stopPropagation();
+      _toggleSiteCarrierExpansion(site, carriers);
+    });
+    row.appendChild(chevron);
+    options.appendChild(row);
+
+    if (!expanded) return;
+    carriers.forEach(carrier => {
+      const key = `${site.id}::${carrier.earfcn}`;
+      const carrierChecked = _selection.siteCarrier.has(key);
+      const subRow = _optionRow({
+        checked: carrierChecked,
+        blocked: !carrierChecked && _selectionSize() >= MAX_SCOPES,
+        color: carrierColors.get(`earfcn-${carrier.earfcn}`),
+        name: `Portadora ${carrier.earfcn}`,
+        meta: _plural(carrier.cell_count, "célula"),
+        onToggle: enabled => {
+          if (enabled) _selection.siteCarrier.add(key);
+          else _selection.siteCarrier.delete(key);
+          _onSelectionChanged();
+        },
+      });
+      subRow.classList.add("scope-picker-suboption");
+      options.appendChild(subRow);
+    });
   });
+}
+
+/**
+ * Chevron "separar por portadora": alterna a expansão do site no seletor.
+ * Na primeira vez que um site é expandido nesta sessão, marca todas as
+ * portadoras dele de uma vez — expandir tem que simplesmente funcionar, e não
+ * bater no teto de escopos em silêncio, então a seleção anterior é limpa
+ * quando as portadoras não cabem sozinhas.
+ */
+function _toggleSiteCarrierExpansion(site, carriers) {
+  if (_expandedSites.has(site.id)) {
+    _expandedSites.delete(site.id);
+    _renderSiteOptions();
+    _syncPickerSummaries();
+    return;
+  }
+  _expandedSites.add(site.id);
+  if (!_autoMarkedCarrierSites.has(site.id)) {
+    _autoMarkedCarrierSites.add(site.id);
+    const keys = carriers.map(carrier => `${site.id}::${carrier.earfcn}`);
+    const newKeys = keys.filter(key => !_selection.siteCarrier.has(key));
+    if (_selectionSize() + newKeys.length > MAX_SCOPES) {
+      _selection.cluster.clear();
+      _selection.site.clear();
+      _selection.cell.clear();
+      _selection.siteCarrier.clear();
+    }
+    keys.forEach(key => _selection.siteCarrier.add(key));
+  }
+  _onSelectionChanged();
 }
 
 /** Monta a casca do seletor de células uma vez; a busca só repinta as opções. */
@@ -507,8 +661,12 @@ function _renderCellPicker() {
  */
 function _cellScopeSiteIds() {
   const ids = new Set();
-  if (_selection.site.size || _selection.cluster.size) {
+  if (_selection.site.size || _selection.cluster.size || _selection.siteCarrier.size) {
     _selection.site.forEach(id => ids.add(id));
+    _selection.siteCarrier.forEach(key => {
+      const index = key.lastIndexOf("::");
+      if (index !== -1) ids.add(key.slice(0, index));
+    });
     _scopeSites.forEach(site => {
       if ((site.cluster_ids || []).some(id => _selection.cluster.has(id))) ids.add(site.id);
     });
@@ -582,12 +740,30 @@ function _summaryText(kind, entries) {
   return `${selected.length} selecionados`;
 }
 
+/** Resumo do seletor de sites: conta sites e portadoras separadamente. */
+function _siteSummaryText() {
+  if (!_scopeSites.length) return "Nenhum no evento";
+  const siteCount = _selection.site.size;
+  const carrierCount = _selection.siteCarrier.size;
+  if (!siteCount && !carrierCount) return "Nenhum";
+  if (siteCount && carrierCount) {
+    return `${_plural(siteCount, "site")} · ${_plural(carrierCount, "portadora")}`;
+  }
+  if (siteCount) {
+    if (siteCount > 1) return `${siteCount} selecionados`;
+    const site = _scopeSites.find(candidate => _selection.site.has(candidate.id));
+    return site?.name || site?.id || "1 selecionado";
+  }
+  if (carrierCount > 1) return _plural(carrierCount, "portadora");
+  return _siteCarrierLabel([..._selection.siteCarrier][0]);
+}
+
 function _syncPickerSummaries() {
   const clusterValue = document.querySelector("#kpi-overview-cluster-picker .scope-picker-value");
   const siteValue = document.querySelector("#kpi-overview-site-picker .scope-picker-value");
   const cellValue = document.querySelector("#kpi-overview-cell-picker .scope-picker-value");
   if (clusterValue) clusterValue.textContent = _summaryText("cluster", _scopeClusters);
-  if (siteValue) siteValue.textContent = _summaryText("site", _scopeSites);
+  if (siteValue) siteValue.textContent = _siteSummaryText();
   if (cellValue) cellValue.textContent = _summaryText("cell", _scopeCells);
 
   const hint = document.getElementById("kpi-overview-scope-hint");
@@ -682,6 +858,10 @@ async function _refreshScopeData() {
     const clusterIds = new Set(_scopeClusters.map(cluster => cluster.id));
     const siteIds = new Set(_scopeSites.map(site => site.id));
     const cellIds = new Set(_scopeCells.map(cell => cell.id));
+    const carrierKeys = new Set();
+    _scopeSites.forEach(site => (site.carriers || []).forEach(carrier => {
+      carrierKeys.add(`${site.id}::${carrier.earfcn}`);
+    }));
     [..._selection.cluster].forEach(id => {
       if (!clusterIds.has(id)) _selection.cluster.delete(id);
     });
@@ -690,6 +870,9 @@ async function _refreshScopeData() {
     });
     [..._selection.cell].forEach(id => {
       if (!cellIds.has(id)) _selection.cell.delete(id);
+    });
+    [..._selection.siteCarrier].forEach(key => {
+      if (!carrierKeys.has(key)) _selection.siteCarrier.delete(key);
     });
     if (_pendingSeed || !_selectionSize()) {
       _pendingSeed = false;

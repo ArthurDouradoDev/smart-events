@@ -843,7 +843,7 @@ class TestEarfcnClusters:
         assert "earfcn-1276" in sites["SR-SPPNB2"]["cluster_ids"]
         assert "earfcn-1700" in sites["SR-SPPNB2"]["cluster_ids"]
 
-    def test_nao_mistura_celulas_5g_mesmo_com_earfcn_preenchido(self, api, sample_event):
+    def test_5g_gera_portadora_propria_sem_misturar_com_4g(self, api, sample_event):
         event = _twin_sites_event(sample_event, "earfcn-twin")
         for site in event["sites"]:
             for cell in site["cells"]:
@@ -855,13 +855,16 @@ class TestEarfcnClusters:
                     cell["tech"] = "5G"
         database.save_event(event)
 
-        ids = {c["id"] for c in api.get_clusters(event["id"])}
-
-        assert "earfcn-1276" in ids
-        assert "earfcn-627264" not in ids
         clusters = {c["id"]: c for c in api.get_clusters(event["id"])}
+
+        assert "earfcn-1276" in clusters
+        assert "earfcn-627264" in clusters
         # 12 + 6 + 10 células 4G dos três sites do fixture de gêmeos.
         assert clusters["earfcn-1276"]["cell_count"] == 28
+        assert clusters["earfcn-1276"]["family"] == "4G"
+        # 3 + 2 células 5G dos dois sites gêmeos.
+        assert clusters["earfcn-627264"]["cell_count"] == 5
+        assert clusters["earfcn-627264"]["family"] == "5G"
 
     def test_serie_do_cluster_de_portadora_agrega_so_as_celulas_da_earfcn(
             self, api, sample_event):
@@ -909,6 +912,159 @@ class TestEarfcnClusters:
         assert earfcn[0]["name"] == "Banda 1800"
 
 
+class TestSiteCarrierScope:
+    """`scope="site_carrier"`: recorte de um site por portadora (EARFCN/NR-ARFCN).
+
+    `scope_id` é `<site_id>::<earfcn>`; reaproveita `_cluster_series_by_family`
+    sem nenhuma agregação nova.
+    """
+
+    def _event_com_portadoras(self, sample_event, event_id):
+        event = _twin_sites_event(sample_event, event_id)
+        for site in event["sites"]:
+            for cell in site["cells"]:
+                if str(cell["id"]).startswith("4G-"):
+                    cell["earfcn"] = "1276"
+                    cell["tech"] = "4G"
+                else:
+                    cell["earfcn"] = "627264"
+                    cell["tech"] = "5G"
+        return event
+
+    def test_resolve_a_agregacao_das_celulas_daquela_portadora(self, api, sample_event):
+        event = self._event_com_portadoras(sample_event, "site-carrier-scope")
+        database.save_event(event)
+        _insert_cell_kpi(event["id"], "725483", "4G-SPSMG7-0", "4G", 10.0)
+        _insert_cell_kpi(event["id"], "725483", "4G-SPSMG7-1", "4G", 80.0)
+
+        result = api.get_kpi_series(
+            event["id"], None, "utilization_dl", minutes=0,
+            scope="site_carrier", scope_id="SPSMG7::1276", technology_family="4G")
+
+        assert result["ok"] is True
+        assert result["series"][0]["technology"] == "4G"
+        assert result["series"][0]["values"] == [80.0]
+
+    def test_site_gemeo_4g_5g_so_puxa_o_membro_da_portadora(self, api, sample_event):
+        event = self._event_com_portadoras(sample_event, "site-carrier-twin")
+        database.save_event(event)
+        _insert_cell_kpi(event["id"], "1774059", "5G-SPSMG7-0", "5G", 40.0)
+        _insert_cell_kpi(event["id"], "725483", "4G-SPSMG7-0", "4G", 99.0)
+
+        result = api.get_kpi_series(
+            event["id"], None, "utilization_dl", minutes=0,
+            scope="site_carrier", scope_id="SPSMG7::627264", technology_family="5G")
+
+        assert result["series"][0]["technology"] == "5G"
+        assert result["series"][0]["values"] == [40.0]
+
+    def test_earfcn_inexistente_devolve_serie_vazia_sem_erro(self, api, sample_event):
+        event = self._event_com_portadoras(sample_event, "site-carrier-missing")
+        database.save_event(event)
+
+        result = api.get_kpi_series(
+            event["id"], None, "utilization_dl", minutes=0,
+            scope="site_carrier", scope_id="SPSMG7::999999", technology_family="4G")
+
+        assert result["ok"] is True
+        assert result["series"] == []
+
+    def test_get_kpi_overview_multi_aceita_o_escopo(self, api, sample_event):
+        event = self._event_com_portadoras(sample_event, "site-carrier-multi")
+        database.save_event(event)
+        _insert_cell_kpi(event["id"], "725483", "4G-SPSMG7-0", "4G", 55.0)
+
+        result = api.get_kpi_overview_multi(
+            event["id"],
+            [{"scope": "site_carrier", "scope_id": "SPSMG7::1276"}],
+            "4G",
+            minutes=0,
+        )
+
+        assert result["ok"] is True
+        assert result["series"][0]["scope"] == "site_carrier"
+        assert result["series"][0]["scope_id"] == "SPSMG7::1276"
+        assert result["series"][0]["metrics"]["utilization_dl"] == [55.0]
+
+    def test_get_sites_lista_as_portadoras_do_site(self, api, sample_event):
+        event = self._event_com_portadoras(sample_event, "site-carrier-list")
+        database.save_event(event)
+
+        sites = {site["id"]: site for site in api.get_sites(event["id"])}
+        carriers = {c["earfcn"]: c for c in sites["SPSMG7"]["carriers"]}
+
+        assert carriers["1276"]["family"] == "4G"
+        assert carriers["1276"]["cell_count"] == 12
+        assert carriers["627264"]["family"] == "5G"
+        assert carriers["627264"]["cell_count"] == 3
+
+
+class TestDisplaySiteName:
+    """Nome exibido a partir do `nename` da EP (convenção de nomes da TIM).
+
+    Sem hífen o nome já é o do site; com hífen, o que vem antes é o indicador de
+    tecnologia e o nome do site é o último elemento. O bruto continua acessível
+    em `original_name`.
+    """
+
+    def _event(self, sample_event, event_id, site_name):
+        return {
+            **sample_event,
+            "id": event_id,
+            "sites": [{
+                "id": "462982", "name": site_name,
+                "lat": -12.975111, "lng": -38.440582,
+                "is_event_site": True,
+                "cells": [{"id": f"{site_name}_1", "azimuth": 0}],
+            }],
+        }
+
+    def test_nome_sem_hifen_fica_intacto(self, api, sample_event):
+        database.save_event(self._event(sample_event, "name-plain", "SPSMG7"))
+
+        site = api.get_sites("name-plain")[0]
+
+        assert site["name"] == "SPSMG7"
+        assert site["original_name"] == "SPSMG7"
+
+    def test_nome_com_hifen_exibe_o_trecho_depois_do_indicador(self, api, sample_event):
+        database.save_event(self._event(sample_event, "name-prefixed", "5D-SACEO1"))
+
+        site = api.get_sites("name-prefixed")[0]
+
+        assert site["name"] == "SACEO1"
+        assert site["original_name"] == "5D-SACEO1"
+
+    def test_varios_hifens_pegam_o_ultimo_elemento(self, api, sample_event):
+        database.save_event(self._event(sample_event, "name-multi", "SR-BA-SACEO1"))
+
+        assert api.get_sites("name-multi")[0]["name"] == "SACEO1"
+
+    def test_nome_terminado_em_hifen_mantem_o_bruto(self, api, sample_event):
+        # Sem nada depois do hífen não há nome a extrair — melhor o bruto que vazio.
+        database.save_event(self._event(sample_event, "name-trailing", "5G-"))
+
+        assert api.get_sites("name-trailing")[0]["name"] == "5G-"
+
+    def test_gemeo_fundido_exibe_o_nome_tratado(self, api, sample_event):
+        event = {
+            **sample_event,
+            "id": "name-twin",
+            "sites": [
+                {"id": "462982", "name": "SR-SACAL5", "lat": -12.975111, "lng": -38.440582,
+                 "is_event_site": True, "cells": _cells("4G-SACAL5", 4)},
+                {"id": "1511558", "name": "5G-SACAL5", "lat": -12.975111, "lng": -38.440582,
+                 "is_event_site": True, "cells": _cells("5G-SACAL5", 3)},
+            ],
+        }
+        database.save_event(event)
+
+        site = api.get_sites("name-twin")[0]
+
+        assert site["name"] == "SACAL5"
+        assert site["original_name"] == "SR-SACAL5"
+
+
 class TestAlertDisplayNames:
     def _insert(self, event_id, **fields):
         payload = {
@@ -930,7 +1086,9 @@ class TestAlertDisplayNames:
 
         alert = api.get_alerts(sample_event["id"])[0]
 
-        assert alert["display_name"] == "SR-SPPNB2"
+        # `SR-` é o indicador de tecnologia: o nome exibido é o que vem depois do
+        # hífen (ver TestDisplaySiteName). O id do site fundido não muda.
+        assert alert["display_name"] == "SPPNB2"
         assert alert["serving_site"] == "SR-SPPNB2"
 
     def test_acessibilidade_mostra_nome_da_celula(self, api, sample_event):
@@ -982,7 +1140,8 @@ class TestEventCells:
         cells = api.get_event_cells(sample_event["id"])
 
         assert {c["id"] for c in cells} == {"SR-SPPNB2_1", "SR-SPPNB2_2", "SR-SPPNB2_3"}
-        assert all(c["site_id"] == "SR-SPPNB2" and c["site_name"] == "SR-SPPNB2"
+        # site_id continua o id bruto; site_name é o nome tratado (sem `SR-`).
+        assert all(c["site_id"] == "SR-SPPNB2" and c["site_name"] == "SPPNB2"
                    for c in cells)
 
     def test_recorta_por_familia_e_cobre_sites_fundidos(self, api, sample_event):

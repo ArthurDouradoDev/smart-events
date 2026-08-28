@@ -1205,3 +1205,183 @@ Rodam com o Python da `.venv` do projeto — o Python global não tem `requests`
 
 ⚠ Não usar usuário real com senha errada para testar: 5 tentativas bloqueiam a conta no OSS.
 As sondagens acima nunca enviam credencial, justamente por isso.
+
+## 2026-08-28 — Portadora por site (Fase 0 + Fase 1 do backend)
+
+Handoff completo em `plano-portadora-por-site.md`. Duas entregas em cima da
+seção "Clusters por portadora (DLEARFCN)" (2026-08-26):
+
+### Fase 0 — 5G entra nas portadoras globais (reversão de decisão)
+
+O cliente vai popular o NR-ARFCN **na mesma coluna `DLEARFCN`** da EP — o filtro
+"só 4G" de `Api._earfcn_clusters` foi removido. Namespace de id único: 5G usa
+`earfcn-<valor>`, igual ao 4G (sem prefixo `nrarfcn-`); pressuposto: LTE EARFCN
+(≤ ~65k) e NR-ARFCN de FR1 (≥ ~140k) não colidem numericamente. Cada cluster
+gerado ganha `family` (`"4G"`/`"5G"`/`None`, resolvida por
+`_cell_technology_family` com fallback em `_single_configured_family` — necessário
+porque há eventos com células sem token de tecnologia no nome). A cor do cluster
+agora é indexada **por família** (4G conta do zero, 5G conta do zero); indexar
+globalmente fazia as portadoras 4G repintarem toda vez que uma 5G entrava na lista.
+O teste que afirmava o oposto (`test_nao_mistura_celulas_5g...`) foi reescrito para
+`test_5g_gera_portadora_propria_sem_misturar_com_4g`.
+
+### Fase 1 — escopo `site_carrier` no backend
+
+Novo escopo em `get_kpi_series`/`get_kpi_overview`/`get_kpi_overview_multi`:
+`scope="site_carrier"`, `scope_id="<site_id>::<earfcn>"` (split com `rsplit("::", 1)`
+— ids de site não contêm `::`, mas o earfcn fica garantido como último segmento).
+Resolve para uma seleção parcial de site via `Api._site_carrier_selections`
+(ao lado de `_cluster_raw_selections`) e reaproveita `_cluster_series_by_family` —
+**nenhuma agregação nova foi escrita**. Armadilha conhecida: essa função espera ids
+de site **brutos** (membros), nunca o id fundido — por isso o helper resolve o dono
+de cada célula com `_owner_site_id_for_cell` antes de devolver a seleção.
+
+`get_sites` ganhou o campo `"carriers": [{"earfcn", "family", "cell_count"}, ...]`
+por site (via `Api._site_carriers`, também usado no fallback do `except`), para o
+frontend não precisar reimplementar a classificação de família em JS.
+
+Rejeitado: gerar clusters sintéticos site×portadora (`earfcn-1276@725483`) —
+explosão combinatória no dropdown do dashboard.
+
+Testes novos: `tests/test_api.py::TestSiteCarrierScope` (resolução do escopo, site
+gêmeo 4G/5G só puxa o membro certo, earfcn inexistente → série vazia,
+`get_kpi_overview_multi` aceitando o escopo, `carriers` em `get_sites`).
+
+**Pendente (não fazia parte desta entrega):** Fase 2 (frontend — sub-linhas de
+portadora no seletor de sites da Visão Geral, `kpi_overview.js`/`bridge.js`/CSS) e o
+teste de `tests/test_server_parse_sites.py` para NR-ARFCN de 6 dígitos. Ver
+checklist em `plano-portadora-por-site.md`.
+
+**Gate:** `pytest tests/ -q --ignore=tests/test_http_vpn.py` → **551 passed**
+(546 + 5 novos), zero regressões.
+
+## 2026-08-28 — Portadora por site (Fase 2 do frontend)
+
+Continuação da entrega acima — consome o escopo `site_carrier` e o campo
+`site.carriers` do backend (Fase 1) na Visão Geral de KPIs.
+
+### `frontend/js/kpi_overview.js`
+
+- `_selection` ganhou `siteCarrier: Set<"<site_id>::<earfcn>">`, entrando em
+  `_selectionSize()`, na purga de `_refreshScopeData` (existência do par
+  site+earfcn em `site.carriers`, **sem** filtrar por família — mesmo
+  precedente dos clusters manuais, que também sobrevivem à troca de aba) e em
+  `_applyPreferredSelection()`.
+- `_familyFilteredClusters()` (novo): esconde clusters `source: "earfcn"` de
+  família diferente da aba ativa. Usado em `_carrierClusters()` e
+  `_renderClusterPicker()` — sem isso "Todos os clusters" marcava portadoras
+  da aba errada, que renderizavam vazias.
+- `_applyPreferredSelection()`: o `if` que priorizava portadoras só em "4G"
+  virou `carriers.length` puro (decisão 2 do plano — 5G também abre com
+  portadoras marcadas).
+- **Seletor de Sites — "separar por portadora":** site com ≥2 portadoras
+  (`site.carriers`, filtradas pela família ativa) ganha um chevron
+  (`.scope-picker-chevron`, dentro do `<label>` da opção; `preventDefault` +
+  `stopPropagation` no click evitam que ele dispare o checkbox do site pai).
+  Expandido, lista uma sub-linha (`.scope-picker-suboption`, reaproveita
+  `.scope-picker-option`) por portadora com checkbox + swatch + "N células".
+  **Primeira expansão do site na sessão** marca todas as portadoras dele de
+  uma vez (`_autoMarkedCarrierSites`, nunca reaplicado depois de recolher/
+  reabrir); se não couberem no teto de 8 escopos, a seleção inteira é limpa
+  antes — expandir tem que sempre funcionar. `_expandedSites` guarda o estado
+  aberto/fechado; ambos os Sets são zerados em `_open()`, junto com
+  `_hiddenScopes`.
+- Cor do escopo `site_carrier`: base = cor do cluster `earfcn-<v>` global
+  (`_carrierClusterColorMap()`), resolvida por colisão pelo mesmo mecanismo
+  `taken` de site/célula em `_selectedScopes()` — mesma cor da portadora
+  global quando ela está livre, cor diferente quando não está.
+- `_cellScopeSiteIds()` e o resumo do seletor de sites (`_siteSummaryText()`,
+  agora separado de `_summaryText`) passam a contar `siteCarrier` também.
+
+### `frontend/js/bridge.js` (mocks, cenário `?kpiOverview=earfcn`)
+
+- `MOCK_EARFCN_CLUSTERS` ganhou `family` em cada entrada e uma portadora 5G
+  (`earfcn-627264`).
+- `carriers` nos mocks de `get_sites` via `_MOCK_SITE_CARRIERS` (ERB-07 e
+  ERB-03 com 2 portadoras 4G cada — para exercitar o chevron; SPSMG7 com uma
+  4G + a 5G).
+- `scopeOffset` de `get_kpi_overview` e o filtro de escopo de
+  `get_kpi_overview_multi` reconhecem `"site_carrier"`.
+
+### `frontend/css/main.css`
+
+`.scope-picker-chevron` (rotaciona 90° em `.is-open`) e `.scope-picker-suboption`
+(indenta 26px, reaproveita `.scope-picker-option`).
+
+### Verificação
+
+Smoke manual com Playwright headless contra `?kpiOverview=earfcn` (script
+descartável, não versionado): expandir ERB-07 mostra 2 sub-linhas
+("Portadora 1276 · 2 células", "Portadora 1700 · 1 célula") já marcadas; os
+9 painéis renderizam 5 séries sincronizadas (3 clusters + 2 site_carrier) sem
+erro de console; clicar no chevron não ativa o checkbox do site; desmarcar uma
+portadora e recolher/reabrir preserva a escolha (não re-marca); trocar para a
+aba 5G mantém a comparação (portadoras 4G não são purgadas por família, mesmo
+comportamento dos clusters manuais). Screenshot conferido visualmente.
+
+**Gate:** `pytest tests/ -q --ignore=tests/test_http_vpn.py` → **551 passed**,
+zero regressões. `test_visao_4g_prefere_clusters_de_portadora_quando_existem`
+foi renomeado/reescrito (`test_visao_prefere_clusters_de_portadora_quando_existem_em_qualquer_familia`)
+porque a assinatura antiga (`_family === "4G" && carriers.length`) não existe
+mais no código-fonte — a asserção literal do teste precisava acompanhar a
+mudança da decisão 2.
+
+**Pendente:** Fase 3 (testes Python/Playwright dedicados ao `site_carrier` no
+frontend, NR-ARFCN em `test_server_parse_sites.py`) e Fase 4 (esta entrada já
+cobre boa parte, mas o plano pede também a formalização final). Smoke via
+`python main.py --mock --dev` não foi rodado nesta sessão (verificação feita
+via servidor estático + Playwright direto, mais rápido para iterar).
+
+---
+
+## 2026-08-28 — Nome de exibição do site a partir do `nename` (convenção TIM)
+
+**Decisão do usuário:** a rede TIM nomeia site de duas formas na coluna `nename` da EP: sem
+hífen, o valor já é o nome do site; com hífen, o que vem antes é o indicador de tecnologia e o
+nome do site é o que vem depois (`5D-SACEO1` → `SACEO1`, `5G-SAFEL1` → `SAFEL1`). O sistema
+passa a exibir o nome tratado **sempre**.
+
+**Implementação:** `Api._display_site_name` (`api/api.py`, ao lado de `_normalize_site_name`),
+aplicada em `_as_merged_site`. Um único ponto: como todo o resto (`get_sites`, `get_event_cells`,
+alertas, mapa, seletores da Visão Geral) consome sites fundidos, a regra chega em todas as telas
+de uma vez, inclusive nos eventos já importados — **não precisa reimportar a EP**.
+
+- Regra literal: `rsplit("-", 1)[-1]`; sem hífen o nome sai intacto; nome terminado em hífen
+  (`"5G-"`) cai de volta no bruto, para nunca exibir vazio.
+- **O bruto não se perde:** `original_name` no site fundido e em `get_sites` (inclusive no
+  fallback do `except`); o banco continua guardando o `nename` original. A busca do painel
+  principal (`kpi.js`) e a do seletor de sites (`kpi_overview.js`) casam com os dois, então
+  procurar por "5G-SAFEL1" continua achando o site.
+- **Ids não mudam.** `serving_site`, `site_id` e o id do site fundido continuam vindo do
+  `enodebid`/nome normalizado — só o rótulo mudou.
+
+**Pressuposto (do usuário, sobre a lista completa da rede):** só existem essas duas formas. Um
+nome com hífen que não seja `<tecnologia>-<site>` (ex.: `RJ-ZONA-SUL`) exibiria só o último
+elemento. Se aparecer, é aqui que se ajusta.
+
+**Interação com a fusão 4G/5G:** `_normalize_site_name` (chave de fusão) continua com a lista
+fechada `4G|5G|5D|SD|SR` — a regra nova é só de exibição. Efeito colateral conhecido, medido no
+`roadshow-salvador` (341 sites fundidos, 339 renomeados): dois sites que já não fundiam por
+estarem a 5,7 km um do outro (`5D-SAPFO9` e `SD-SAPFO9`, com warning de homônimo desde sempre)
+passam a exibir o mesmo rótulo `SAPFO9`. São sites distintos da EP; o id e o warning continuam
+distinguindo.
+
+**Reversão de teste documentada:** `TestAlertDisplayNames::test_utilizacao_mostra_nome_do_site`
+e `TestEventCells::test_lista_todas_as_celulas_com_o_site_dono` afirmavam `SR-SPPNB2` como nome
+exibido. Passaram a esperar `SPPNB2`. Cobertura nova: `tests/test_api.py::TestDisplaySiteName`.
+
+---
+
+## 2026-08-28 — Seletor de sites da Visão Geral: linha com portadoras
+
+Complemento da entrega `site_carrier` (ver `plano-portadora-por-site.md`).
+
+- O chevron "separar por portadora" passou a aparecer com **≥1** portadora (era ≥2). Com uma só
+  a expansão não separa nada, mas é o que informa que o recorte existe — nos eventos reais é
+  comum um site ter uma portadora por família, e o recurso ficava invisível.
+- A meta da linha mostra `4G/5G · 6 portadoras`. **Enumerar os EARFCNs ali quebrou o layout:**
+  `.scope-picker-option-meta` era `white-space: nowrap` sem encolher e `.scope-picker-option-name`
+  era `flex: 1` com `min-width: 0` — a meta longa espremia o nome do site até **zero** e a lista
+  ganhava rolagem horizontal. Correção: meta curta (os EARFCNs ficam nas sub-linhas da expansão),
+  `min-width: 5em` no nome, elipse na meta, `overflow-x: hidden` nas opções e o menu do seletor
+  de sites em 360px.

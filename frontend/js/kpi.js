@@ -420,11 +420,13 @@ function _renderSiteList(sites) {
     return (order[a.status]??3) - (order[b.status]??3);
   });
 
-  // Filtra por busca (nome ou ID) e pelo cluster ativo no dropdown
+  // Filtra por busca (nome exibido, nome bruto da EP ou ID) e pelo cluster ativo
   const filtered = sorted.filter(site => {
     const name = (site.name || "").toLowerCase();
+    const rawName = (site.original_name || "").toLowerCase();
     const id = (site.id || "").toLowerCase();
-    const matchesSearch = name.includes(_searchQuery) || id.includes(_searchQuery);
+    const matchesSearch = name.includes(_searchQuery) || rawName.includes(_searchQuery)
+      || id.includes(_searchQuery);
     const matchesCluster = clusterFilter === "all" || (site.cluster_ids || []).includes(clusterFilter);
     return matchesSearch && matchesCluster;
   });

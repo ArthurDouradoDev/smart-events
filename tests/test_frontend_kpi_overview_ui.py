@@ -123,11 +123,13 @@ def test_paleta_de_series_nao_e_reordenada_sem_revalidar():
     assert '"#00d2ff", "#D29922", "#f692cc", "#FF7B00",' in source
 
 
-def test_visao_4g_prefere_clusters_de_portadora_quando_existem():
+def test_visao_prefere_clusters_de_portadora_quando_existem_em_qualquer_familia():
+    # Decisão 2 (plano-portadora-por-site.md): a aba 5G também abre com as
+    # portadoras marcadas, igual à 4G — não é mais um `if` restrito a "4G".
     source = OVERVIEW_JS.read_text(encoding="utf-8")
 
     assert 'cluster.source === "earfcn"' in source
-    assert '_family === "4G" && carriers.length' in source
+    assert '} else if (carriers.length) {' in source
 
 
 def test_toolbar_tem_dropdowns_separados_de_clusters_e_sites():

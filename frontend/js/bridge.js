@@ -241,10 +241,12 @@ const MOCK_CLUSTERS = [
 ];
 
 const MOCK_EARFCN_CLUSTERS = [
-  { id: "earfcn-1276", name: "Portadora 1276", color: "#3FB950", source: "earfcn",
+  { id: "earfcn-1276", name: "Portadora 1276", color: "#3FB950", source: "earfcn", family: "4G",
+    site_ids: ["ERB-07", "ERB-03", "SPSMG7"] },
+  { id: "earfcn-1700", name: "Portadora 1700", color: "#D29922", source: "earfcn", family: "4G",
     site_ids: ["ERB-07", "ERB-03"] },
-  { id: "earfcn-1700", name: "Portadora 1700", color: "#D29922", source: "earfcn",
-    site_ids: ["ERB-07", "ERB-03"] },
+  { id: "earfcn-627264", name: "Portadora 627264", color: "#00d2ff", source: "earfcn", family: "5G",
+    site_ids: ["SPSMG7"] },
 ];
 
 function _allMockClusters() {
@@ -255,6 +257,19 @@ function _allMockClusters() {
 
 function _clusterIdsFor(siteId) {
   return _allMockClusters().filter(c => c.site_ids.includes(siteId)).map(c => c.id);
+}
+
+// Portadoras (EARFCN) por site — só no cenário "earfcn", mesmo gate de
+// MOCK_EARFCN_CLUSTERS, para o seletor de sites exercitar "separar por
+// portadora" sem afetar telas que não pedem esse cenário.
+const _MOCK_SITE_CARRIERS = {
+  "ERB-07": [{ earfcn: "1276", family: "4G", cell_count: 2 }, { earfcn: "1700", family: "4G", cell_count: 1 }],
+  "ERB-03": [{ earfcn: "1276", family: "4G", cell_count: 1 }, { earfcn: "1700", family: "4G", cell_count: 2 }],
+  SPSMG7: [{ earfcn: "1276", family: "4G", cell_count: 12 }, { earfcn: "627264", family: "5G", cell_count: 3 }],
+};
+
+function _mockSiteCarriers(site) {
+  return _kpiOverviewScenario === "earfcn" ? (_MOCK_SITE_CARRIERS[site.id] || []) : [];
 }
 
 const _mock = {
@@ -290,6 +305,7 @@ const _mock = {
           : isShare ? s.utilization : s.utilization * _mockMagnitude(metric),
         metric_is_share: isShare,
         cluster_ids: _clusterIdsFor(s.id),
+        carriers: _mockSiteCarriers(s),
       };
     }).filter(s => !family || (s.cells && s.cells.length) || !(s.tech_families || []).length);
   },
@@ -448,7 +464,7 @@ const _mock = {
     // Deslocamento derivado do id: dois clusters comparados lado a lado precisam
     // render seres visivelmente diferentes no modo mock.
     const scopeSeed = [...String(scope_id || "")].reduce((acc, ch) => acc + ch.charCodeAt(0), 0);
-    const scopeOffset = (scope === "cluster" ? 7 : 0) + (scopeSeed % 11);
+    const scopeOffset = (scope === "cluster" ? 7 : scope === "site_carrier" ? 13 : 0) + (scopeSeed % 11);
     const metrics = {};
     metricIds.forEach((metric, metricIndex) => {
       metrics[metric] = labels.map((_, index) => {
@@ -477,7 +493,7 @@ const _mock = {
       const scope = entry?.scope;
       const scopeId = entry?.scope_id ?? entry?.id;
       const key = `${scope}:${scopeId}`;
-      if (!["site", "cluster", "cell"].includes(scope) || !scopeId || seen.has(key)) return;
+      if (!["site", "cluster", "cell", "site_carrier"].includes(scope) || !scopeId || seen.has(key)) return;
       seen.add(key);
       entries.push({ scope, scope_id: String(scopeId) });
     });

@@ -163,9 +163,18 @@ em JS. Incluir também no `fallback` do `except` para a lista não perder o camp
   `carriers.length` (decisão 2).
 - **`_renderClusterPicker()`:** iterar sobre a lista filtrada por família em vez de `_scopeClusters`
   cru — senão "Todos os clusters" marca portadoras da outra aba, que renderizariam vazias.
-- **`_renderSiteOptions()` (linha 445) — o coração do C:** site com ≥2 portadoras na família atual
+- **`_renderSiteOptions()` (linha 445) — o coração do C:** site com ≥1 portadora na família atual
   ganha um chevron "separar por portadora". Expandido, mostra uma sub-linha por portadora
   (checkbox + swatch + `N células`). O checkbox do site continua independente (decisão 3).
+  **Revisão 2026-08-28:** o corte era ≥2, mas nos eventos reais (ex. `novosantoamaro`) cada site
+  tem uma portadora por família — o chevron nunca aparecia e a funcionalidade ficava invisível.
+  Com ≥1 a expansão não separa nada num site de portadora única, mas informa que o recorte existe;
+  o `title` do chevron vira "Ver a portadora do site" nesse caso.
+- **`_siteOptionMeta()`:** a meta da linha de site passa a somar às famílias quantas portadoras o
+  site tem na aba ativa (`4G/5G · 6 portadoras`). Enumerar os EARFCNs ali (primeira tentativa)
+  zerou a largura do nome do site e criou rolagem horizontal na lista — quais são as portadoras
+  fica para as sub-linhas da expansão. Ver a entrada de 2026-08-28 no `MEMORY.md` para o ajuste
+  de CSS que acompanha (piso de largura no nome, elipse na meta, menu de 360px).
 - **`_cellScopeSiteIds()` (linha 508):** incluir os sites com portadora marcada, para o seletor de
   células continuar coerente.
 - **`_syncPickerSummaries()` (linha 585):** resumo do seletor de sites conta sites + portadoras
@@ -194,7 +203,7 @@ Estilo das sub-linhas (indentação + chevron), reaproveitando `.scope-picker-op
 | `tests/test_server_parse_sites.py` | NR-ARFCN de 6 dígitos (`627264`) é aceito e gravado — fecha o buraco entre docstring e código |
 | `tests/test_api.py::TestEarfcnClusters` | reescrever o teste do 5G (§0.4); `family` no `get_clusters`; cores 4G não repintam ao entrar 5G |
 | `tests/test_api.py::TestSiteCarrierScope` (novo) | resolução do escopo; site gêmeo; earfcn inexistente → série vazia; `get_kpi_overview_multi` aceitando o escopo; `carriers` no `get_sites` |
-| `tests/test_frontend_kpi_overview_ui.py` | novo cenário `?kpiOverview=earfcn5g`; expandir site → chips `SPPNB2 · 1276` e `· 1700` com cores distintas; aba 5G abrindo com portadoras marcadas |
+| `tests/test_frontend_kpi_overview_ui.py` | novo cenário `?kpiOverview=earfcn5g`; expandir site → chips `SPPNB2 · 1276` e `· 1700` com cores distintas; aba 5G abrindo com portadoras marcadas; site de portadora única (SPSMG7 na aba 4G) também tem chevron e a meta `1 portadora: 1276` |
 
 **Gate (CLAUDE.md §4):** `pytest tests/ -q --ignore=tests/test_http_vpn.py`.
 Baseline conhecida: **546 passed**. Meta: 546 + novos, zero regressões.
@@ -235,15 +244,15 @@ Entrada nova em `MEMORY.md` com:
 
 ## 9. Checklist de execução
 
-- [ ] Fase 0 — 5G nas portadoras globais + `family` no `get_clusters` + cor por família
-- [ ] Fase 0.4 — reescrever `test_nao_mistura_celulas_5g_mesmo_com_earfcn_preenchido`
-- [ ] Fase 1.1 — `_site_carrier_selections`
-- [ ] Fase 1.2 — ramo `site_carrier` em `get_kpi_series`
-- [ ] Fase 1.3 — `site_carrier` em `get_kpi_overview` e `get_kpi_overview_multi`
-- [ ] Fase 1.4 — `carriers` no `get_sites` (+ fallback)
-- [ ] Fase 2.1 — seleção, cores e sub-linhas em `kpi_overview.js`
-- [ ] Fase 2.2 — mocks em `bridge.js`
-- [ ] Fase 2.3 — CSS das sub-linhas
+- [x] Fase 0 — 5G nas portadoras globais + `family` no `get_clusters` + cor por família
+- [x] Fase 0.4 — reescrever `test_nao_mistura_celulas_5g_mesmo_com_earfcn_preenchido`
+- [x] Fase 1.1 — `_site_carrier_selections`
+- [x] Fase 1.2 — ramo `site_carrier` em `get_kpi_series`
+- [x] Fase 1.3 — `site_carrier` em `get_kpi_overview` e `get_kpi_overview_multi`
+- [x] Fase 1.4 — `carriers` no `get_sites` (+ fallback)
+- [x] Fase 2.1 — seleção, cores e sub-linhas em `kpi_overview.js`
+- [x] Fase 2.2 — mocks em `bridge.js`
+- [x] Fase 2.3 — CSS das sub-linhas
 - [ ] Fase 3 — testes (Python + Playwright)
 - [ ] Gate — `pytest tests/ -q --ignore=tests/test_http_vpn.py` verde
 - [ ] Smoke — `python main.py --mock --dev`
