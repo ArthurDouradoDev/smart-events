@@ -1385,3 +1385,47 @@ Complemento da entrega `site_carrier` (ver `plano-portadora-por-site.md`).
   ganhava rolagem horizontal. Correção: meta curta (os EARFCNs ficam nas sub-linhas da expansão),
   `min-width: 5em` no nome, elipse na meta, `overflow-x: hidden` nas opções e o menu do seletor
   de sites em 360px.
+
+---
+
+## 2026-08-28 — Troca 4G↔5G na Visão Geral: o que atravessa a aba
+
+**Decisão (do usuário, entre "sempre compartilhar", "memória por família" e "só na primeira
+troca"): sempre compartilhar.** Atravessam a troca de aba só os escopos que existem nas duas
+famílias — **cluster sem família definida** (o cluster de sites, que tem células 4G e 5G) e
+**site**. Portadora (cluster EARFCN e `site_carrier`), cluster recortado de uma tecnologia só e
+célula são purgados.
+
+Descartadas: "só na primeira troca" cria um modo invisível (o mesmo clique se comporta diferente
+na segunda vez, sem nada na tela dizendo isso) e "abrir vazio" cai no estado de erro
+"selecione ao menos um", que lê como painel quebrado no caminho mais comum ("quero ver esse
+mesmo site no 5G").
+
+**O defeito corrigido não era só cosmético.** `_selectedScopes()` varre `_scopeClusters` sem
+filtro de família, enquanto o seletor usa `_familyFilteredClusters()`: o escopo da outra
+tecnologia virava chip e entrava na consulta, mas **não tinha linha na lista para ser
+desmarcado**. Só saía fechando o modal.
+
+- **Backend:** `Api._selection_family()` deriva `family` para cluster **manual** a partir das
+  células que ele recorta (única família ⇒ é dela; mistura ⇒ `None`). Antes só o cluster EARFCN
+  declarava família, então o "cluster de células 4G" não tinha como ser filtrado.
+  `family` só é consumido por `kpi_overview.js` — nenhum outro módulo lê esse campo.
+- **`_familyFilteredClusters()`** deixou de olhar `source === "earfcn"`: a regra agora é só
+  `!cluster.family || cluster.family === _family`, valendo para portadora e cluster manual.
+- **Re-semeadura:** se a purga zerar uma comparação **que tinha algo**, `_applyPreferredSelection()`
+  roda para a família nova (no evento com portadoras, a 5G abre com as portadoras dela).
+  Comparação que já estava vazia continua vazia — aí o vazio foi escolha do usuário, e re-semear
+  ali é justamente o que o comentário de `_refreshCellsForFamily` sempre alertou.
+- **`_applyPreferredSelection()` ficou consciente de família** nas sementes cegas
+  (`clusters:compare` e o fallback "primeiro cluster"), senão a re-semeadura devolveria o escopo
+  invisível que a purga acabou de tirar.
+- **Consequência tratada:** com a semente family-aware, um "ver KPIs" vindo de cluster de uma
+  tecnologia só seria descartado se a aba resolvesse para a outra família. `_preferredFamily()`
+  passou a deixar **o cluster pedido escolher a aba de abertura** — o cluster pedido sempre
+  aparece, e agora na aba onde tem dado. `techFilter` do dashboard continua mandando nos demais
+  casos (inclusive `"all"` ⇒ 4G).
+- **Mock:** `get_clusters` do `bridge.js` descartava `family` no envelope — as portadoras do
+  cenário `?kpiOverview=earfcn` chegavam sem família e o filtro nunca era exercitado em `--mock`.
+
+Cobertura: `test_api.py::TestClusters::test_cluster_de_uma_tecnologia_so_declara_a_familia` e
+três testes de UI em `test_frontend_kpi_overview_ui.py` (purga, re-semeadura, vazio deliberado).

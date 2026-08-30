@@ -592,3 +592,93 @@ def test_visao_4g_abre_com_clusters_por_portadora_marcados():
                 ).first.locator("input").is_checked()
     except Exception as exc:  # pragma: no cover
         _skip_if_no_browser(exc)
+
+
+def _expand_carriers(page, site_name):
+    """Abre o "separar por portadora" do site — marca as portadoras da aba ativa."""
+    _open_picker(page, "kpi-overview-site-picker")
+    page.locator("#kpi-overview-site-picker .scope-picker-option",
+                 has_text=site_name).first.locator(".scope-picker-chevron").click()
+    page.locator("#kpi-overview-site-picker .scope-picker-trigger").click()
+
+
+def _wait_chips(page, expected):
+    page.wait_for_function(
+        """expected => {
+          const chips = [...document.querySelectorAll(
+            '#kpi-overview-context .kpi-overview-chip')].map(el => el.textContent.trim());
+          return chips.length === expected.length
+            && chips.every((chip, i) => chip === expected[i]);
+        }""",
+        arg=expected,
+        timeout=8000,
+    )
+
+
+def test_troca_de_tecnologia_carrega_so_cluster_sem_familia_e_site():
+    """Atravessam a troca 4G↔5G só os escopos que existem nas duas famílias.
+
+    Portadora — cluster EARFCN e site×portadora — é de uma tecnologia só. Sem a
+    purga ela sobrevive como escopo invisível: vira chip e entra na consulta,
+    mas o seletor da aba nova não tem linha para desmarcá-la.
+    """
+    sync_api = pytest.importorskip("playwright.sync_api")
+    try:
+        with _frontend_server() as url, sync_api.sync_playwright() as playwright:
+            with _overview(playwright) as (page, _browser):
+                _open_overview(page, url, "?kpiOverview=earfcn")
+                _clear_selection(page)
+                _pick(page, "kpi-overview-cluster-picker", "Arquibancada Sul")
+                _pick(page, "kpi-overview-cluster-picker", "Portadora 1276")
+                _pick(page, "kpi-overview-site-picker", "SPSMG7")
+                _expand_carriers(page, "SPSMG7")
+                _wait_chips(page, ["Arquibancada Sul", "Portadora 1276",
+                                   "SPSMG7", "SPSMG7 · 1276"])
+
+                page.locator('#kpi-overview-family-tabs [data-family="5G"]').click()
+
+                _wait_chips(page, ["Arquibancada Sul", "SPSMG7"])
+                _open_picker(page, "kpi-overview-cluster-picker")
+                assert page.locator(
+                    "#kpi-overview-cluster-picker .scope-picker-option",
+                    has_text="Portadora 1276").count() == 0
+    except Exception as exc:  # pragma: no cover
+        _skip_if_no_browser(exc)
+
+
+def test_troca_que_esvazia_a_comparacao_semeia_a_familia_nova():
+    """Purga que zera a comparação re-semeia — abrir a aba no estado de erro
+    "selecione ao menos um" lê como painel quebrado, não como escolha."""
+    sync_api = pytest.importorskip("playwright.sync_api")
+    try:
+        with _frontend_server() as url, sync_api.sync_playwright() as playwright:
+            with _overview(playwright) as (page, _browser):
+                # A 4G abre com as portadoras dela; nenhuma sobrevive no 5G.
+                _open_overview(page, url, "?kpiOverview=earfcn")
+                _wait_chips(page, ["Portadora 1276", "Portadora 1700"])
+
+                page.locator('#kpi-overview-family-tabs [data-family="5G"]').click()
+
+                _wait_chips(page, ["Portadora 627264"])
+                assert page.locator("#kpi-overview-error").is_hidden()
+    except Exception as exc:  # pragma: no cover
+        _skip_if_no_browser(exc)
+
+
+def test_comparacao_esvaziada_de_proposito_continua_vazia_ao_trocar():
+    """O vazio escolhido pelo usuário não é desfeito pela troca de aba."""
+    sync_api = pytest.importorskip("playwright.sync_api")
+    try:
+        with _frontend_server() as url, sync_api.sync_playwright() as playwright:
+            with _overview(playwright) as (page, _browser):
+                _open_overview(page, url, "?kpiOverview=earfcn")
+                _clear_selection(page)
+
+                page.locator('#kpi-overview-family-tabs [data-family="5G"]').click()
+
+                error = page.locator("#kpi-overview-error")
+                error.wait_for(state="visible", timeout=5000)
+                assert page.locator(
+                    "#kpi-overview-context .kpi-overview-chip").count() == 0
+    except Exception as exc:  # pragma: no cover
+        _skip_if_no_browser(exc)

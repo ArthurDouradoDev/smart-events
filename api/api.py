@@ -1168,6 +1168,32 @@ class Api:
             logger.error(f"get_event_cells error: {e}")
             return []
 
+    @classmethod
+    def _selection_family(cls, selections: list[dict], raw_sites: dict,
+                          config: dict) -> str | None:
+        """Família única das células que um cluster recorta (``None`` se mistura).
+
+        É o que permite ao seletor da visão geral tratar um cluster manual feito
+        só de células 4G como específico de família, igual às portadoras: sem
+        isso ele sobrevive à troca de aba como escopo invisível — vira chip,
+        entra na consulta e renderiza painel vazio.
+        """
+        families: set[str] = set()
+        for selection in selections:
+            cells = (raw_sites.get(str(selection["site_id"])) or {}).get("cells") or []
+            chosen = selection.get("cell_ids")
+            if chosen is not None:
+                wanted = {str(cell_id) for cell_id in chosen}
+                cells = [cell for cell in cells
+                         if str(cell if isinstance(cell, str)
+                                else cell.get("id")) in wanted]
+            for cell in cells:
+                family = (cls._cell_technology_family(cell)
+                          or cls._single_configured_family(config))
+                if family:
+                    families.add(family)
+        return next(iter(families)) if len(families) == 1 else None
+
     def get_clusters(self, event_id: str) -> list:
         """Lista os clusters do evento (cadastrados no servidor central) para o
         dropdown do app, incluindo o recorte granular de células."""
@@ -1205,8 +1231,10 @@ class Api:
                 }
                 if cluster.get("source"):
                     entry["source"] = cluster["source"]
-                if cluster.get("family"):
-                    entry["family"] = cluster["family"]
+                family = (cluster.get("family")
+                          or self._selection_family(selections, raw_sites, config))
+                if family:
+                    entry["family"] = family
                 out.append(entry)
             return out
         except Exception as e:

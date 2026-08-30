@@ -317,6 +317,7 @@ const _mock = {
       has_partial_selection: false,
       polygon: c.polygon || [],
       ...(c.source ? { source: c.source } : {}),
+      ...(c.family ? { family: c.family } : {}),
     }
   )),
   get_kpi_catalog: (_eventId=null) => _mockKpiCatalog(),

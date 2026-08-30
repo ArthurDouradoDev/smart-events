@@ -116,11 +116,12 @@ export function initKpiOverview() {
     button.addEventListener("click", () => {
       if (_family === button.dataset.family) return;
       _family = button.dataset.family;
+      _dropFamilySpecificSelection();
       _syncFamilyTabs();
       _renderPanelShells();
+      _renderPickers();
       void _load();
-      // Célula é específica de família (ao contrário de site/cluster): a
-      // lista precisa ser buscada de novo, e seleções que sumiram, purgadas.
+      // A lista de células é específica de família: precisa ser buscada de novo.
       // Um `_refreshScopeData()` completo reaplicaria a semente de seleção
       // (herdada do dashboard) sempre que a comparação estiver vazia — o que
       // reintroduziria um escopo que o usuário acabou de limpar.
@@ -164,11 +165,11 @@ function _open() {
   const modal = document.getElementById("kpi-overview-modal");
   if (!modal) return;
   document.getElementById("chart-popup-modal")?.classList.add("hidden");
-  _family = State.techFilter === "5G" ? "5G" : "4G";
   _minutes = [0, 15, 30, 60].includes(Number(State.timeWindow)) ? Number(State.timeWindow) : 60;
   _scopeSites = State.sites || [];
   _scopeClusters = State.clusters || [];
   _scopeCells = [];
+  _family = _preferredFamily();
   _hiddenScopes.clear();
   _expandedSites.clear();
   _autoMarkedCarrierSites.clear();
@@ -210,14 +211,30 @@ function _carrierClusters() {
 }
 
 /**
- * Clusters visíveis na aba ativa: portadoras (EARFCN) de família diferente da
- * aba ficam de fora — senão "Todos os clusters" marcaria portadoras que
- * renderizariam vazias na família errada. Cluster manual ou de família
- * indeterminada continua visível nas duas abas.
+ * Clusters visíveis na aba ativa: os de família diferente da aba ficam de fora
+ * — senão "Todos os clusters" marcaria escopos que renderizariam vazios na
+ * família errada. Vale tanto para a portadora (EARFCN) quanto para o cluster
+ * manual recortado só de células de uma tecnologia; o de família indeterminada
+ * (o caso normal do cluster de sites, que tem as duas) fica nas duas abas.
  */
 function _familyFilteredClusters() {
   return _scopeClusters.filter(cluster =>
-    cluster.source !== "earfcn" || !cluster.family || cluster.family === _family);
+    !cluster.family || cluster.family === _family);
+}
+
+/**
+ * Aba de abertura: a do dashboard, exceto quando o "ver KPIs" veio de um cluster
+ * de uma tecnologia só — aí é a dele, senão o cluster pedido abriria na aba onde
+ * não tem célula nenhuma e renderiza nove painéis vazios.
+ */
+function _preferredFamily() {
+  const requested = typeof State.selectedSite === "string"
+      && State.selectedSite.startsWith("cluster:")
+    ? _scopeClusters.find(cluster =>
+        cluster.id === State.selectedSite.slice("cluster:".length))
+    : null;
+  if (requested?.family) return requested.family;
+  return State.techFilter === "5G" ? "5G" : "4G";
 }
 
 /** Herda o recorte que o usuário já tinha no dashboard ao abrir a visão geral. */
@@ -226,12 +243,15 @@ function _applyPreferredSelection() {
   _selection.site.clear();
   _selection.cell.clear();
   _selection.siteCarrier.clear();
-  const clusterIds = new Set(_scopeClusters.map(cluster => cluster.id));
+  // Só clusters da aba ativa: semear com um da outra família devolveria o escopo
+  // invisível que a troca de aba acabou de purgar.
+  const visibleClusters = _familyFilteredClusters();
+  const clusterIds = new Set(visibleClusters.map(cluster => cluster.id));
   const siteIds = new Set(_scopeSites.map(site => site.id));
   const carriers = _carrierClusters();
 
   if (State.selectedSite === "clusters:compare") {
-    _scopeClusters.slice(0, MAX_SCOPES).forEach(cluster => _selection.cluster.add(cluster.id));
+    visibleClusters.slice(0, MAX_SCOPES).forEach(cluster => _selection.cluster.add(cluster.id));
   } else if (typeof State.selectedSite === "string" && State.selectedSite.startsWith("cluster:")) {
     const id = State.selectedSite.slice("cluster:".length);
     if (clusterIds.has(id)) _selection.cluster.add(id);
@@ -247,9 +267,47 @@ function _applyPreferredSelection() {
     _selection.cluster.add(State.clusterFilter);
   }
   if (!_selectionSize()) {
-    if (_scopeClusters[0]) _selection.cluster.add(_scopeClusters[0].id);
+    if (visibleClusters[0]) _selection.cluster.add(visibleClusters[0].id);
     else if (_scopeSites[0]) _selection.site.add(_scopeSites[0].id);
   }
+}
+
+/**
+ * Purga da comparação, ao trocar de aba, tudo que é específico de tecnologia.
+ *
+ * Atravessam a troca só os escopos que existem nas duas famílias: cluster sem
+ * família definida (o cluster de sites) e site. Portadora — cluster EARFCN e
+ * site×portadora —, cluster de uma família só e célula pertencem a uma
+ * tecnologia; os seletores já os escondem na outra aba, e sem a purga eles
+ * sobreviveriam como escopo invisível: viram chip, entram na consulta,
+ * renderizam painel vazio e não há linha na lista para desmarcá-los.
+ *
+ * Se a purga zerar uma comparação que tinha algo, a semente do dashboard é
+ * reaplicada para a família nova — abrir a aba no estado de erro "selecione ao
+ * menos um" lê como painel quebrado. Comparação que já estava vazia continua
+ * vazia: aí o vazio foi escolha do usuário.
+ */
+function _dropFamilySpecificSelection() {
+  const had = _selectionSize() > 0;
+  const visibleClusters = new Set(_familyFilteredClusters().map(cluster => cluster.id));
+  [..._selection.cluster].forEach(id => {
+    if (!visibleClusters.has(id)) _selection.cluster.delete(id);
+  });
+  const visibleCarriers = new Set();
+  _scopeSites.forEach(site => (site.carriers || []).forEach(carrier => {
+    if (!carrier.family || carrier.family === _family) {
+      visibleCarriers.add(`${site.id}::${carrier.earfcn}`);
+    }
+  }));
+  [..._selection.siteCarrier].forEach(key => {
+    if (!visibleCarriers.has(key)) _selection.siteCarrier.delete(key);
+  });
+  // Célula é sempre de uma família só: nenhuma da aba anterior sobrevive.
+  _selection.cell.clear();
+  _hiddenScopes.clear();
+  _expandedSites.clear();
+  _autoMarkedCarrierSites.clear();
+  if (had && !_selectionSize()) _applyPreferredSelection();
 }
 
 function _plural(count, singular) {

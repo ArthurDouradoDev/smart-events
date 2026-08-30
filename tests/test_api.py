@@ -806,6 +806,26 @@ class TestClusters:
         }]
 
 
+    def test_cluster_de_uma_tecnologia_so_declara_a_familia(self, api, sample_event):
+        # A visão geral usa `family` para esconder o cluster na aba da outra
+        # tecnologia. Sem ele o cluster de células 4G sobrevive à troca para 5G
+        # como escopo invisível: vira chip, entra na consulta e renderiza painel
+        # vazio, sem linha no seletor para desmarcá-lo.
+        event = _twin_sites_event(sample_event, "cluster-family")
+        event["clusters"] = [
+            {"id": "so-4g", "name": "Só 4G", "site_ids": ["725483"],
+             "members": [{"site_id": "725483", "all_cells": True}]},
+            {"id": "fundido", "name": "Fundido", "site_ids": ["SPSMG7"]},
+        ]
+        database.save_event(event)
+
+        clusters = {c["id"]: c for c in api.get_clusters(event["id"])}
+        assert clusters["so-4g"]["family"] == "4G"
+        # Cluster de site inteiro cobre as duas tecnologias: sem família, ele
+        # atravessa a troca de aba.
+        assert "family" not in clusters["fundido"]
+
+
 class TestEarfcnClusters:
     def test_sem_dlearfcn_nao_inventa_cluster(self, api, sample_event):
         database.save_event(sample_event)
