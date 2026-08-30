@@ -100,6 +100,20 @@ def _webview_initialization() -> str:
     return "janela WebView2 criada, carregada e encerrada"
 
 
+def _window_chrome() -> dict:
+    """Valida disponibilidade das APIs sem instalar um hook na janela do self-test.
+
+    A prova destrutiva com uma janela real permanece separada do diagnostico
+    WebView2 nesta fase; assim uma falha do chrome nunca mascara o renderer.
+    """
+    from core.window_chrome import window_chrome_diagnostic
+
+    result = window_chrome_diagnostic()
+    if not result.get("ok"):
+        raise RuntimeError(result.get("error") or "diagnostico Win32 sem detalhes")
+    return result
+
+
 def run_webview_probe() -> int:
     """Cria uma WebView real e a fecha assim que o DOM termina de carregar."""
     try:
@@ -212,6 +226,7 @@ def run_self_test(report_path: str | Path | None = None) -> tuple[int, Path, dic
         _check("pythonnet / Python.Runtime.dll", _pythonnet),
         _check("Microsoft Edge WebView2 Runtime", webview2_version),
         _check("inicializacao pywebview", _webview_initialization),
+        _check("controlador de moldura Win32", _window_chrome),
         _check("Chromium headless e Chromium visual", _playwright),
         _check("gravacao nos dados do operador", _write_access),
         _check("banco SQLite local", _database),

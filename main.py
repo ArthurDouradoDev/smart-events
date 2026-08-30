@@ -222,11 +222,20 @@ def _wait_server_ready(port: int, timeout: float = 8.0) -> bool:
 def main():
     import webview
     from api.api import Api
+    from core.window_chrome import WindowChromeController, resolve_window_chrome_mode
 
     mock_mode = "--mock" in sys.argv
     dev_mode = "--dev" in sys.argv
+    chrome_decision = resolve_window_chrome_mode(sys.argv[1:], log=logger)
+    custom_titlebar = chrome_decision.mode == "custom"
 
-    logger.info(f"Iniciando Smart Events | mock={mock_mode} | dev={dev_mode}")
+    logger.info(
+        "Iniciando Smart Events | mock=%s | dev=%s | titlebar=%s | motivo=%s",
+        mock_mode,
+        dev_mode,
+        chrome_decision.mode,
+        chrome_decision.reason,
+    )
 
     # Garante que subprocessos (renovação de sessão Playwright) morram junto com o app.
     _setup_windows_job()
@@ -278,6 +287,7 @@ def main():
     # (Cookies, Local Storage) ficam em outro lugar do profile e não são afetados.
     os.environ.setdefault("WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS", "--disk-cache-size=1")
 
+    chrome_controller = WindowChromeController(log=logger)
     window = webview.create_window(
         title="Smart Events",
         url=str(FRONTEND) + "#desktop",
@@ -286,9 +296,22 @@ def main():
         height=900,
         min_size=(1024, 600),
         resizable=True,
+        frameless=custom_titlebar,
+        easy_drag=False,
         fullscreen=False,
         background_color="#0D1117",
     )
+
+    def _on_before_show():
+        if not custom_titlebar:
+            logger.info("Window chrome nao instalado: moldura nativa ativa")
+            return
+        if chrome_controller.attach(window):
+            logger.info("Window chrome instalado: %s", chrome_controller.get_state())
+        else:
+            # ``attach`` restaura WS_CAPTION e os estilos nativos antes de
+            # retornar. A falha nunca deve impedir que a janela seja exibida.
+            logger.error("Window chrome em fallback nativo: %s", chrome_controller.get_state())
 
     def _on_loaded():
         logger.info("Interface carregada")
@@ -296,19 +319,25 @@ def main():
         if mock_mode:
             window.evaluate_js("window.__MOCK_MODE__ = true;")
 
+    window.events.before_show += _on_before_show
     window.events.loaded += _on_loaded
 
-    webview.start(
-        debug=dev_mode,
-        http_server=False,   # serve arquivos locais diretamente
-        storage_path=str(credentials.data_dir() / "webview"),
-        # private_mode=False: o pywebview, em private_mode (default=True), APAGA a
-        # storage_path ao fechar o app. Como a storage_path é a pasta data/, isso
-        # destruía o session.json (cookies/roarand) e o browser_profile a cada
-        # fechamento — forçando novo login a CADA início. Persistindo a sessão, o
-        # login só é refeito quando os cookies realmente expiram no servidor.
-        private_mode=False,
-    )
+    try:
+        webview.start(
+            debug=dev_mode,
+            http_server=False,   # serve arquivos locais diretamente
+            storage_path=str(credentials.data_dir() / "webview"),
+            # private_mode=False: o pywebview, em private_mode (default=True), APAGA a
+            # storage_path ao fechar o app. Como a storage_path é a pasta data/, isso
+            # destruía o session.json (cookies/roarand) e o browser_profile a cada
+            # fechamento — forçando novo login a CADA início. Persistindo a sessão, o
+            # login só é refeito quando os cookies realmente expiram no servidor.
+            private_mode=False,
+        )
+    finally:
+        # Em uma destruicao Win32 normal o WNDPROC ja foi restaurado por
+        # WM_NCDESTROY. O finally cobre falhas de startup e encerramentos atipicos.
+        chrome_controller.detach()
 
 
 if __name__ == "__main__":
