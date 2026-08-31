@@ -5,11 +5,12 @@ import re
 import sys
 from pathlib import Path
 from typing import Optional
-from fastapi import FastAPI, HTTPException, Request, UploadFile, File
+from fastapi import Body, FastAPI, HTTPException, Request, UploadFile, File
 from fastapi.responses import FileResponse, HTMLResponse
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 import uvicorn
+from core.distribution_service import DistributionError, DistributionService
 from core.paths import data_dir, resource_dir
 from core.seed import seed_operator_data
 
@@ -518,6 +519,110 @@ async def upload_cliente_logo(cliente_id: str, file: UploadFile = File(...)):
     except Exception as e:
         logger.error(f"Failed to save logo for cliente {cliente_id}: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+# ── Distribuições (.sepack gerado pela seleção de eventos) ──────────
+# Os endpoints aceitam apenas IDs de evento e opções enumeradas. Nenhum caminho de
+# origem, saída ou compilador vem do navegador: o serviço resolve tudo a partir do
+# SERVER_DATA_DIR do próprio servidor e grava somente em data/distributions/<job-id>/.
+
+DISTRIBUTION_SERVICE = DistributionService(source_dir=SERVER_DATA_DIR)
+
+_PREVIEW_FIELDS = {"event_ids", "name", "vip_policy", "vip_ids"}
+_JOB_FIELDS = _PREVIEW_FIELDS | {"format"}
+
+
+def _distribution_body(payload, allowed: set) -> dict:
+    """Aceita só os campos previstos — um `source`/`output` extra é recusado."""
+    if not isinstance(payload, dict):
+        raise HTTPException(status_code=400, detail="Corpo da requisição deve ser um objeto JSON.")
+    unexpected = sorted(set(payload) - allowed)
+    if unexpected:
+        raise HTTPException(
+            status_code=400,
+            detail="Campos não aceitos nesta operação: " + ", ".join(unexpected),
+        )
+    name = payload.get("name")
+    if name is not None and not isinstance(name, str):
+        raise HTTPException(status_code=400, detail="O campo name deve ser texto.")
+    vip_ids = payload.get("vip_ids")
+    if vip_ids is not None and (
+        not isinstance(vip_ids, list) or not all(isinstance(v, str) for v in vip_ids)
+    ):
+        raise HTTPException(status_code=400, detail="O campo vip_ids deve ser uma lista de texto.")
+    return {
+        "event_ids": payload.get("event_ids"),
+        "name": name,
+        "vip_policy": str(payload.get("vip_policy") or "auto"),
+        "vip_ids": vip_ids,
+    }
+
+
+def _distribution_failure(exc: DistributionError) -> HTTPException:
+    return HTTPException(status_code=exc.status, detail={"code": exc.code, "message": exc.message})
+
+
+@app.get("/api/distributions/capabilities")
+def get_distribution_capabilities():
+    return DISTRIBUTION_SERVICE.capabilities()
+
+
+@app.post("/api/distributions/preview")
+def post_distribution_preview(payload: dict = Body(...)):
+    body = _distribution_body(payload, _PREVIEW_FIELDS)
+    try:
+        return DISTRIBUTION_SERVICE.preview(
+            body["event_ids"],
+            name=body["name"],
+            vip_policy=body["vip_policy"],
+            vip_ids=body["vip_ids"],
+        )
+    except DistributionError as exc:
+        raise _distribution_failure(exc) from exc
+
+
+@app.post("/api/distributions")
+def post_distribution(payload: dict = Body(...)):
+    body = _distribution_body(payload, _JOB_FIELDS)
+    fmt = payload.get("format") or "event_package"
+    if not isinstance(fmt, str):
+        raise HTTPException(status_code=400, detail="O campo format deve ser texto.")
+    try:
+        return DISTRIBUTION_SERVICE.create_job(
+            body["event_ids"],
+            name=body["name"],
+            fmt=fmt,
+            vip_policy=body["vip_policy"],
+            vip_ids=body["vip_ids"],
+        )
+    except DistributionError as exc:
+        raise _distribution_failure(exc) from exc
+
+
+@app.get("/api/distributions/{job_id}")
+def get_distribution(job_id: str):
+    try:
+        return DISTRIBUTION_SERVICE.get_job(job_id)
+    except DistributionError as exc:
+        raise _distribution_failure(exc) from exc
+
+
+def _distribution_artifact(job_id: str, kind: str) -> FileResponse:
+    try:
+        path, entry = DISTRIBUTION_SERVICE.artifact(job_id, kind)
+    except DistributionError as exc:
+        raise _distribution_failure(exc) from exc
+    return FileResponse(path, filename=entry["name"], media_type=entry["media_type"])
+
+
+@app.get("/api/distributions/{job_id}/download")
+def download_distribution(job_id: str):
+    return _distribution_artifact(job_id, "package")
+
+
+@app.get("/api/distributions/{job_id}/manifest")
+def download_distribution_manifest(job_id: str):
+    return _distribution_artifact(job_id, "manifest")
 
 
 if __name__ == "__main__":

@@ -95,6 +95,10 @@ a = Analysis(
     hiddenimports=[
         'server',  # importado por main.py no modo --serve
         'core.session_renew',  # importado por main.py no modo --get-session
+        # importado por main.py nos modos --inspect/--import-event-package. Na Fase 4
+        # entram aqui tambem a chave publica e o verificador de assinatura do .sepack;
+        # a chave PRIVADA nunca e empacotada.
+        'core.event_package',
         'uvicorn',
         'uvicorn.logging',
         'uvicorn.loops',

@@ -1567,3 +1567,156 @@ depois da correção do arraste — o defeito veio com o recuo, no commit `9ab2b
    mais se parece com o que Electron/WinUI fazem.
 3. Reescrever o `rcNormalPosition` após cada restauração, com `SetWindowPlacement`. Simples,
    mas trata o sintoma e briga com o WinForms a cada ciclo.
+
+## 2026-08-31 — Conciliação de cadastros na importação de `.sepack` (decisão 5.1 do plano)
+
+O plano de distribuição automatizada só dizia "clientes e VIPs existentes: mesclar por ID, com a
+mesma política de conflito", o que na prática significava preservar o arquivo local inteiro.
+Ficou definido no plano (`docs/plans/2026-08-31-001-feat-distribuicao-automatizada-eventos-plan.md`,
+decisão 5.1) que **evento** continua sendo preservado inteiro em conflito, mas **cliente, regional,
+VIP e logo** são cadastros compartilhados e passam a ser conciliados campo a campo, pela chave
+`id`:
+
+- campo faltante local + presente no pacote: adiciona;
+- campo local preenchido + ausente/vazio no pacote: mantém o local;
+- campo preenchido nos dois lados com valores diferentes: preserva o local e registra conflito
+  (inclui `ip` da regional, que é ambiente-específico);
+- logo é a única substituição automática: entra quando vem não vazio, com backup do anterior;
+- `id` novo com nome normalizado igual a um cadastro existente: apenas aviso, sem mesclar sozinho.
+
+**Motivo:** importar um evento novo da TIM em uma máquina que já tem a TIM cadastrada não pode
+criar um segundo cliente — isso fragmentaria o cadastro e faria o app pedir credencial de novo.
+Nenhuma fase nova foi criada; o trabalho está na Fase 1 (`reconcile_record()`, campo `reconciled`
+no `ImportResult`, seis testes novos) e na revisão da Fase 2.
+
+## 2026-08-31 — Fase 1 da distribuição automatizada: formato `.sepack`, geração e importação
+
+Implementada a Fase 1 do plano
+`docs/plans/2026-08-31-001-feat-distribuicao-automatizada-eventos-plan.md`. Nenhuma interface
+nova; tudo por CLI e pelos modos sem janela do `main.py`.
+
+**Entregue:**
+
+- `core/event_package.py` — contrato do `.sepack` (envelope + payload.zip + manifesto com
+  SHA-256 por arquivo), `preview_package`, `build_package`, `validate_package`,
+  `inspect_package`, `reconcile_record`, `plan_import`, `import_package`, `summary_lines`.
+- `core/seed.py` — `validate_collection()` (multi-cliente, lista exata de eventos); o recorte
+  por perfil passou a delegar as regras estruturais a ela, sem mudar as mensagens legadas.
+- `core/paths.py` — `server_data_dir()`, `distributions_dir()`, `import_reports_dir()`,
+  `import_backups_dir()`, `import_lock_path()`, `is_safe_component()`.
+- `tools/event_package.py` — `preview | build | inspect | import`, com `--json`.
+- `main.py` — `--inspect-event-package` / `--import-event-package` resolvidos **antes** de
+  qualquer coisa do pywebview.
+- Testes: `tests/test_event_package.py` (26), `tests/test_main_event_package_cli.py` (8) e
+  2 novos em `tests/test_installer.py`. Suíte completa: 666 passed, 10 skipped.
+
+**Decisões travadas nesta implementação (além da decisão 5.1 já documentada):**
+
+- **`server_data_dir()` repete a regra do `server.py`** (`data_dir()` no frozen,
+  `data_dir().parent` em dev) em vez de "consertá-la". O importador precisa gravar exatamente
+  onde o app lê; divergir aqui produziria importação invisível. `server.py` não foi alterado.
+- **Reprodutibilidade é sobre o payload, não sobre o arquivo inteiro:** `build_package` aceita
+  `package_id` e `created_at` injetáveis; com os mesmos valores e a mesma origem, os bytes são
+  idênticos (ordem alfabética das entradas, timestamp ZIP fixo em 1980-01-01, deflate nível 9).
+  Sem isso, "reproduzível" seria intestável.
+- **O pacote é lido inteiro em memória e validado sobre essa cópia** (limite de 32 MiB). Isso já
+  entrega a proteção contra TOCTOU que a Fase 4 exige para a assinatura.
+- **`signature_required: true` é recusado nesta fase.** Aceitar sem poder verificar seria fingir
+  confiança.
+- **Códigos de saída (CLI e `main.py`):** 0 concluído/idempotente, 2 argumento inválido,
+  3 pacote inválido, 4 concluído com conflito preservado, 5 erro interno (só na CLI).
+- **Ordem de gravação:** logos → clientes → VIPs → eventos, para que a dependência exista antes
+  de quem a referencia mesmo se o processo morrer no meio.
+- **VIP legado por fallback exige cliente + regional.** Evento sem regional não gera fallback
+  nenhum, em vez de arrastar todos os VIPs do cliente.
+- Nenhuma dependência nova: o módulo usa só a biblioteca padrão. `requirements-build.lock` não
+  precisou mudar; `main.spec` ganhou apenas `core.event_package` em `hiddenimports` e a semente
+  embutida continua no lugar (a remoção é da Fase 3).
+
+**Pendente de validação manual (não automatizável aqui):** abrir o app apontando para uma pasta
+de dados importada e conferir os eventos no seletor e os clientes no gerenciador de credenciais
+(passos 4 e 5 da validação funcional da fase).
+
+## 2026-08-31 — Fase 2 da distribuição automatizada: seleção múltipla e geração pela Central
+
+Implementada a Fase 2 do plano
+`docs/plans/2026-08-31-001-feat-distribuicao-automatizada-eventos-plan.md`. O operador
+seleciona eventos na lista, revisa o que entra e baixa o `.sepack` sem tocar em JSON nem
+em linha de comando.
+
+**Entregue:**
+
+- `core/distribution_service.py` — `DistributionService` com `capabilities()`, `preview()`,
+  `create_job()`, `get_job()`, `list_jobs()`, `artifact()`, `wait_for()` e
+  `cleanup_incomplete()`; estados `queued → validating → packaging → ready|failed`;
+  `redact()` para tudo que sai para a UI.
+- `server.py` — `GET /api/distributions/capabilities`, `POST /api/distributions/preview`,
+  `POST /api/distributions`, `GET /api/distributions/{job_id}` e os dois downloads
+  (`/download`, `/manifest`).
+- `server_frontend/index.html` — checkbox por card, "Selecionar todos visíveis", contador,
+  botão **Gerar distribuição**, modal `<dialog>` de revisão, progresso por etapa com
+  polling em backoff, sucesso com tamanho/SHA-256/data e falha com diagnóstico copiável.
+- `core/paths.py` — `distribution_jobs_dir()`.
+- Testes: `tests/test_distribution_api.py` (18) e
+  `tests/test_server_frontend_distribution_ui.py` (11 estruturais + 9 Playwright).
+  Suíte completa: **704 passed, 10 skipped** (era 666/10 na Fase 1).
+
+**Decisões travadas nesta implementação:**
+
+- **O navegador nunca manda caminho.** `_distribution_body()` recusa qualquer chave fora
+  de `{event_ids, name, vip_policy, vip_ids, format}` com HTTP 400 nomeando os campos
+  extras. Origem e destino saem sempre do `SERVER_DATA_DIR` do próprio servidor.
+- **`job_id` é `uuid4().hex` validado por `^[0-9a-f]{32}$` antes de virar caminho.** Um id
+  fora do formato é recusado com `job.invalid_id` sem nunca compor um `Path`.
+- **Download só de artefato registrado no job.** `artifact()` lê o nome de
+  `record["artifacts"][kind]["name"]`, revalida com `paths.is_safe_component()` e exige
+  `state == "ready"` (senão 409). Não existe endpoint que aceite nome de arquivo.
+- **Os endpoints são `def` com `Body(...)`, não `async def` com `Request`.** O projeto não
+  tem `httpx`, então o TestClient do FastAPI não existe aqui; assinaturas assim são
+  chamáveis direto no teste, como já fazia `tests/test_server_parse_sites.py`.
+- **Um job de escrita por vez (`threading.Lock`), previews em paralelo.** O lock é adquirido
+  fora do `try`: enquanto ele não vem, o job fica legitimamente em `queued` e a interface
+  mostra "aguardando outra geração terminar".
+- **Estado do job só existe em disco** (`data/distributions/jobs/<job-id>.json`, gravado por
+  `os.replace` a cada transição). Uma instância nova do serviço — página recarregada ou
+  processo reiniciado — recupera artefatos e manifesto sem estado em memória.
+- **A gravação atômica no Windows precisa de repetição, não só de lock.** `_retrying()`
+  repete leitura e `os.replace` sob `PermissionError` (o destino está aberto pelo polling da
+  interface; o `.tmp` está aberto pelo antivírus), `_record_lock` é `RLock` cobrindo leitura
+  e gravação, e `_force_failed()` garante que nenhum job fique preso em `queued` quando o
+  registro não pode ser lido. Detalhe completo em ERRORS.md (2026-08-31).
+- **`redact()` mantém o nome do arquivo e descarta a árvore do perfil**
+  (`C:\Users\ana\...\dados.json` → `<caminho>/dados.json`); em `CHAVE=valor` com palavra de
+  segredo, mantém a chave e oculta o valor. Rotas de API (`/api/...`) não são tratadas como
+  caminho de usuário, senão o diagnóstico ficaria ilegível.
+- **`cleanup_incomplete()` nunca apaga job `ready`.** Só remove job não terminal mais velho
+  que a idade configurada (24 h por padrão), e roda no `create_job()`.
+- **`capabilities.formats` lista só o que funciona** (`["event_package"]`), e
+  `available_formats` traz o Setup completo como opção **desabilitada** com
+  `reason: "disponivel apos configurar um build-base"`. A UI cruza os dois: `usable =
+  item.enabled && formats.has(item.id)`. Na Fase 3 basta o backend passar a listar
+  `full_setup` em `formats`.
+- **Erro bloqueia Gerar; aviso não.** `btn-distribution-generate.disabled = !preview.ok`, e
+  `preview.ok` é falso apenas quando há `errors`. O fallback legado de VIP é aviso.
+- **A seleção vive num `Set` fora do DOM**, reaplicada em `renderEvents()` para sobreviver à
+  re-renderização, e podada quando um evento some da lista (evento excluído não pode ficar
+  selecionado de forma invisível). É limpa ao trocar de aba e ao concluir o download.
+- **O modal é `<dialog>` nativo**, não uma div com overlay: foco preso e `Esc` vêm de graça,
+  sem código de trap próprio.
+- **Nenhuma dependência nova**; `main.spec` não precisou mudar
+  (`core.distribution_service` entra pela análise de `server`, já em `hiddenimports`).
+
+**Validação executada:** smoke ponta a ponta com o servidor real em HTTP sobre uma cópia do
+`server_data` — capabilities, preview de 2 eventos de clientes diferentes (TIM + Vivo, 651
+sites, 7690 células, aviso de fallback de VIP), job até `ready`, download com
+`Content-Disposition: attachment`, download do manifesto, 404 para job desconhecido, 400
+para `output` vindo do navegador, e o `.sepack` baixado passando por
+`tools.event_package inspect` + `import` (2 eventos e 3 cadastros adicionados; segunda
+importação idempotente).
+
+**Pendente de validação manual (não automatizável aqui):** abrir a Central num navegador
+real e conferir a largura estreita (passo 9) e a leitura de tela do modal.
+
+**Bug pré-existente encontrado, NÃO corrigido (fora do escopo da fase):** `server.py` usa
+`shutil.copyfileobj` em `upload_cliente_logo()` sem `import shutil` no módulo — o upload de
+logo por cliente levanta `NameError`. Corrigir em tarefa própria.

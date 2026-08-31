@@ -137,6 +137,53 @@ def test_prepare_vivo_profile_keeps_exact_event_and_validates_radio(tmp_path):
     assert result["profile"]["client"] == "Vivo"
 
 
+def test_validate_collection_accepts_multiple_clients_and_exact_event_list(tmp_path):
+    from core.seed import validate_collection
+
+    events = [
+        (Path("tim.json"), _event("tim-a", "Evento TIM", "TIM")),
+        (Path("vivo.json"), _event("vivo-a", "Evento Vivo", "Vivo")),
+    ]
+    clientes = [
+        (Path("tim.json"), _client("tim", "TIM")),
+        (Path("vivo.json"), _client("vivo", "Vivo")),
+    ]
+    vips = [(Path("vip.json"), {"id": "vip-a", "name": "VIP A", "cliente": "Vivo"})]
+
+    assert validate_collection(
+        events, clientes, vips, expected_event_ids=["tim-a", "vivo-a"]
+    ) == []
+
+    faltando = validate_collection(events, clientes, vips, expected_event_ids=["tim-a"])
+    assert any("diferem da lista esperada" in error for error in faltando)
+
+    sem_cliente = validate_collection(events, [clientes[0]], vips)
+    assert any("Evento sem cliente cadastrado" in error for error in sem_cliente)
+    assert any("VIP sem cliente cadastrado" in error for error in sem_cliente)
+
+
+def test_installer_seed_never_carries_credentials_or_history(tmp_path):
+    from tools.prepare_installer_seed import prepare
+
+    source = tmp_path / "source"
+    _write(source / "events" / "road.json", _event("road", "RoadShow SP", "TIM"))
+    _write(source / "clientes" / "tim.json", _client("tim", "TIM"))
+    # Lixo que jamais pode viajar num artefato distribuido.
+    _write(source / "credentials.json", {"TIM": {"_shared": {"user": "x", "password": "y"}}})
+    _write(source / "session.json", {"cookie": "abc"})
+    (source / "smart_events.db").write_bytes(b"SQLite format 3\x00")
+    (source / "logs").mkdir(parents=True, exist_ok=True)
+    (source / "logs" / "smart_events.log").write_text("log", encoding="utf-8")
+
+    destination = tmp_path / "seed"
+    prepare(source, destination)
+
+    produced = {path.name for path in destination.rglob("*") if path.is_file()}
+    assert "credentials.json" not in produced
+    assert "session.json" not in produced
+    assert not any(name.endswith((".db", ".log")) for name in produced)
+
+
 def test_validate_profile_seed_rejects_missing_radio_and_pm_task(tmp_path):
     from core.seed import validate_seed
 

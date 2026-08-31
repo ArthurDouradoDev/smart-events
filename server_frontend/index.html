@@ -682,6 +682,165 @@
 
     .tooltip-title { font-weight: 600; font-size: 12px; margin-bottom: 2px; }
     .tooltip-desc  { font-size: 11px; color: var(--text-secondary); }
+
+    /* ── Seleção de eventos e geração de distribuição ── */
+    .event-select-label {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      cursor: pointer;
+      font-size: 13px;
+      color: var(--text-secondary);
+    }
+
+    .event-select {
+      width: 16px;
+      height: 16px;
+      flex: none;
+      accent-color: var(--info);
+      cursor: pointer;
+    }
+
+    .distribution-bar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      flex-wrap: wrap;
+      margin-bottom: 14px;
+      padding: 10px 14px;
+      background: var(--bg-hover);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-md);
+    }
+
+    .distribution-bar-actions { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+    .distribution-count { font-size: 13px; color: var(--text-secondary); }
+
+    .distribution-modal {
+      width: min(720px, calc(100vw - 32px));
+      max-height: calc(100vh - 64px);
+      padding: 0;
+      border: 1px solid var(--border);
+      border-radius: var(--radius-lg);
+      background: var(--bg-surface);
+      color: var(--text-primary);
+      overflow: hidden;
+    }
+
+    .distribution-modal::backdrop { background: rgba(1, 4, 9, 0.72); }
+
+    .distribution-modal-head,
+    .distribution-modal-foot {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      flex-wrap: wrap;
+      padding: 16px 20px;
+      background: var(--bg-surface);
+    }
+
+    .distribution-modal-head { border-bottom: 1px solid var(--border); }
+    .distribution-modal-foot { border-top: 1px solid var(--border); }
+
+    .distribution-modal-body {
+      padding: 18px 20px;
+      max-height: min(60vh, 520px);
+      overflow-y: auto;
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+    }
+
+    .distribution-section {
+      border: 1px solid var(--border-soft);
+      border-radius: var(--radius-md);
+      padding: 12px 14px;
+      background: var(--bg-hover);
+    }
+
+    .distribution-section h4 {
+      font-size: 12px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      color: var(--text-muted);
+      margin-bottom: 8px;
+    }
+
+    .distribution-row {
+      display: flex;
+      justify-content: space-between;
+      gap: 12px;
+      flex-wrap: wrap;
+      font-size: 13px;
+      padding: 4px 0;
+      border-bottom: 1px solid var(--border-soft);
+    }
+
+    .distribution-row:last-child { border-bottom: none; }
+    .distribution-row span:last-child { color: var(--text-secondary); text-align: right; }
+
+    .distribution-issue {
+      font-size: 12px;
+      padding: 8px 10px;
+      border-radius: var(--radius-md);
+      margin-bottom: 6px;
+    }
+
+    .distribution-issue.error   { background: var(--danger-bg); color: var(--danger); }
+    .distribution-issue.warning { background: rgba(210, 153, 34, 0.12); color: var(--warning); }
+    .distribution-issue.info    { background: var(--info-bg); color: var(--info); }
+
+    .distribution-format {
+      display: flex;
+      align-items: flex-start;
+      gap: 10px;
+      padding: 10px;
+      border: 1px solid var(--border-soft);
+      border-radius: var(--radius-md);
+      margin-bottom: 8px;
+      cursor: pointer;
+    }
+
+    .distribution-format.disabled { opacity: 0.55; cursor: not-allowed; }
+    .distribution-format-hint { font-size: 11px; color: var(--text-muted); display: block; }
+
+    .distribution-steps { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 12px; }
+
+    .distribution-step {
+      font-size: 11px;
+      font-weight: 600;
+      text-transform: uppercase;
+      padding: 4px 10px;
+      border-radius: 12px;
+      background: var(--border);
+      color: var(--text-secondary);
+    }
+
+    .distribution-step.done   { background: var(--success-bg); color: var(--success); }
+    .distribution-step.active { background: var(--info-bg);    color: var(--info); }
+    .distribution-step.failed { background: var(--danger-bg);  color: var(--danger); }
+
+    .distribution-diagnostic {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 11px;
+      white-space: pre-wrap;
+      word-break: break-word;
+      background: var(--bg-base);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-md);
+      padding: 10px;
+      max-height: 180px;
+      overflow: auto;
+    }
+
+    @media (max-width: 640px) {
+      .distribution-bar,
+      .distribution-modal-foot { flex-direction: column; align-items: stretch; }
+      .distribution-bar-actions { justify-content: space-between; }
+    }
   </style>
 </head>
 
@@ -752,12 +911,87 @@
             Novo Evento
           </button>
         </div>
+        <!-- Barra de seleção para gerar distribuição (.sepack) -->
+        <div class="distribution-bar" id="distribution-bar">
+          <label class="event-select-label" for="select-all-visible-events">
+            <input type="checkbox" id="select-all-visible-events" class="event-select">
+            <span>Selecionar todos visíveis</span>
+          </label>
+          <div class="distribution-bar-actions">
+            <span class="distribution-count" id="distribution-selection-count" aria-live="polite">
+              Nenhum evento selecionado
+            </span>
+            <button class="btn btn-secondary" id="btn-clear-event-selection" style="width:auto;" disabled>
+              Limpar seleção
+            </button>
+            <button class="btn btn-primary" id="btn-generate-distribution" style="width:auto;" disabled>
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+                <polyline points="7 10 12 15 17 10"/>
+                <line x1="12" y1="15" x2="12" y2="3"/>
+              </svg>
+              Gerar distribuição
+            </button>
+          </div>
+        </div>
+
         <div class="card" style="padding:20px;">
           <div class="events-container" id="events-list">
             <div class="empty-state">Buscando eventos no servidor...</div>
           </div>
         </div>
       </div>
+
+      <!-- Modal: revisar e gerar distribuição -->
+      <dialog id="distribution-modal" class="distribution-modal"
+        aria-labelledby="distribution-modal-title">
+        <div class="distribution-modal-head">
+          <h3 id="distribution-modal-title" style="font-size:16px;">Revisar distribuição</h3>
+          <button class="event-action-btn" id="btn-distribution-close" title="Fechar" aria-label="Fechar">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
+            </svg>
+          </button>
+        </div>
+
+        <div class="distribution-modal-body">
+          <!-- Estado: revisão -->
+          <div id="distribution-review">
+            <div id="distribution-preview-loading" class="empty-state">Carregando revisão...</div>
+            <div id="distribution-preview-content" style="display:none;"></div>
+          </div>
+
+          <!-- Estado: job em progresso -->
+          <div id="distribution-progress" style="display:none;">
+            <div class="distribution-steps" id="distribution-steps"></div>
+            <div id="distribution-progress-msg" aria-live="polite" style="font-size:13px; color:var(--text-secondary);"></div>
+          </div>
+
+          <!-- Estado: sucesso -->
+          <div id="distribution-success" style="display:none;"></div>
+
+          <!-- Estado: falha -->
+          <div id="distribution-failure" style="display:none;"></div>
+        </div>
+
+        <div class="distribution-modal-foot">
+          <button class="btn btn-secondary" id="btn-distribution-cancel" style="width:auto;">Cancelar</button>
+          <div class="distribution-bar-actions">
+            <button class="btn btn-secondary" id="btn-distribution-retry" style="width:auto; display:none;">
+              Tentar novamente
+            </button>
+            <button class="btn btn-secondary" id="btn-distribution-download-manifest" style="width:auto; display:none;">
+              Baixar manifesto
+            </button>
+            <button class="btn btn-primary" id="btn-distribution-download" style="width:auto; display:none;">
+              Baixar pacote
+            </button>
+            <button class="btn btn-primary" id="btn-distribution-generate" style="width:auto;" disabled>
+              Gerar
+            </button>
+          </div>
+        </div>
+      </dialog>
 
       <!-- Vista: Formulário de Evento (oculto por padrão) -->
       <div id="eventos-form-view" style="display:none;">
@@ -1370,10 +1604,29 @@
     let editingClienteId = null;
     let loadedClientesList = [];
 
+    // ── Distribuição (.sepack) ──────────────────────────────────
+    const distributionModal     = document.getElementById('distribution-modal');
+    const distributionCountLbl  = document.getElementById('distribution-selection-count');
+    const selectAllVisibleInput = document.getElementById('select-all-visible-events');
+    const btnGenerateDistribution = document.getElementById('btn-generate-distribution');
+    const btnClearEventSelection  = document.getElementById('btn-clear-event-selection');
+
+    // A seleção vive fora do DOM para sobreviver à re-renderização da lista
+    // (salvar/excluir um evento redesenha todos os cards). É limpa ao trocar de
+    // aba ou ao concluir o download: a distribuição já foi entregue e manter os
+    // eventos marcados convidaria a gerar o mesmo pacote duas vezes.
+    const selectedEventIds = new Set();
+    let distributionCapabilities = null;
+    let distributionPreview = null;
+    let distributionJobId = null;
+    let distributionPollTimer = null;
+    let distributionPollDelay = 0;
+
     // ── Init ────────────────────────────────────────────────────
     document.addEventListener('DOMContentLoaded', () => {
       initMap();
       loadEvents();
+      bindDistributionUi();
 
       tabBtnEventos.addEventListener('click', () => switchTab('eventos'));
       tabBtnVips.addEventListener('click',    () => switchTab('vips'));
@@ -1524,6 +1777,8 @@
       panelEventos.style.display  = tab === 'eventos'  ? '' : 'none';
       panelVips.style.display     = tab === 'vips'     ? '' : 'none';
       panelClientes.style.display = tab === 'clientes' ? '' : 'none';
+      // Sair da aba encerra a intenção de distribuir: a seleção não atravessa abas.
+      if (tab !== 'eventos') { closeDistributionModal(); clearEventSelection(); }
       if (tab === 'eventos')  loadEvents();
       if (tab === 'vips')     loadVips();
       if (tab === 'clientes') loadClientes();
@@ -2286,8 +2541,13 @@
     }
 
     function renderEvents(events) {
+      // Um evento excluído não pode continuar selecionado de forma invisível.
+      const visible = new Set((events || []).map(e => e.id));
+      [...selectedEventIds].forEach(id => { if (!visible.has(id)) selectedEventIds.delete(id); });
+
       if (!events || events.length === 0) {
         eventsList.innerHTML = '<div class="empty-state">Nenhum evento cadastrado no servidor.</div>';
+        updateDistributionSelection();
         return;
       }
       events.sort((a, b) => new Date(a.start_time || 0) - new Date(b.start_time || 0));
@@ -2318,12 +2578,24 @@
         let badgeClass = 'badge-scheduled', statusLabel = 'Agendado';
         if (status === 'ACTIVE')  { badgeClass = 'badge-active';  statusLabel = 'Ativo'; }
         if (status === 'ENDED' || status === 'ARCHIVED') { badgeClass = 'badge-ended'; statusLabel = 'Encerrado'; }
+        const eventId = escapeHTML(event.id);
         return `
           <div class="event-card">
             <div class="event-header">
-              <div style="display:flex; flex-direction:column; gap:2px;">
-                <span class="event-name">${escapeHTML(event.name)}</span>
-                <div style="font-size:11px; font-family:'JetBrains Mono',monospace; color:var(--text-muted)">ID: ${escapeHTML(event.id)}</div>
+              <div style="display:flex; align-items:flex-start; gap:10px;">
+                <label class="event-select-label" for="event-select-${eventId}"
+                  onclick="event.stopPropagation()">
+                  <input type="checkbox" class="event-select" id="event-select-${eventId}"
+                    data-event-id="${eventId}"
+                    aria-label="Selecionar o evento ${escapeHTML(event.name)} para a distribuição"
+                    ${selectedEventIds.has(event.id) ? 'checked' : ''}
+                    onclick="event.stopPropagation()"
+                    onchange="toggleEventSelection('${eventId}', this.checked)">
+                </label>
+                <div style="display:flex; flex-direction:column; gap:2px;">
+                  <span class="event-name">${escapeHTML(event.name)}</span>
+                  <div style="font-size:11px; font-family:'JetBrains Mono',monospace; color:var(--text-muted)">ID: ${escapeHTML(event.id)}</div>
+                </div>
               </div>
               <div style="display:flex; align-items:center; gap:8px;">
                 <span class="event-badge ${badgeClass}">${statusLabel}</span>
@@ -2349,6 +2621,415 @@
             </div>
           </div>`;
       }).join('');
+      updateDistributionSelection();
+    }
+
+    // ── Seleção múltipla e geração de distribuição ──────────────
+
+    function visibleEventIds() {
+      return (loadedEventsList || []).map(event => event.id);
+    }
+
+    function toggleEventSelection(eventId, checked) {
+      if (checked) selectedEventIds.add(eventId);
+      else selectedEventIds.delete(eventId);
+      updateDistributionSelection();
+    }
+
+    function selectAllVisibleEvents(checked) {
+      visibleEventIds().forEach(id => checked ? selectedEventIds.add(id) : selectedEventIds.delete(id));
+      document.querySelectorAll('#events-list .event-select').forEach(input => {
+        input.checked = selectedEventIds.has(input.dataset.eventId);
+      });
+      updateDistributionSelection();
+    }
+
+    function clearEventSelection() {
+      selectedEventIds.clear();
+      document.querySelectorAll('#events-list .event-select').forEach(input => { input.checked = false; });
+      updateDistributionSelection();
+    }
+
+    function updateDistributionSelection() {
+      const total = selectedEventIds.size;
+      distributionCountLbl.textContent = total === 0
+        ? 'Nenhum evento selecionado'
+        : `${total} evento${total === 1 ? '' : 's'} selecionado${total === 1 ? '' : 's'}`;
+      btnGenerateDistribution.disabled = total === 0;
+      btnClearEventSelection.disabled = total === 0;
+
+      const visible = visibleEventIds();
+      const selectedVisible = visible.filter(id => selectedEventIds.has(id)).length;
+      selectAllVisibleInput.checked = visible.length > 0 && selectedVisible === visible.length;
+      selectAllVisibleInput.indeterminate = selectedVisible > 0 && selectedVisible < visible.length;
+    }
+
+    function bindDistributionUi() {
+      selectAllVisibleInput.addEventListener('change', e => selectAllVisibleEvents(e.target.checked));
+      btnClearEventSelection.addEventListener('click', clearEventSelection);
+      btnGenerateDistribution.addEventListener('click', openDistributionModal);
+      document.getElementById('btn-distribution-close').addEventListener('click', closeDistributionModal);
+      document.getElementById('btn-distribution-cancel').addEventListener('click', closeDistributionModal);
+      document.getElementById('btn-distribution-generate').addEventListener('click', startDistributionJob);
+      document.getElementById('btn-distribution-retry').addEventListener('click', retryDistributionJob);
+      document.getElementById('btn-distribution-download')
+        .addEventListener('click', () => downloadDistributionArtifact('download'));
+      document.getElementById('btn-distribution-download-manifest')
+        .addEventListener('click', () => downloadDistributionArtifact('manifest'));
+      // <dialog> já entrega foco preso e Esc; só precisamos parar o polling.
+      distributionModal.addEventListener('cancel', () => stopDistributionPolling());
+      distributionModal.addEventListener('close', () => stopDistributionPolling());
+      updateDistributionSelection();
+    }
+
+    function showDistributionPane(pane) {
+      ['review', 'progress', 'success', 'failure'].forEach(name => {
+        document.getElementById(`distribution-${name}`).style.display = name === pane ? '' : 'none';
+      });
+      document.getElementById('btn-distribution-generate').style.display = pane === 'review' ? '' : 'none';
+      document.getElementById('btn-distribution-retry').style.display = pane === 'failure' ? '' : 'none';
+      const done = pane === 'success';
+      document.getElementById('btn-distribution-download').style.display = done ? '' : 'none';
+      document.getElementById('btn-distribution-download-manifest').style.display = done ? '' : 'none';
+    }
+
+    async function openDistributionModal() {
+      if (selectedEventIds.size === 0) return;
+      distributionJobId = null;
+      distributionPreview = null;
+      showDistributionPane('review');
+      document.getElementById('distribution-preview-loading').style.display = '';
+      document.getElementById('distribution-preview-content').style.display = 'none';
+      document.getElementById('btn-distribution-generate').disabled = true;
+      if (!distributionModal.open) distributionModal.showModal();
+      await loadDistributionCapabilities();
+      await requestDistributionPreview();
+    }
+
+    function closeDistributionModal() {
+      stopDistributionPolling();
+      if (distributionModal.open) distributionModal.close();
+    }
+
+    async function loadDistributionCapabilities() {
+      if (distributionCapabilities) return distributionCapabilities;
+      try {
+        const res = await fetch('/api/distributions/capabilities');
+        if (!res.ok) throw new Error('HTTP ' + res.status);
+        distributionCapabilities = await res.json();
+      } catch (err) {
+        console.error('Falha ao ler as capacidades de distribuição', err);
+        // Sem capacidades confirmadas, só o formato garantido desta fase aparece.
+        distributionCapabilities = { formats: ['event_package'], available_formats: [] };
+      }
+      return distributionCapabilities;
+    }
+
+    async function requestDistributionPreview() {
+      try {
+        const res = await fetch('/api/distributions/preview', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ event_ids: [...selectedEventIds] }),
+        });
+        const payload = await res.json();
+        if (!res.ok) {
+          const detail = payload && payload.detail;
+          const message = detail && detail.message ? detail.message : ('HTTP ' + res.status);
+          renderDistributionPreview({
+            ok: false, counts: {}, events: [], clientes: [], vips: [], excluded: [],
+            warnings: [], errors: [{ code: (detail && detail.code) || 'http', path: '', message }],
+          });
+          return;
+        }
+        distributionPreview = payload;
+        renderDistributionPreview(payload);
+      } catch (err) {
+        renderDistributionPreview({
+          ok: false, counts: {}, events: [], clientes: [], vips: [], excluded: [],
+          warnings: [], errors: [{ code: 'network', path: '', message: err.message }],
+        });
+      }
+    }
+
+    function renderDistributionPreview(preview) {
+      const counts = preview.counts || {};
+      const events = preview.events || [];
+      const clientes = preview.clientes || [];
+      const vips = preview.vips || [];
+      const fallbackVips = vips.filter(vip => vip.source === 'fallback');
+      const issues = [
+        ...(preview.errors || []).map(item =>
+          `<div class="distribution-issue error">${escapeHTML(item.code)}: ${escapeHTML(item.message)}</div>`),
+        ...(preview.warnings || []).map(item =>
+          `<div class="distribution-issue warning">⚠ ${escapeHTML(item)}</div>`),
+      ].join('');
+
+      const summary = `${counts.events || 0} evento${counts.events === 1 ? '' : 's'} · `
+        + `${counts.clientes || 0} cliente${counts.clientes === 1 ? '' : 's'} · `
+        + `${counts.regions || 0} ${counts.regions === 1 ? 'regional' : 'regionais'} · `
+        + `${counts.vips || 0} VIP${counts.vips === 1 ? '' : 's'}`;
+
+      document.getElementById('distribution-preview-content').innerHTML = `
+        <div class="distribution-section">
+          <h4>Distribuição</h4>
+          <label style="font-size:12px; color:var(--text-secondary);">Nome</label>
+          <input type="text" id="distribution-name-input" value="${escapeHTML(preview.name || '')}"
+            style="width:100%; margin:6px 0 8px;">
+          <div class="distribution-row">
+            <span>Arquivo sugerido</span>
+            <span class="mono">${escapeHTML(preview.suggested_filename || '')}</span>
+          </div>
+          <div class="distribution-row"><span>Resumo</span><span>${escapeHTML(summary)}</span></div>
+        </div>
+
+        ${issues ? `<div class="distribution-section"><h4>Validação</h4>${issues}</div>` : ''}
+
+        <div class="distribution-section">
+          <h4>Eventos incluídos</h4>
+          ${events.map(row => `
+            <div class="distribution-row">
+              <span>${escapeHTML(row.name)} <span class="mono" style="color:var(--text-muted)">${escapeHTML(row.id)}</span></span>
+              <span>${escapeHTML(row.client || '—')} / ${escapeHTML(row.region || '—')} ·
+                ${row.sites} sites · ${row.cells} células · ${row.clusters} clusters ·
+                ${row.pm_tasks} tasks PM</span>
+            </div>`).join('') || '<div class="empty-state">Nenhum evento.</div>'}
+        </div>
+
+        <div class="distribution-section">
+          <h4>Clientes e regionais</h4>
+          ${clientes.map(row => `
+            <div class="distribution-row">
+              <span>${escapeHTML(row.name)}</span>
+              <span>${escapeHTML((row.regions || []).join(', ') || '—')}${row.logo ? ' · logo' : ''}</span>
+            </div>`).join('') || '<div class="empty-state">Nenhum cliente.</div>'}
+        </div>
+
+        <div class="distribution-section">
+          <h4>VIPs</h4>
+          ${vips.map(row => `
+            <div class="distribution-row">
+              <span>${escapeHTML(row.name)}</span>
+              <span>${escapeHTML(row.client || '—')} / ${escapeHTML(row.region || '—')} ·
+                ${row.source === 'fallback' ? 'fallback legado' : 'associação explícita'}</span>
+            </div>`).join('') || '<div class="empty-state">Nenhum VIP.</div>'}
+          ${fallbackVips.length ? `<div class="distribution-issue warning" id="distribution-vip-fallback-note">
+            ⚠ ${fallbackVips.length} VIP(s) vieram do fallback legado (cliente + regional), sem
+            associação explícita. Revise antes de gerar.</div>` : ''}
+        </div>
+
+        <div class="distribution-section">
+          <h4>No destino</h4>
+          <div class="distribution-issue info" id="distribution-reconciliation-note">
+            ${escapeHTML(preview.reconciliation_note || '')}
+          </div>
+        </div>
+
+        <div class="distribution-section">
+          <h4>Não será incluído</h4>
+          <div id="distribution-excluded" style="font-size:12px; color:var(--text-secondary);">
+            ${(preview.excluded || []).map(item => escapeHTML(item)).join(' · ')}
+          </div>
+        </div>
+
+        <div class="distribution-section">
+          <h4>Formato</h4>
+          <div id="distribution-format-list">${renderDistributionFormats()}</div>
+        </div>`;
+
+      document.getElementById('distribution-preview-loading').style.display = 'none';
+      document.getElementById('distribution-preview-content').style.display = '';
+      // Erro bloqueia a geração; aviso (fallback de VIP) não bloqueia.
+      document.getElementById('btn-distribution-generate').disabled = !preview.ok;
+    }
+
+    function renderDistributionFormats() {
+      const formats = (distributionCapabilities && distributionCapabilities.available_formats) || [];
+      const enabled = new Set((distributionCapabilities && distributionCapabilities.formats) || []);
+      return formats.map((item, index) => {
+        const usable = item.enabled && enabled.has(item.id);
+        return `
+          <label class="distribution-format${usable ? '' : ' disabled'}">
+            <input type="radio" name="distribution-format" value="${escapeHTML(item.id)}"
+              id="distribution-format-${escapeHTML(item.id)}"
+              ${usable ? '' : 'disabled'} ${usable && index === 0 ? 'checked' : ''}>
+            <span>${escapeHTML(item.label)}
+              <span class="distribution-format-hint">${escapeHTML(
+                usable ? (item.description || '') : (item.reason || 'indisponível'))}</span>
+            </span>
+          </label>`;
+      }).join('');
+    }
+
+    function selectedDistributionFormat() {
+      const checked = document.querySelector('input[name="distribution-format"]:checked');
+      return checked ? checked.value : 'event_package';
+    }
+
+    async function startDistributionJob() {
+      const nameInputEl = document.getElementById('distribution-name-input');
+      showDistributionPane('progress');
+      renderDistributionSteps({ state: 'queued', progress: { steps: ['queued'], step: 'queued' } });
+      document.getElementById('distribution-progress-msg').textContent = 'Enviando a seleção...';
+      try {
+        const res = await fetch('/api/distributions', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            event_ids: [...selectedEventIds],
+            name: nameInputEl ? nameInputEl.value.trim() : '',
+            format: selectedDistributionFormat(),
+          }),
+        });
+        const payload = await res.json();
+        if (!res.ok) {
+          const detail = payload && payload.detail;
+          renderDistributionJob({
+            state: 'failed', failed_step: 'validating',
+            diagnostic: (detail && detail.message) || ('HTTP ' + res.status),
+            errors: [{ code: (detail && detail.code) || 'http', path: '',
+                       message: (detail && detail.message) || ('HTTP ' + res.status) }],
+          });
+          return;
+        }
+        distributionJobId = payload.job_id;
+        renderDistributionJob(payload);
+        distributionPollDelay = 500;
+        scheduleDistributionPoll();
+      } catch (err) {
+        renderDistributionJob({
+          state: 'failed', failed_step: 'queued', diagnostic: err.message,
+          errors: [{ code: 'network', path: '', message: err.message }],
+        });
+      }
+    }
+
+    function stopDistributionPolling() {
+      if (distributionPollTimer) clearTimeout(distributionPollTimer);
+      distributionPollTimer = null;
+    }
+
+    function scheduleDistributionPoll() {
+      stopDistributionPolling();
+      distributionPollTimer = setTimeout(pollDistributionJob, distributionPollDelay);
+    }
+
+    async function pollDistributionJob() {
+      if (!distributionJobId) return;
+      try {
+        const res = await fetch(`/api/distributions/${encodeURIComponent(distributionJobId)}`);
+        if (!res.ok) throw new Error('HTTP ' + res.status);
+        const job = await res.json();
+        renderDistributionJob(job);
+        if (job.state === 'ready' || job.state === 'failed') return;
+        // Backoff: consultas raras num job longo, sem martelar o servidor local.
+        distributionPollDelay = Math.min(Math.round(distributionPollDelay * 1.6), 4000);
+        scheduleDistributionPoll();
+      } catch (err) {
+        console.error('Falha ao consultar o job de distribuição', err);
+        distributionPollDelay = Math.min(Math.round(distributionPollDelay * 1.6), 4000);
+        scheduleDistributionPoll();
+      }
+    }
+
+    function renderDistributionSteps(job) {
+      const labels = {
+        queued: 'Na fila', validating: 'Validando', packaging: 'Empacotando',
+        compiling: 'Compilando', testing: 'Testando', ready: 'Pronto',
+      };
+      const steps = (job.progress && job.progress.steps) || ['queued', 'validating', 'packaging', 'ready'];
+      const reached = new Set((job.steps || []).map(item => item.state));
+      document.getElementById('distribution-steps').innerHTML = steps.map(step => {
+        let cls = '';
+        if (job.state === 'failed' && job.failed_step === step) cls = ' failed';
+        else if (job.state === step) cls = ' active';
+        else if (reached.has(step)) cls = ' done';
+        return `<span class="distribution-step${cls}" data-step="${escapeHTML(step)}">${escapeHTML(labels[step] || step)}</span>`;
+      }).join('');
+    }
+
+    function renderDistributionJob(job) {
+      if (job.state === 'ready') {
+        stopDistributionPolling();
+        const pkg = (job.artifacts && job.artifacts.package) || {};
+        const counts = job.counts || {};
+        document.getElementById('distribution-success').innerHTML = `
+          <div class="distribution-issue info">Distribuição pronta para download.</div>
+          <div class="distribution-section">
+            <div class="distribution-row"><span>Arquivo</span><span class="mono">${escapeHTML(pkg.name || '')}</span></div>
+            <div class="distribution-row"><span>Tamanho</span><span>${formatDistributionBytes(pkg.bytes)}</span></div>
+            <div class="distribution-row"><span>SHA-256</span><span class="mono" style="word-break:break-all;">${escapeHTML(pkg.sha256 || '')}</span></div>
+            <div class="distribution-row"><span>Gerado em</span><span>${escapeHTML(job.finished_at_utc || '')}</span></div>
+            <div class="distribution-row"><span>Conteúdo</span><span>${counts.events || 0} eventos · ${counts.clientes || 0} clientes · ${counts.vips || 0} VIPs</span></div>
+          </div>
+          ${(job.warnings || []).map(item =>
+            `<div class="distribution-issue warning">⚠ ${escapeHTML(item)}</div>`).join('')}`;
+        showDistributionPane('success');
+        return;
+      }
+
+      if (job.state === 'failed') {
+        stopDistributionPolling();
+        const diagnostic = [
+          `job: ${job.job_id || '—'}`,
+          `etapa: ${job.failed_step || '—'}`,
+          ...(job.errors || []).map(item => `[${item.code}] ${item.path} ${item.message}`),
+          job.diagnostic || '',
+        ].join('\n');
+        document.getElementById('distribution-failure').innerHTML = `
+          <div class="distribution-issue error">
+            A geração falhou na etapa <strong>${escapeHTML(job.failed_step || '—')}</strong>.
+          </div>
+          ${(job.errors || []).map(item =>
+            `<div class="distribution-issue error">${escapeHTML(item.code)}: ${escapeHTML(item.message)}</div>`).join('')}
+          <div class="distribution-section">
+            <h4>Diagnóstico</h4>
+            <div class="distribution-diagnostic" id="distribution-diagnostic">${escapeHTML(diagnostic)}</div>
+          </div>`;
+        showDistributionPane('failure');
+        return;
+      }
+
+      showDistributionPane('progress');
+      renderDistributionSteps(job);
+      const messages = {
+        queued: 'Na fila, aguardando outra geração terminar...',
+        validating: 'Validando a seleção e as dependências...',
+        packaging: 'Montando o pacote de eventos...',
+        compiling: 'Compilando o instalador...',
+        testing: 'Executando os testes do artefato...',
+      };
+      document.getElementById('distribution-progress-msg').textContent =
+        messages[job.state] || 'Processando...';
+    }
+
+    function formatDistributionBytes(bytes) {
+      const value = Number(bytes) || 0;
+      if (value < 1024) return `${value} B`;
+      if (value < 1024 * 1024) return `${(value / 1024).toFixed(1)} KiB`;
+      return `${(value / (1024 * 1024)).toFixed(1)} MiB`;
+    }
+
+    function downloadDistributionArtifact(kind) {
+      if (!distributionJobId) return;
+      const link = document.createElement('a');
+      link.href = `/api/distributions/${encodeURIComponent(distributionJobId)}/${kind}`;
+      link.download = '';
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      if (kind === 'download') {
+        // A distribuição foi entregue: manter os eventos marcados convidaria a
+        // gerar o mesmo pacote de novo sem perceber.
+        clearEventSelection();
+        closeDistributionModal();
+      }
+    }
+
+    function retryDistributionJob() {
+      distributionJobId = null;
+      showDistributionPane('review');
+      openDistributionModal();
     }
 
     // Envio do formulário de evento

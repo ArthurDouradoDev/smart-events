@@ -85,6 +85,122 @@ def _task_key(value: dict) -> tuple[str, int | str]:
     return tech, task_id
 
 
+def _find_client(clientes: list[tuple[Path, dict]], identity: str) -> dict | None:
+    """Resolve o cliente de um evento/VIP pelo nome ou pelo id, sem diferenciar caixa."""
+    target = str(identity or "").strip().casefold()
+    if not target:
+        return None
+    for _path, client in clientes:
+        candidates = {
+            str(client.get("name") or "").strip().casefold(),
+            str(client.get("id") or "").strip().casefold(),
+        }
+        candidates.discard("")
+        if target in candidates:
+            return client
+    return None
+
+
+def validate_collection(
+    events: list[tuple[Path, dict]],
+    clientes: list[tuple[Path, dict]],
+    vips: list[tuple[Path, dict]],
+    *,
+    expected_event_ids: list[str] | set[str] | None = None,
+    required_pm_tasks: list[dict] | tuple[dict, ...] = (),
+    require_cell_radio_metadata: bool = False,
+) -> list[str]:
+    """Valida uma colecao de eventos, clientes e VIPs sem exigir um unico cliente.
+
+    Cada evento resolve o proprio cliente e a propria regional, de modo que a
+    mesma colecao pode misturar clientes. ``expected_event_ids`` exige a lista
+    exata de eventos quando informada.
+    """
+    errors: list[str] = []
+
+    if expected_event_ids is not None:
+        expected = {str(value).strip() for value in expected_event_ids if str(value).strip()}
+        actual = {str(event.get("id") or path.stem).strip() for path, event in events}
+        if not expected:
+            errors.append("Nenhum evento foi selecionado.")
+        if actual != expected:
+            errors.append(
+                "Eventos da colecao diferem da lista esperada: "
+                f"esperados={sorted(expected)}, encontrados={sorted(actual)}."
+            )
+
+    for file_path, client in clientes:
+        if not str(client.get("id") or "").strip():
+            errors.append(f"Cliente sem id: {file_path.name}.")
+        if not str(client.get("name") or "").strip():
+            errors.append(f"Cliente sem nome: {file_path.name}.")
+
+    required_tasks = {_task_key(value) for value in required_pm_tasks or []}
+    for file_path, event in events:
+        if not str(event.get("id") or "").strip():
+            errors.append(f"Evento sem id: {file_path.name}.")
+        if not str(event.get("name") or "").strip():
+            errors.append(f"Evento sem nome: {file_path.name}.")
+
+        polygon = event.get("polygon") or []
+        if not isinstance(polygon, list) or len(polygon) < 3:
+            errors.append(f"Evento sem poligono valido: {file_path.name}.")
+        sites = event.get("sites") or []
+        if not isinstance(sites, list) or not sites:
+            errors.append(f"Evento sem sites: {file_path.name}.")
+            sites = []
+
+        oss = event.get("oss") or {}
+        client_name = str(oss.get("cliente") or "").strip()
+        client = _find_client(clientes, client_name)
+        if client is None:
+            errors.append(
+                f"Evento sem cliente cadastrado: {file_path.name} ({client_name or 'N/D'})."
+            )
+        region = str(oss.get("region") or "").strip().upper()
+        explicit_url = str(oss.get("base_url") or "").strip()
+        regions = _client_regions(client) if client else {}
+        if not explicit_url and (not region or not regions.get(region)):
+            errors.append(
+                f"Regional OSS sem URL para {client_name or 'N/D'}: "
+                f"{file_path.name} ({region or 'N/D'})."
+            )
+
+        actual_tasks = {
+            _task_key(value)
+            for value in (event.get("integration") or {}).get("pm_tasks") or []
+        }
+        missing_tasks = sorted(required_tasks - actual_tasks, key=str)
+        if missing_tasks:
+            errors.append(f"Tarefas PM obrigatorias ausentes em {file_path.name}: {missing_tasks}.")
+
+        if require_cell_radio_metadata:
+            missing_cells = []
+            for site in sites:
+                for cell in site.get("cells") or []:
+                    if not str(cell.get("tech") or "").strip() or not str(
+                        cell.get("frequency") or ""
+                    ).strip():
+                        missing_cells.append(str(cell.get("id") or "sem-id"))
+            if missing_cells:
+                sample = ", ".join(missing_cells[:5])
+                suffix = "..." if len(missing_cells) > 5 else ""
+                errors.append(
+                    f"Celulas sem tecnologia/frequencia em {file_path.name}: "
+                    f"{len(missing_cells)} ({sample}{suffix})."
+                )
+
+    for file_path, vip in vips:
+        if not str(vip.get("id") or "").strip():
+            errors.append(f"VIP sem id: {file_path.name}.")
+        vip_client = str(vip.get("cliente") or "").strip()
+        # VIP legado sem cliente continua valido; so o cliente desconhecido e erro.
+        if vip_client and _find_client(clientes, vip_client) is None:
+            errors.append(f"VIP sem cliente cadastrado: {file_path.name} ({vip_client}).")
+
+    return errors
+
+
 def _validate_profile_seed(
     root: Path,
     profile: dict,
@@ -107,62 +223,33 @@ def _validate_profile_seed(
             f"esperados={sorted(expected_event_ids)}, encontrados={sorted(actual_event_ids)}."
         )
 
-    matching_clients = []
     if len(clientes) != 1:
         errors.append(f"A semente deve conter exatamente um cliente; encontrados: {len(clientes)}.")
     for file_path, client in clientes:
         identity = str(client.get("name") or client.get("id") or "")
         if identity.casefold() != expected_client.casefold():
             errors.append(f"Cliente fora do perfil {expected_client}: {file_path.name}.")
-        else:
-            matching_clients.append(client)
-    regions = _client_regions(matching_clients[0]) if len(matching_clients) == 1 else {}
 
-    required_tasks = {_task_key(value) for value in profile.get("required_pm_tasks") or []}
-    require_radio = bool(profile.get("require_cell_radio_metadata", False))
     for file_path, event in events:
         event_client = str((event.get("oss") or {}).get("cliente") or "")
         if event_client.casefold() != expected_client.casefold():
             errors.append(f"Evento nao pertence a {expected_client}: {file_path.name}.")
-        polygon = event.get("polygon") or []
-        if not isinstance(polygon, list) or len(polygon) < 3:
-            errors.append(f"Evento sem poligono valido: {file_path.name}.")
-        sites = event.get("sites") or []
-        if not isinstance(sites, list) or not sites:
-            errors.append(f"Evento sem sites: {file_path.name}.")
-            sites = []
-        region = str((event.get("oss") or {}).get("region") or "").strip().upper()
-        explicit_url = str((event.get("oss") or {}).get("base_url") or "").strip()
-        if not explicit_url and (not region or not regions.get(region)):
-            errors.append(
-                f"Regional OSS sem URL para {expected_client}: {file_path.name} ({region or 'N/D'})."
-            )
-        actual_tasks = {
-            _task_key(value)
-            for value in (event.get("integration") or {}).get("pm_tasks") or []
-        }
-        missing_tasks = sorted(required_tasks - actual_tasks, key=str)
-        if missing_tasks:
-            errors.append(f"Tarefas PM obrigatorias ausentes em {file_path.name}: {missing_tasks}.")
-        if require_radio:
-            missing_cells = []
-            for site in sites:
-                for cell in site.get("cells") or []:
-                    if not str(cell.get("tech") or "").strip() or not str(
-                        cell.get("frequency") or ""
-                    ).strip():
-                        missing_cells.append(str(cell.get("id") or "sem-id"))
-            if missing_cells:
-                sample = ", ".join(missing_cells[:5])
-                suffix = "..." if len(missing_cells) > 5 else ""
-                errors.append(
-                    f"Celulas sem tecnologia/frequencia em {file_path.name}: "
-                    f"{len(missing_cells)} ({sample}{suffix})."
-                )
 
     for file_path, vip in vips:
         if str(vip.get("cliente") or "").casefold() != expected_client.casefold():
             errors.append(f"VIP fora do perfil {expected_client}: {file_path.name}.")
+
+    # As regras estruturais (poligono, sites, regional, tarefas PM e radio) valem
+    # para qualquer colecao; o recorte por perfil so acrescenta o cliente unico.
+    errors.extend(
+        validate_collection(
+            events,
+            clientes,
+            vips,
+            required_pm_tasks=profile.get("required_pm_tasks") or [],
+            require_cell_radio_metadata=bool(profile.get("require_cell_radio_metadata", False)),
+        )
+    )
     return errors
 
 

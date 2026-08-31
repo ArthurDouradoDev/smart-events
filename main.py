@@ -6,8 +6,13 @@ Uso:
   python main.py           # produção (sem mock)
   python main.py --mock    # desenvolvimento com dados sintéticos
   python main.py --dev     # abre DevTools e habilita console
+
+Modos sem janela (usados pelo instalador e pela associação do .sepack):
+  main.py --inspect-event-package <arquivo> [--report <json>]
+  main.py --import-event-package <arquivo> [--conflict preserve] [--report <json>] [--show-dialog]
 """
 
+import json
 import logging
 import os
 import sys
@@ -143,6 +148,74 @@ def _get_arg(flag: str, default=None):
         if idx + 1 < len(sys.argv):
             return sys.argv[idx + 1]
     return default
+
+
+def _show_message_box(title: str, message: str, failed: bool, warning: bool = False) -> None:
+    """Diálogo curto de resultado; não abre a janela principal."""
+    if os.name != "nt":
+        return
+    try:
+        import ctypes
+        icon = 0x10 if failed else (0x30 if warning else 0x40)
+        ctypes.windll.user32.MessageBoxW(None, message, title, icon)
+    except Exception as exc:  # pragma: no cover - ambiente sem user32
+        logger.warning("Não foi possível exibir o diálogo: %s", exc)
+
+
+def _run_event_package_mode() -> int:
+    """Inspeciona ou importa um pacote `.sepack` sem subir a interface.
+
+    Códigos de saída: 0 concluído (ou idempotente), 2 argumento inválido,
+    3 pacote inválido, 4 concluído com conflito preservado.
+    """
+    from core import event_package
+
+    inspecting = "--inspect-event-package" in sys.argv
+    flag = "--inspect-event-package" if inspecting else "--import-event-package"
+    package = _get_arg(flag)
+    if not package or package.startswith("--"):
+        logger.error("Informe o caminho do pacote: %s <arquivo.sepack>", flag)
+        return 2
+
+    if inspecting:
+        payload = event_package.inspect_package(package)
+        exit_code = 0 if payload["ok"] else 3
+        lines = (
+            ["Pacote válido: " + str((payload.get("manifest") or {}).get("name", ""))]
+            if payload["ok"]
+            else ["Pacote inválido: " + item["message"] for item in payload["errors"][:3]]
+        )
+    else:
+        conflict = _get_arg("--conflict", "preserve")
+        result = event_package.import_package(package, conflict_policy=conflict)
+        payload = result.to_dict()
+        lines = event_package.summary_lines(result)
+        if not result.ok:
+            exit_code = 3
+        else:
+            exit_code = 4 if result.conflicts else 0
+
+    report_arg = _get_arg("--report", None)
+    if report_arg:
+        try:
+            report_path = Path(report_arg)
+            report_path.parent.mkdir(parents=True, exist_ok=True)
+            report_path.write_text(
+                json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
+            )
+        except OSError as exc:
+            logger.error("Não foi possível gravar o relatório: %s", exc)
+
+    for line in lines:
+        logger.info(line)
+    if "--show-dialog" in sys.argv:
+        _show_message_box(
+            "SmartEvents - Pacote de eventos",
+            "\n".join(lines) or "Nenhuma alteração.",
+            failed=exit_code == 3,
+            warning=exit_code == 4,
+        )
+    return exit_code
 
 
 def _run_get_session() -> int:
@@ -433,7 +506,11 @@ def main():
 
 if __name__ == "__main__":
     # Subprocessos sem janela: servidor embutido (--serve) ou renovação de sessão (--get-session).
-    if "--self-test-webview" in sys.argv:
+    # Os modos de pacote são resolvidos antes de qualquer coisa do pywebview:
+    # nem servidor, nem scheduler, nem navegador são inicializados aqui.
+    if "--inspect-event-package" in sys.argv or "--import-event-package" in sys.argv:
+        sys.exit(_run_event_package_mode())
+    elif "--self-test-webview" in sys.argv:
         from core.self_test import run_webview_probe
         sys.exit(run_webview_probe())
     elif "--self-test" in sys.argv:

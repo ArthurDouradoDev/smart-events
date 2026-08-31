@@ -773,3 +773,89 @@ exatamente o que o Windows faz.
 **Regra:** estado que o `WM_NCCALCSIZE` consulta tem que estar escrito **antes** de qualquer
 `SetWindowPos` com `SWP_FRAMECHANGED` — a mensagem chega síncrona, dentro da chamada, não
 depois dela.
+
+## 2026-08-31 — Teste do backup de importação falhou por separador de caminho no Windows
+
+**Sintoma:** `test_replace_creates_backup_before_overwrite` e o teste do logo falharam com lista
+vazia, dando a impressão de que a importação não estava gravando backup. O backup estava sendo
+gravado corretamente.
+
+**Causa:** a asserção filtrava a lista de backups com
+`item.endswith("events/alvo.json")`. Os caminhos vêm de `Path` e no Windows chegam com `\`
+(`...\events\alvo.json`), então o filtro nunca casava.
+
+**Correção:** comparar componentes do caminho (`path.name` e `path.parent.name`) em vez de
+sufixo de string — helper `_backups_of()` em `tests/test_event_package.py`.
+
+**Regra:** em asserção sobre caminho, nunca comparar substring com `/` embutida. Comparar
+`Path(...).name` / `.parent.name`, ou normalizar com `as_posix()`. Vale para todo teste deste
+repositório, que roda em Windows.
+
+## 2026-08-31 — Fase 2: `regional` + `is` não é `regionais`
+
+**O que quebrou:** o resumo da revisão de distribuição mostrava
+`2 eventos · 2 clientes · 2 regionalis · 2 VIPs`. O template pluralizava por sufixo
+(`regional${n === 1 ? '' : 'is'}`), padrão que funciona para `evento`/`cliente`/`VIP`.
+
+**Causa raiz:** plural irregular em português. `regional` → `regionais` troca a última
+letra, não acrescenta sufixo.
+
+**Regra:** pluralizar por sufixo só quando o plural for de fato `palavra + s`. Para
+qualquer palavra terminada em `-l`, `-ão`, `-m` ou `-r`, escrever as duas formas
+explicitamente (`n === 1 ? 'regional' : 'regionais'`). Um teste de Playwright que confere
+o texto renderizado pega isso; um teste estrutural sobre o HTML, não.
+
+## 2026-08-31 — `<dialog>` modal: `contains(document.activeElement)` não é o teste de foco preso
+
+**O que quebrou:** o teste do modal de distribuição pressionava `Tab` 12 vezes e exigia
+que `document.activeElement` continuasse dentro do `<dialog>`. Falhou no Chromium.
+
+**Causa raiz:** ao passar do último elemento focável de um `<dialog>` modal, o Chromium
+devolve o foco à barra do navegador e `document.activeElement` vira `body`. O foco não
+vazou para a página — apenas saiu do documento.
+
+**Regra:** a garantia do `<dialog>` modal é que o Tab **nunca alcança um controle fora do
+modal**, não que `activeElement` fique sempre dentro dele. Asserir a negativa
+(`active && active !== body && !modal.contains(active)` é sempre falso), não a positiva.
+
+## 2026-08-31 — `os.replace` no Windows falha com ACCESS_DENIED sob leitura concorrente
+
+**O que quebrou:** `tests/test_distribution_api.py` falhava de forma intermitente (~1 em 8
+execuções, em testes diferentes a cada vez) com duas caras:
+
+- `PermissionError: [Errno 13]` ao **ler** `data/distributions/jobs/<job-id>.json`;
+- `PermissionError: [WinError 5] Access is denied: '<...>.tmp' -> '<...>.json'` ao
+  **gravar** o mesmo arquivo.
+
+**Causa raiz:** a gravação atômica (`escreve .tmp` + `os.replace`) não é livre de disputa no
+Windows. O `MoveFileEx` precisa de acesso de exclusão sobre o destino, e o destino está
+aberto sempre que a interface consulta o job enquanto o worker o reescreve. O antivírus,
+que abre o `.tmp` recém-criado para escanear, produz o mesmo `ACCESS_DENIED` no lado da
+gravação. A janela dura milissegundos — daí a intermitência.
+
+**Consequência agravante:** `_run_job()` fazia `return` silencioso quando não conseguia ler
+o registro. O job ficava preso em `queued` **para sempre** e a interface consultaria sem
+nunca receber um estado terminal. Um erro raro de I/O virava um job eterno.
+
+**Correção:** `_retrying()` em `core/distribution_service.py` repete leitura e `os.replace`
+até 8 vezes com espera crescente (10 ms → 80 ms) e só então propaga; `_record_lock` virou
+`RLock` e passou a cobrir leitura **e** gravação do registro; e `_force_failed()` garante
+que o job sempre alcance um estado terminal, mesmo quando o registro anterior não pode ser
+lido. Teste de regressão:
+`test_job_never_stays_stuck_when_its_record_cannot_be_read`.
+
+**Regras:**
+
+1. No Windows, `escreve .tmp + os.replace` **não** é suficiente quando alguém pode estar
+   lendo o destino. Sempre repetir o `os.replace` (e a leitura) sob `PermissionError`.
+2. Serializar leitura e gravação do mesmo arquivo dentro do processo resolve a disputa
+   entre threads, mas **não** a do antivírus — a repetição continua necessária.
+3. Nenhum caminho de execução de um job pode terminar sem estado terminal. `return` dentro
+   de um worker é sempre suspeito: ou grava `failed`, ou não é um erro.
+4. Teste concorrente que não reproduz em execução isolada precisa de laço (20 execuções) e
+   de `threading.excepthook` para mostrar a exceção que escapou da thread.
+
+**Exposição conhecida, não corrigida:** `core/event_package.py` tem um `_write_atomic()`
+gêmeo, sem repetição. O risco lá é bem menor (grava uma vez por importação, sem ninguém
+consultando em paralelo), mas o mesmo `ACCESS_DENIED` do antivírus é possível. Corrigir em
+tarefa própria, com o mesmo `_retrying()`.
