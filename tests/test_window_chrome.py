@@ -465,6 +465,23 @@ def test_fullscreen_toggle_covers_the_monitor_and_restores_the_previous_placemen
     assert controller.get_state()["state"] == "maximized"
 
 
+def test_fullscreen_does_not_inset_the_client_area_while_the_frame_changes():
+    """O SWP_FRAMECHANGED entrega o WM_NCCALCSIZE dentro do proprio set_window_rect."""
+    controller, adapter = attached_controller()
+
+    def reentrant_set_window_rect(hwnd, rect):
+        adapter.window_rects.append(rect)
+        controller._wnd_proc(101, WM_NCCALCSIZE, 1, 4096)
+
+    adapter.set_window_rect = reentrant_set_window_rect
+
+    assert controller.toggle_fullscreen() is True
+    assert adapter.window_rects == [MONITOR]
+    # Em tela cheia nao ha o que redimensionar; recuar a area cliente aqui
+    # deixaria uma faixa visivel entre o conteudo e as bordas do monitor.
+    assert adapter.nccalcsize_calls == []
+
+
 def test_maximize_button_leaves_fullscreen_before_toggling():
     controller, adapter = attached_controller()
 

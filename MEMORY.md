@@ -1526,3 +1526,44 @@ botão maximizar (Windows 11) não aparece. O botão é `no-drag`, então o pont
 a espessura da moldura (22×22 px físicos a 144 DPI), até parar no mínimo. Medido com o
 código de antes e de depois desta correção, idêntico:
 `1800×1000 → 1778×978 → 1756×956 → 1734×934 → 1712×922`.
+
+---
+
+## 2026-08-31 — Causa provada do encolhimento a cada maximizar/restaurar (ainda aberto)
+
+Completa o "defeito conhecido" da entrada anterior, que ficara sem causa raiz. Rastreado com
+log temporário no `_wnd_proc` (`WM_WINDOWPOSCHANGING/CHANGED`, `WM_SIZE`, `WM_NCCALCSIZE`,
+`WM_GETMINMAXINFO`), depois removido.
+
+**O que o trace mostra**, em cada ciclo, com a janela restaurada em 1800×1000:
+
+```
+POSCHANGED  pos=(100,100,1800,1000)  <- Windows restaura para o rcNormalPosition
+SIZE        cliente=(1778,978)       <- nosso recuo: cliente = janela - 22
+POSCHANGING pos=(100,100,1778,978) flags=0x0016   <- o WinForms pede janela = 1778x978
+```
+
+Ou seja: **o WinForms reaplica, como tamanho de janela, o tamanho de área cliente que ele tinha
+em cache.** Ele não sabe do nosso `WM_NCCALCSIZE`: para os estilos desta janela o
+`AdjustWindowRectEx` diz que cliente e janela têm o mesmo tamanho, então cada restauração
+"perde" os 22 px de moldura, e o novo tamanho vira o `rcNormalPosition` do ciclo seguinte —
+por isso o erro é cumulativo, não constante. Para no piso porque o `ptMinTrackSize` do
+`WM_GETMINMAXINFO` segura a altura (visível no trace: pedido `…,1690,900`, `NCCALCSIZE` com
+`…,1690,922`).
+
+**Atribuição confirmada por experimento:** com o recuo do `WM_NCCALCSIZE` desligado (e nada
+mais alterado), cinco ciclos deixam a janela em 1800×1000, sem desvio nenhum. Com o recuo
+ligado, `1800×1000 → 1778×978 → 1756×956 → 1734×934 → 1712×922 → 1690×922`. Idêntico antes e
+depois da correção do arraste — o defeito veio com o recuo, no commit `9ab2bc1`.
+
+**Caminhos de correção considerados (nenhum aplicado ainda):**
+
+1. Corrigir o `WM_WINDOWPOSCHANGING` que chega logo após a restauração, devolvendo os 22 px.
+   Cirúrgico, mas é heurística: precisa distinguir o pedido do WinForms de um pedido legítimo.
+2. Trocar o recuo por um `Padding` no formulário, mantendo `WM_NCCALCSIZE` devolvendo `0`. A
+   faixa de moldura passaria a ser área cliente do HWND pai não coberta pelo WebView2 — o
+   `hit_test()` continua devolvendo `HTLEFT`/`HTTOP`/… ali, e a contabilidade do WinForms volta
+   a fechar (cliente == janela), eliminando a origem do desvio. É a mais estrutural e a que
+   mais se parece com o que Electron/WinUI fazem.
+3. Reescrever o `rcNormalPosition` após cada restauração, com `SetWindowPlacement`. Simples,
+   mas trata o sintoma e briga com o WinForms a cada ciclo.

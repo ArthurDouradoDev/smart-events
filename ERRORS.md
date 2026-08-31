@@ -739,3 +739,37 @@ valer para a primeira página se liga em `CoreWebView2InitializationCompleted`, 
 `before_show`. E flag de diagnóstico deve descrever o efeito observado, nunca a escrita: um
 `nonclient: True` que só significava "escrevi na propriedade" foi o que desligou o fallback e
 escondeu a falha.
+
+---
+
+## 2026-08-31 — Tela cheia com faixa visível entre o app e as bordas do monitor
+
+**Como apareceu:** ao entrar em tela cheia, sobrava uma distância pequena mas perceptível
+entre o conteúdo e as quatro bordas da tela, como se a janela tivesse um padding.
+
+**Causa raiz:** ordem errada dentro de `toggle_fullscreen`. O `set_window_rect` usa
+`SWP_FRAMECHANGED`, que entrega o `WM_NCCALCSIZE` **durante a própria chamada**. Naquele
+instante `_fullscreen_placement` ainda era `None` e a janela já tinha saído de maximizada, então
+`_is_full_surface()` respondia `False` e a área cliente nascia recuada pela espessura da moldura
+— o recuo que existe para expor as bordas de resize quando a janela está restaurada.
+
+**Medido na janela real (144 DPI, monitor 1920×1200):**
+
+| | antes | depois |
+|---|---|---|
+| janela | `(0, 0, 1920, 1200)` | `(0, 0, 1920, 1200)` |
+| área cliente | `(11, 11, 1898, 1178)` | `(0, 0, 1920, 1200)` |
+| recuo | 11 px nos quatro lados | 0 |
+
+Maximizada o recuo já era 0 nos dois casos, porque ali `is_zoomed` responde `True` antes de o
+`WM_NCCALCSIZE` chegar. Por isso o sintoma só aparecia em tela cheia.
+
+**Correção:** `self._fullscreen_placement = placement` passou para **antes** do
+`set_window_rect`, com rollback se o `SetWindowPos` falhar. Teste de regressão
+(`test_fullscreen_does_not_inset_the_client_area_while_the_frame_changes`) faz o adaptador
+falso reentrar no `_wnd_proc` com `WM_NCCALCSIZE` de dentro do `set_window_rect`, que é
+exatamente o que o Windows faz.
+
+**Regra:** estado que o `WM_NCCALCSIZE` consulta tem que estar escrito **antes** de qualquer
+`SetWindowPos` com `SWP_FRAMECHANGED` — a mensagem chega síncrona, dentro da chamada, não
+depois dela.

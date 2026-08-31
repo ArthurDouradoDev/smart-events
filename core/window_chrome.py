@@ -896,8 +896,17 @@ class WindowChromeController:
                 # SetWindowPos e ignorado enquanto a janela esta maximizada; o
                 # placement salvo acima ja registra o estado para a volta.
                 adapter.show_window(hwnd, SW_RESTORE)
-            adapter.set_window_rect(hwnd, screen)
+            # Registrar a tela cheia ANTES de mover: o SWP_FRAMECHANGED de
+            # set_window_rect dispara o WM_NCCALCSIZE, e ali ``_is_full_surface``
+            # decide se a area cliente e recuada pela moldura. Marcando depois, a
+            # janela cobre o monitor mas o conteudo nasce recuado — a faixa
+            # visivel entre o app e as bordas da tela.
             self._fullscreen_placement = placement
+            try:
+                adapter.set_window_rect(hwnd, screen)
+            except Exception:
+                self._fullscreen_placement = None
+                raise
             self._log.info("Tela cheia ativada | monitor=%s", screen)
 
         return self._run_window_action("toggle_fullscreen", action)
