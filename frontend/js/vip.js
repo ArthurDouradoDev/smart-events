@@ -75,6 +75,11 @@ export function initVip() {
   _initRefresh();
 }
 
+export function resizeVipChart() {
+  const modal = document.getElementById("vip-detail-modal");
+  if (modal && !modal.classList.contains("hidden")) _modalChart?.resize();
+}
+
 let _refreshing = false;
 
 function _initRefresh() {

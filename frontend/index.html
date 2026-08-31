@@ -14,10 +14,30 @@
   <script src="lib/chart.umd.min.js"></script>
   <script src="lib/chartjs-plugin-annotation.min.js"></script>
 
-  <link rel="stylesheet" href="css/main.css?v=20260828-site-carrier-row">
+  <link rel="stylesheet" href="css/main.css?v=20260830-window-chrome-r2">
 </head>
 
 <body>
+
+  <!-- ── WINDOW CHROME (somente shell customizado / preview) ───── -->
+  <div id="window-titlebar" aria-label="Barra de título da janela" aria-hidden="true" hidden>
+    <div id="window-titlebar-drag" class="window-titlebar-drag">
+      <img class="window-titlebar-logo" src="assets/logoSmartEvents-32.png" alt="">
+      <span class="window-titlebar-title">Smart Events</span>
+    </div>
+    <div class="window-titlebar-controls" aria-label="Controles da janela">
+      <button id="window-minimize" class="window-control" type="button" aria-label="Minimizar" title="Minimizar">
+        <svg viewBox="0 0 12 12" aria-hidden="true" focusable="false">
+          <path d="M1.5 6.5h9" />
+        </svg>
+      </button>
+      <button id="window-close" class="window-control window-control-close" type="button" aria-label="Fechar" title="Fechar">
+        <svg viewBox="0 0 12 12" aria-hidden="true" focusable="false">
+          <path d="M2 2l8 8M10 2l-8 8" />
+        </svg>
+      </button>
+    </div>
+  </div>
 
   <!-- ── HEADER ─────────────────────────────────────────────────── -->
   <header id="app-header">
@@ -618,7 +638,7 @@
   </div>
 
   <!-- Scripts (ES Modules) -->
-  <script type="module" src="js/app.js?v=20260828-site-carrier-row"></script>
+  <script type="module" src="js/app.js?v=20260830-window-chrome-r2"></script>
 </body>
 
 </html>

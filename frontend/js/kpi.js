@@ -234,6 +234,12 @@ export function initKpi() {
   });
 }
 
+export function resizeKpiCharts() {
+  _chart?.resize();
+  const popup = document.getElementById("chart-popup-modal");
+  if (popup && !popup.classList.contains("hidden")) _popupChart?.resize();
+}
+
 async function _loadKpiCatalog(eventId = State.eventId) {
   const requestId = ++_catalogRequestId;
   const response = await API.getKpiCatalog(eventId || null);

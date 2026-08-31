@@ -157,6 +157,12 @@ export function initKpiOverview() {
   });
 }
 
+export function resizeKpiOverviewCharts() {
+  const modal = document.getElementById("kpi-overview-modal");
+  if (!modal || modal.classList.contains("hidden")) return;
+  _charts.forEach(chart => chart.resize());
+}
+
 function _isOpen() {
   return !document.getElementById("kpi-overview-modal")?.classList.contains("hidden");
 }

@@ -299,7 +299,34 @@ def main():
         frameless=custom_titlebar,
         easy_drag=False,
         fullscreen=False,
+        maximized=True,
         background_color="#0D1117",
+    )
+
+    # Controles do shell ficam separados da API de dominio. O pywebview os
+    # publica em ``window.pywebview.api`` pelos nomes abaixo, enquanto o
+    # controlador continua sendo a unica unidade com acesso ao Win32.
+    def window_minimize():
+        return chrome_controller.minimize()
+
+    def window_close():
+        return chrome_controller.close()
+
+    def window_get_state():
+        return chrome_controller.get_state()
+
+    def window_set_chrome_regions(payload):
+        return chrome_controller.set_regions(payload)
+
+    def window_begin_drag():
+        return chrome_controller.begin_drag()
+
+    window.expose(
+        window_minimize,
+        window_close,
+        window_get_state,
+        window_set_chrome_regions,
+        window_begin_drag,
     )
 
     def _on_before_show():
@@ -315,7 +342,6 @@ def main():
 
     def _on_loaded():
         logger.info("Interface carregada")
-        window.maximize()
         if mock_mode:
             window.evaluate_js("window.__MOCK_MODE__ = true;")
 

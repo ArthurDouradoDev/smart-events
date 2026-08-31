@@ -680,6 +680,75 @@ const _mock = {
   delete_credentials: () => ({ ok: true }),
 };
 
+// ── Shell da janela ───────────────────────────────────────────────
+// Estes mocks sao deliberadamente separados dos dados de dominio acima. No
+// navegador eles nunca minimizam ou fecham nada: apenas registram a intencao,
+// permitindo validar a barra com ``?chromePreview=1``.
+const _chromePreview = new URLSearchParams(window.location.search).get("chromePreview") === "1";
+const _windowChromeMock = {
+  calls: [],
+  state: "maximized",
+  regions: null,
+};
+window.__windowChromeMock = _windowChromeMock;
+
+const _windowMocks = {
+  window_minimize: () => {
+    _windowChromeMock.calls.push({ method: "window_minimize" });
+    _windowChromeMock.state = "minimized";
+    return true;
+  },
+  window_close: () => {
+    _windowChromeMock.calls.push({ method: "window_close" });
+    return true;
+  },
+  window_get_state: () => ({
+    ok: true,
+    mode: _chromePreview ? "custom" : "native",
+    attached: _chromePreview,
+    dpi: 96,
+    state: _windowChromeMock.state,
+  }),
+  window_set_chrome_regions: payload => {
+    _windowChromeMock.calls.push({ method: "window_set_chrome_regions", payload });
+    _windowChromeMock.regions = payload;
+    return true;
+  },
+  window_begin_drag: () => {
+    _windowChromeMock.calls.push({ method: "window_begin_drag" });
+    return true;
+  },
+};
+
+function _callWindowMethod(method, ...args) {
+  return new Promise((resolve, reject) => {
+    _whenReady(() => {
+      try {
+        if (MOCK) {
+          resolve(_windowMocks[method](...args));
+          return;
+        }
+        const fn = window.pywebview?.api?.[method];
+        if (typeof fn !== "function") {
+          throw new Error(`Funcao de janela indisponivel: ${method}`);
+        }
+        const result = fn(...args);
+        if (result && typeof result.then === "function") result.then(resolve).catch(reject);
+        else resolve(result);
+      } catch (error) {
+        reject(error);
+      }
+    });
+  });
+}
+
+export const windowMinimize = () => _callWindowMethod("window_minimize");
+export const windowClose = () => _callWindowMethod("window_close");
+export const windowGetState = () => _callWindowMethod("window_get_state");
+export const windowSetChromeRegions = payload =>
+  _callWindowMethod("window_set_chrome_regions", payload);
+export const windowBeginDrag = () => _callWindowMethod("window_begin_drag");
+
 // ── Aguarda pywebview estar pronto ────────────────────────────────
 function _whenReady(fn) {
   if (_ready || MOCK) return fn();

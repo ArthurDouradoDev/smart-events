@@ -210,6 +210,10 @@ export function fitToEvent(sites, polygon) {
   if (points.length) _map.fitBounds(L.latLngBounds(points), { padding: [40, 40] });
 }
 
+export function resizeMap() {
+  if (_map) _map.invalidateSize({ pan: false });
+}
+
 // ── Internos ──────────────────────────────────────────────────────
 
 function _siteHasVip(site) {

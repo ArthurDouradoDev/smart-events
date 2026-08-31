@@ -650,7 +650,16 @@ class WindowChromeController:
         return self._run_window_action("minimize", lambda adapter, hwnd: adapter.show_window(hwnd, SW_MINIMIZE))
 
     def begin_drag(self) -> bool:
-        return self._run_window_action("begin_drag", lambda adapter, hwnd: adapter.begin_drag(hwnd))
+        def action(adapter: Any, hwnd: int) -> None:
+            # O move loop nativo restaura temporariamente uma janela maximizada
+            # para permitir que ela atravesse monitores. Ao soltar, voltamos a
+            # maximiza-la no monitor de destino para o app nunca ficar reduzido.
+            was_maximized = adapter.is_zoomed(hwnd)
+            adapter.begin_drag(hwnd)
+            if was_maximized:
+                adapter.show_window(hwnd, SW_MAXIMIZE)
+
+        return self._run_window_action("begin_drag", action)
 
     def toggle_maximize(self) -> bool:
         def action(adapter: Any, hwnd: int) -> None:

@@ -5,10 +5,11 @@
 
 import API     from "./bridge.js";
 import State   from "./state.js";
-import { initMap, renderSites, renderEventPolygon, fitToEvent } from "./map.js?v=20260820-cluster-compare-r2";
-import { initVip }    from "./vip.js";
-import { initKpi, refreshChart }    from "./kpi.js?v=20260828-site-carrier-row";
-import { initKpiOverview } from "./kpi_overview.js?v=20260828-site-carrier-row";
+import { initWindowChrome } from "./window_chrome.js?v=20260830-window-chrome-r1";
+import { initMap, renderSites, renderEventPolygon, fitToEvent, resizeMap } from "./map.js?v=20260830-window-chrome-r1";
+import { initVip, resizeVipChart }    from "./vip.js?v=20260830-window-chrome-r1";
+import { initKpi, refreshChart, resizeKpiCharts }    from "./kpi.js?v=20260830-window-chrome-r1";
+import { initKpiOverview, resizeKpiOverviewCharts } from "./kpi_overview.js?v=20260830-window-chrome-r1";
 import { initAlerts, injectAlerts } from "./alerts.js?v=20260826-site-filter";
 import { initAlarms, injectAlarms } from "./alarms.js?v=20260826-site-filter";
 import { initLogs } from "./logs.js";
@@ -26,6 +27,7 @@ let _syncTimer = null;
 let _lastSyncStatus = null;
 let _historicalTimestamps = [];
 let _historicalIndex = -1;
+let _visualResizeTimer = null;
 
 function _isVirtualKpiScope(siteId) {
   return typeof siteId === "string" &&
@@ -35,6 +37,7 @@ function _isVirtualKpiScope(siteId) {
 // ── Bootstrap ─────────────────────────────────────────────────────
 
 async function boot() {
+  void initWindowChrome();
   initMap();
   initVip();
   initKpi();
@@ -43,6 +46,7 @@ async function boot() {
   initAlarms();
   initLogs();
   initCredentials();
+  _setupResponsiveResize();
 
   _setupHeaderClock();
   _setupLoadEventBtn();
@@ -69,6 +73,23 @@ async function boot() {
     _enterStandbyMode();
     await _checkScheduledEvents();
   }
+}
+
+function _setupResponsiveResize() {
+  const schedule = () => {
+    clearTimeout(_visualResizeTimer);
+    _visualResizeTimer = setTimeout(() => {
+      requestAnimationFrame(() => {
+        resizeMap();
+        resizeKpiCharts();
+        resizeKpiOverviewCharts();
+        resizeVipChart();
+      });
+    }, 180);
+  };
+  window.addEventListener("resize", schedule, { passive: true });
+  window.addEventListener("smart-events:layout-resize", schedule);
+  schedule();
 }
 
 // ── Modos da interface ────────────────────────────────────────────

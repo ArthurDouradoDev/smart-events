@@ -153,6 +153,7 @@ class FakeAdapter:
         self.iconic = False
         self.closed = False
         self.drag_started = False
+        self.restore_during_drag = False
         self.client_size = (800, 600)
         self.dpi = 96
         self.last_callback = None
@@ -217,6 +218,8 @@ class FakeAdapter:
 
     def begin_drag(self, hwnd):
         self.drag_started = True
+        if self.restore_during_drag:
+            self.zoomed = False
 
     def call_wndproc(self, proc, hwnd, msg, wparam, lparam):
         return 1234
@@ -325,13 +328,23 @@ def test_window_actions_and_state_transitions():
     assert adapter.closed is True
 
 
+def test_drag_remaximizes_on_the_destination_monitor():
+    controller, adapter = attached_controller()
+    adapter.zoomed = True
+    adapter.restore_during_drag = True
+
+    assert controller.begin_drag() is True
+
+    assert adapter.drag_started is True
+    assert adapter.show_commands[-1] == SW_MAXIMIZE
+
+
 def valid_payload():
     return {
         "titlebar": {"x": 0, "y": 0, "width": 800, "height": 36},
-        "draggable": [{"x": 0, "y": 0, "width": 660, "height": 36}],
+        "draggable": [{"x": 0, "y": 0, "width": 708, "height": 36}],
         "buttons": {
-            "minimize": {"x": 662, "y": 0, "width": 46, "height": 36},
-            "maximize": {"x": 708, "y": 0, "width": 46, "height": 36},
+            "minimize": {"x": 708, "y": 0, "width": 46, "height": 36},
             "close": {"x": 754, "y": 0, "width": 46, "height": 36},
         },
     }
@@ -369,6 +382,6 @@ def test_validate_regions_limits_drag_region_count():
 
 def test_validate_regions_rejects_drag_over_a_control():
     payload = valid_payload()
-    payload["draggable"][0]["width"] = 680
+    payload["draggable"][0]["width"] = 720
     with pytest.raises(ValueError, match="arrastaveis"):
         validate_regions(payload, 800, 600)
