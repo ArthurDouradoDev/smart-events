@@ -128,6 +128,9 @@ input:focus-visible {
 
 html.chrome-custom #window-titlebar { display: flex; }
 
+/* ``app-region`` só tem efeito quando o shell liga IsNonClientRegionSupportEnabled
+   no WebView2; aí é o próprio navegador que entrega arraste, duplo clique e Aero
+   Snap ao Windows. No navegador comum a propriedade é ignorada, sem prejuízo. */
 .window-titlebar-drag {
   min-width: 0;
   flex: 1;
@@ -135,6 +138,16 @@ html.chrome-custom #window-titlebar { display: flex; }
   align-items: center;
   gap: 8px;
   padding: 0 12px;
+  app-region: drag;
+  -webkit-app-region: drag;
+}
+
+/* A faixa arrastável cobre o logo e o título; nenhum dos dois pode engolir o
+   ponteiro, senão o arraste morre em cima deles. */
+.window-titlebar-logo,
+.window-titlebar-title {
+  pointer-events: none;
+  user-select: none;
 }
 
 .window-titlebar-logo {
@@ -169,6 +182,8 @@ html.chrome-custom #window-titlebar { display: flex; }
   color: var(--text-secondary);
   border-radius: 0;
   transition: background var(--transition), color var(--transition);
+  app-region: no-drag;
+  -webkit-app-region: no-drag;
 }
 
 .window-control svg {

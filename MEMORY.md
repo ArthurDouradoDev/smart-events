@@ -1464,3 +1464,30 @@ o mínimo do dashboard (1024×601 lógicos) — é esperado, não é bug.
 
 **Pendente de validação do usuário:** matriz com dois monitores de escalas diferentes
 (notebook 150% + externo 100%), que é onde o sintoma original aparecia.
+
+---
+
+## 2026-08-31 — Como arraste e resize funcionam no shell customizado (contrato)
+
+Complementa a entrada do mesmo dia sobre a janela restaurável. Estes dois pontos são a
+espinha dorsal do chrome e não devem ser "simplificados" sem reler a entrada correspondente
+no ERRORS.md.
+
+- **Arraste é do WebView2, não nosso.** `IsNonClientRegionSupportEnabled = True` +
+  `app-region: drag` na `.window-titlebar-drag`. O `windowBeginDrag`/`begin_drag` só entra em
+  ação quando `get_state()["nonclient"]` é `False`. Onde há `app-region: drag`, o DOM **não
+  recebe** `pointerdown`/`dblclick` — não adiantará amarrar comportamento novo nesses eventos
+  na região arrastável.
+- **Resize depende do recuo do `WM_NCCALCSIZE`.** Área cliente = janela menos
+  `SM_CXSIZEFRAME + SM_CXPADDEDBORDER` por lado, **somente quando restaurada**. É esse recuo
+  que devolve a moldura nativa ao HWND pai. Voltar a devolver `0` incondicionalmente mata o
+  resize inteiro de novo, silenciosamente.
+- **O mínimo é da área cliente, não da janela.** `apply_default_geometry(min_size=(1024, 600))`
+  guarda o mínimo do *conteúdo*; `WM_GETMINMAXINFO` soma a moldura ao `ptMinTrackSize`. A
+  144 DPI isso vira uma janela de 1558×922 para entregar 1024×600 lógicos.
+- **`CoreWebView2` só pode ser tocado na thread do formulário.** `before_show` está nela;
+  `loaded` não. Fora dela, `BeginInvoke`.
+
+Ferramenta útil: a sonda externa que restaura a janela viva e pergunta o `WM_NCHITTEST` das
+oito direções via `SendMessageW` — é a única forma de provar que o hit-test real funciona,
+já que o teste unitário exercita a função pura, não o caminho de mensagens.

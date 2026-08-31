@@ -634,3 +634,53 @@ aritmética de retângulos, confirmar no log qual DPI o `attach` reportou (`Wind
 anexado | dpi=…`): 96 num monitor a 150% é o sintoma. E não reimplementar comportamento que o
 move loop nativo já entrega — `WM_NCLBUTTONDOWN`/`HTCAPTION` é o ponto de entrada, o resto é
 do Windows.
+
+---
+
+## 2026-08-31 — Arraste e resize não funcionavam: o WebView2 comia o mouse
+
+**Como apareceu:** com a barra HTML ativa, clicar e segurar na barra de título não movia a
+janela, e não havia como redimensionar por nenhuma das bordas. O `begin_drag`
+(`ReleaseCapture` + `SendMessage(WM_NCLBUTTONDOWN, HTCAPTION)`) não produzia efeito algum.
+
+**Causa raiz:** o WebView2 renderiza num **HWND filho de outro processo**
+(`msedgewebview2.exe`) que cobria 100% da área cliente, porque o `WM_NCCALCSIZE` devolvia `0`
+— área cliente = janela inteira. Consequências:
+
+- Nenhum ponto sobre o app gerava `WM_NCHITTEST` no HWND pai. O `hit_test()` estava correto e
+  testado, mas **nunca era consultado** para as bordas nem para a barra.
+- O `begin_drag` era o contorno para isso, e não funcionava por três motivos somados:
+  `ReleaseCapture()` só age sobre a thread que chama; a captura pertencia ao processo do
+  WebView2; e o `SendMessage` cross-thread entrava no move loop modal a partir da thread de
+  API do pywebview.
+
+**Correção (duas frentes, ambas necessárias):**
+
+1. **Arraste:** ligar `CoreWebView2Settings.IsNonClientRegionSupportEnabled` e marcar a barra
+   com `app-region: drag` (`no-drag` nos botões). Aí é o próprio navegador que classifica a
+   região e entrega arraste, duplo clique e Aero Snap ao Windows. O `begin_drag` virou
+   fallback, usado só quando `get_state()["nonclient"]` é `False`.
+2. **Resize:** o `WM_NCCALCSIZE` passou a **recuar a área cliente pela espessura do frame**
+   (`SM_CXSIZEFRAME + SM_CXPADDEDBORDER`, por DPI) quando a janela está restaurada. O WebView2,
+   ancorado na área cliente, deixa a moldura nativa exposta e as bordas voltam a receber
+   `WM_NCHITTEST`. Maximizada e em tela cheia não há recuo.
+
+**Armadilha encontrada no caminho:** o evento `loaded` do pywebview chega **numa thread de
+trabalho**. Ler `CoreWebView2` de lá **trava** esperando a thread de UI — o handler nunca
+retornava e nenhum log saía. A ativação é despachada com `native.BeginInvoke`.
+
+**Defeito que a correção do resize introduziu (e foi corrigido junto):** o recuo tira 22 px
+físicos de cada eixo, então o `min_size` de 1024×600 passou a valer para a *janela*, deixando
+o viewport em 1009×587 lógicos. `ptMinTrackSize` agora é elevado pela moldura em
+`WM_GETMINMAXINFO`, e `default_restored_rect` usa o mesmo mínimo corrigido.
+
+**Verificado na janela real** por sonda externa (`SendMessageW(WM_NCHITTEST)` no HWND vivo):
+janela `1558×922`, cliente `1536×900` (= exatamente 1024×600 lógicos a 144 DPI), recuo de 11 px
+nos quatro lados, e `HTLEFT/HTRIGHT/HTTOP/HTBOTTOM/HTTOPLEFT/HTBOTTOMRIGHT` corretos.
+Forçar `SetWindowPos` para 400×300 foi barrado em 1558×922.
+
+**Regra:** neste app, **`hit_test()` passar nos testes unitários não prova nada sobre o
+comportamento real** — o HWND pai só recebe `WM_NCHITTEST` onde o WebView2 não estiver por
+cima. Antes de depurar aritmética de retângulo, medir o recuo real
+(`GetWindowRect` vs `ClientToScreen`) e perguntar o hit-test à janela viva. E qualquer acesso
+ao `CoreWebView2` fora de `before_show` precisa passar por `BeginInvoke`.

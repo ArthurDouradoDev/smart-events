@@ -387,6 +387,8 @@ def main():
             # A janela abre maximizada; isto define apenas para onde ela volta ao
             # restaurar, para o app nunca cair num retângulo menor que o dashboard.
             chrome_controller.apply_default_geometry(min_size=(1024, 600))
+            # O CoreWebView2 pode ainda não existir aqui; o ``loaded`` repete.
+            chrome_controller.enable_nonclient_regions()
             logger.info("Window chrome instalado: %s", chrome_controller.get_state())
         else:
             # ``attach`` restaura WS_CAPTION e os estilos nativos antes de
@@ -395,6 +397,20 @@ def main():
 
     def _on_loaded():
         logger.info("Interface carregada")
+        if custom_titlebar:
+            # Só agora o CoreWebView2 existe. O controlador despacha para a thread
+            # de UI (tocar no COM daqui travaria) e loga o sucesso por conta própria.
+            # O resultado chega assíncrono, por isso a conferência é adiada.
+            chrome_controller.enable_nonclient_regions()
+
+            def _warn_if_no_nonclient():
+                if not chrome_controller.get_state().get("nonclient"):
+                    logger.warning(
+                        "WebView2 sem regiao nao-cliente: o arraste da barra usara o "
+                        "caminho alternativo por mensagem, menos confiavel."
+                    )
+
+            threading.Timer(3.0, _warn_if_no_nonclient).start()
         if mock_mode:
             window.evaluate_js("window.__MOCK_MODE__ = true;")
 

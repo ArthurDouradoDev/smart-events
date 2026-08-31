@@ -66,6 +66,13 @@ SWP_FRAMECHANGED = 0x0020
 MONITOR_DEFAULTTONEAREST = 2
 SPI_GETWORKAREA = 0x0030
 
+# Metricas do frame redimensionavel. SM_CXPADDEDBORDER e a faixa invisivel que
+# o Windows acrescenta ao redor da borda visivel e responde pela maior parte da
+# area agarravel com o mouse.
+SM_CXSIZEFRAME = 32
+SM_CYSIZEFRAME = 33
+SM_CXPADDEDBORDER = 92
+
 DEFAULT_TITLEBAR_HEIGHT = 36.0
 DEFAULT_RESIZE_BORDER = 8.0
 MAX_DRAG_REGIONS = 16
@@ -392,6 +399,13 @@ class Win32WindowAdapter:
             wintypes.UINT, wintypes.UINT, ctypes.c_void_p, wintypes.UINT
         ]
         self.user32.SystemParametersInfoW.restype = wintypes.BOOL
+        self.user32.GetSystemMetrics.argtypes = [ctypes.c_int]
+        self.user32.GetSystemMetrics.restype = ctypes.c_int
+        try:
+            self.user32.GetSystemMetricsForDpi.argtypes = [ctypes.c_int, wintypes.UINT]
+            self.user32.GetSystemMetricsForDpi.restype = ctypes.c_int
+        except AttributeError:  # Windows anterior ao 10 1607
+            pass
         self.dwmapi.DwmDefWindowProc.argtypes = [hwnd, wintypes.UINT, wintypes.WPARAM, wintypes.LPARAM, ctypes.POINTER(lresult)]
         self.dwmapi.DwmDefWindowProc.restype = wintypes.BOOL
 
@@ -577,6 +591,32 @@ class Win32WindowAdapter:
         ):
             self._raise_last_error("SetWindowPos(set_window_rect)")
 
+    def get_system_metric(self, index: int, dpi: int) -> int:
+        try:
+            return int(self.user32.GetSystemMetricsForDpi(index, dpi))
+        except AttributeError:
+            return int(self.user32.GetSystemMetrics(index))
+
+    def frame_borders(self, hwnd: int) -> tuple[int, int]:
+        """Espessura horizontal e vertical do frame redimensionavel, em pixels fisicos."""
+        dpi = self.get_dpi(hwnd)
+        padded = self.get_system_metric(SM_CXPADDEDBORDER, dpi)
+        horizontal = self.get_system_metric(SM_CXSIZEFRAME, dpi) + padded
+        vertical = self.get_system_metric(SM_CYSIZEFRAME, dpi) + padded
+        return (max(1, horizontal), max(1, vertical))
+
+    def apply_nccalcsize_borders(self, hwnd: int, lparam: int) -> None:
+        rect = ctypes.cast(lparam, ctypes.POINTER(NATIVE_RECT)).contents
+        horizontal, vertical = self.frame_borders(hwnd)
+        # Nunca recuar a ponto de zerar a area cliente: durante minimizar e
+        # restaurar o Windows propoe retangulos degenerados.
+        if rect.right - rect.left > 2 * horizontal:
+            rect.left += horizontal
+            rect.right -= horizontal
+        if rect.bottom - rect.top > 2 * vertical:
+            rect.top += vertical
+            rect.bottom -= vertical
+
     def apply_dpi_rect(self, hwnd: int, lparam: int) -> None:
         suggested = ctypes.cast(lparam, ctypes.POINTER(NATIVE_RECT)).contents
         width = suggested.right - suggested.left
@@ -587,7 +627,9 @@ class Win32WindowAdapter:
             ):
                 self._raise_last_error("SetWindowPos(WM_DPICHANGED)")
 
-    def apply_minmax_info(self, hwnd: int, lparam: int) -> None:
+    def apply_minmax_info(
+        self, hwnd: int, lparam: int, min_track: tuple[int, int] | None = None
+    ) -> None:
         try:
             screen, work = self.get_monitor_rects(hwnd)
         except Exception:
@@ -597,6 +639,12 @@ class Win32WindowAdapter:
         minmax.ptMaxPosition.y = int(work.y - screen.y)
         minmax.ptMaxSize.x = int(work.width)
         minmax.ptMaxSize.y = int(work.height)
+        if min_track:
+            # O WinForms aplica o minimo a janela inteira. Como a moldura come
+            # a espessura do frame de cada lado, sem isto o viewport do
+            # dashboard cairia abaixo dos 1024 px logicos exigidos.
+            minmax.ptMinTrackSize.x = max(int(minmax.ptMinTrackSize.x), int(min_track[0]))
+            minmax.ptMinTrackSize.y = max(int(minmax.ptMinTrackSize.y), int(min_track[1]))
 
     def restore_native_frame(self, hwnd: int, previous_style: int) -> None:
         self.set_style(hwnd, previous_style | REQUIRED_WINDOW_STYLES | WS_CAPTION)
@@ -636,6 +684,8 @@ class WindowChromeController:
         # Placement salvo ao entrar em tela cheia; ``None`` significa "nao esta
         # em tela cheia" e e a unica fonte de verdade desse estado.
         self._fullscreen_placement: Any | None = None
+        self._nonclient = False
+        self._min_client_size: tuple[float, float] | None = None
 
     @property
     def attached(self) -> bool:
@@ -727,6 +777,7 @@ class WindowChromeController:
         self._attached = False
         self._regions = None
         self._fullscreen_placement = None
+        self._nonclient = False
 
     def _restore(self, *, destroying: bool = False) -> None:
         adapter = self._adapter
@@ -765,6 +816,48 @@ class WindowChromeController:
                 self._last_error = f"{type(exc).__name__}: {exc}"
                 self._log.exception("Falha ao desanexar window chrome")
                 return False
+
+    def enable_nonclient_regions(self) -> bool:
+        """Liga o ``app-region`` do WebView2; idempotente e seguro antes do CoreWebView2.
+
+        O CoreWebView2 so pode ser tocado na thread dona do formulario. O evento
+        ``loaded`` do pywebview chega numa thread de trabalho, e ler a propriedade
+        de la trava esperando a thread de UI. Quando preciso, o trabalho e
+        despachado com ``BeginInvoke`` e o resultado chega de forma assincrona.
+        """
+        with self._lock:
+            if self._nonclient or self._window is None:
+                return self._nonclient
+            native = getattr(self._window, "native", None)
+
+        if getattr(native, "InvokeRequired", False):
+            try:
+                from System import Action  # type: ignore[import-not-found]
+
+                native.BeginInvoke(Action(self._apply_nonclient_regions))
+            except Exception as exc:
+                self._log.warning("Nao foi possivel despachar app-region para a UI: %s", exc)
+            return False
+
+        return self._apply_nonclient_regions()
+
+    def _apply_nonclient_regions(self) -> bool:
+        """Executa na thread dona do formulario."""
+        with self._lock:
+            if self._nonclient or self._window is None:
+                return self._nonclient
+            try:
+                self._nonclient = enable_nonclient_region_support(self._window)
+            except Exception as exc:
+                self._log.warning("Nao foi possivel ligar app-region no WebView2: %s", exc)
+                self._nonclient = False
+            if self._nonclient:
+                self._log.info("Regiao nao-cliente do WebView2 (app-region): ativa")
+            else:
+                # Antes do ``loaded`` o CoreWebView2 ainda nao existe; so o
+                # chamador sabe se esta era a ultima tentativa.
+                self._log.debug("Regiao nao-cliente do WebView2 ainda indisponivel")
+            return self._nonclient
 
     def minimize(self) -> bool:
         return self._run_window_action("minimize", lambda adapter, hwnd: adapter.show_window(hwnd, SW_MINIMIZE))
@@ -819,24 +912,36 @@ class WindowChromeController:
     ) -> bool:
         """Define o tamanho restaurado padrao sem sair do estado maximizado.
 
-        ``min_size`` vem em pixels logicos (o mesmo valor passado ao pywebview)
-        e e convertido com o DPI do monitor atual.
+        ``min_size`` e o minimo da **area cliente** em pixels logicos — o espaco
+        que o dashboard realmente recebe. Fica guardado para o WM_GETMINMAXINFO.
         """
+        self._min_client_size = (float(min_size[0]), float(min_size[1]))
+
         def action(adapter: Any, hwnd: int) -> None:
             dpi = adapter.get_dpi(hwnd)
             _, work = adapter.get_monitor_rects(hwnd)
+            min_width, min_height = self._min_window_size(adapter, hwnd) or (0, 0)
             target = default_restored_rect(
-                work,
-                fraction=fraction,
-                min_width=scale_for_dpi(min_size[0], dpi),
-                min_height=scale_for_dpi(min_size[1], dpi),
+                work, fraction=fraction, min_width=min_width, min_height=min_height
             )
             adapter.set_normal_position(hwnd, target)
             self._log.info(
-                "Geometria restaurada padrao | dpi=%s | area_util=%s | alvo=%s", dpi, work, target
+                "Geometria restaurada padrao | dpi=%s | area_util=%s | minimo=%sx%s | alvo=%s",
+                dpi, work, min_width, min_height, target,
             )
 
         return self._run_window_action("apply_default_geometry", action)
+
+    def _min_window_size(self, adapter: Any, hwnd: int) -> tuple[int, int] | None:
+        """Minimo da janela = minimo do conteudo + a moldura que ela perde."""
+        if self._min_client_size is None:
+            return None
+        dpi = adapter.get_dpi(hwnd)
+        horizontal, vertical = adapter.frame_borders(hwnd)
+        return (
+            scale_for_dpi(self._min_client_size[0], dpi) + 2 * horizontal,
+            scale_for_dpi(self._min_client_size[1], dpi) + 2 * vertical,
+        )
 
     def close(self) -> bool:
         return self._run_window_action("close", lambda adapter, hwnd: adapter.close_window(hwnd))
@@ -879,6 +984,9 @@ class WindowChromeController:
                 "attached": self._attached,
                 "dpi": dpi,
                 "state": state,
+                # O frontend so recorre ao arraste por mensagem quando o
+                # WebView2 nao assume a regiao nao-cliente.
+                "nonclient": self._nonclient,
             }
             if self._fallback:
                 result["fallback"] = True
@@ -917,17 +1025,30 @@ class WindowChromeController:
                 )
                 return False
 
+    def _is_full_surface(self, adapter: Any, hwnd: int) -> bool:
+        """A janela ocupa o monitor inteiro e nao deve exibir moldura."""
+        return self._fullscreen_placement is not None or bool(adapter.is_zoomed(hwnd))
+
     def _wnd_proc(self, hwnd: int, msg: int, wparam: int, lparam: int) -> int:
         adapter = self._adapter
         old_proc = self._old_wndproc
         if adapter is None or not old_proc:
             return 0
         try:
+            # O WebView2 e um HWND filho de outro processo e ocupa toda a area
+            # cliente: pontos sobre ele nunca chegam a este WM_NCHITTEST. Se a
+            # area cliente for a janela inteira, nao sobra faixa alguma para
+            # redimensionar. Por isso devolvemos uma area cliente recuada pela
+            # espessura do frame, e o WebView2, ancorado nela, deixa a moldura
+            # nativa exposta nos quatro lados. Maximizada ou em tela cheia nao
+            # ha o que redimensionar e a faixa viraria uma borda indesejada.
+            #
             # Tanto a forma simples (wParam=FALSE) quanto NCCALCSIZE_PARAMS
-            # (wParam=TRUE) devem usar toda a janela como area cliente. Se a
-            # forma simples for encaminhada, o frame espesso continua roubando
-            # alguns pixels do viewport em DPI fracionario.
+            # (wParam=TRUE) comecam pelo retangulo proposto, entao o mesmo
+            # ponteiro serve para as duas.
             if msg == WM_NCCALCSIZE:
+                if lparam and not self._is_full_surface(adapter, hwnd):
+                    adapter.apply_nccalcsize_borders(hwnd, lparam)
                 return 0
             if msg == WM_NCHITTEST:
                 handled, result = adapter.dwm_def_window_proc(hwnd, msg, wparam, lparam)
@@ -963,7 +1084,7 @@ class WindowChromeController:
                 # area util, senao a janela sem moldura vaza para fora do
                 # monitor pela espessura do frame.
                 result = adapter.call_wndproc(old_proc, hwnd, msg, wparam, lparam)
-                adapter.apply_minmax_info(hwnd, lparam)
+                adapter.apply_minmax_info(hwnd, lparam, self._min_window_size(adapter, hwnd))
                 return result
             if msg == WM_DPICHANGED and lparam:
                 self._dpi = (wparam >> 16) & 0xFFFF or wparam & 0xFFFF or 96
@@ -1100,6 +1221,30 @@ def validate_regions(
     )
 
 
+def enable_nonclient_region_support(window: Any) -> bool:
+    """Faz o WebView2 honrar ``app-region: drag`` na barra de titulo.
+
+    Sem isso o arraste depende de converter um ``pointerdown`` HTML numa mensagem
+    nao-cliente, o que nao funciona: a chamada da API do pywebview nao roda na
+    thread dona do HWND e a captura do mouse pertence ao processo do WebView2.
+    Com a opcao ligada e o proprio navegador que classifica a regiao e entrega o
+    arraste, o duplo clique e o Aero Snap ao Windows — sem intermediarios.
+
+    Requer WebView2 SDK 1.0.2210+ (o empacotado pelo pywebview e bem mais novo).
+    Retorna ``False`` quando a propriedade nao existe ou o CoreWebView2 ainda nao
+    foi criado; nesse caso o chamador deve tentar de novo apos o ``loaded``.
+    """
+    native = getattr(window, "native", None)
+    browser = getattr(native, "browser", None)
+    control = getattr(browser, "webview", None)
+    core = getattr(control, "CoreWebView2", None)
+    settings = getattr(core, "Settings", None)
+    if settings is None or not hasattr(settings, "IsNonClientRegionSupportEnabled"):
+        return False
+    settings.IsNonClientRegionSupportEnabled = True
+    return bool(settings.IsNonClientRegionSupportEnabled)
+
+
 def window_chrome_diagnostic() -> dict[str, Any]:
     return WindowChromeController().diagnostic()
 
@@ -1111,6 +1256,7 @@ __all__ = [
     "WindowChromeController",
     "Win32WindowAdapter",
     "default_restored_rect",
+    "enable_nonclient_region_support",
     "hit_test",
     "point_from_lparam",
     "resolve_titlebar_mode",

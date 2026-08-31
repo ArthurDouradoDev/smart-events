@@ -1,10 +1,13 @@
 from __future__ import annotations
 
+import ctypes
 import math
 
 import pytest
 
 from core.window_chrome import (
+    NATIVE_RECT,
+    WM_NCCALCSIZE,
     HTBOTTOM,
     HTBOTTOMLEFT,
     HTBOTTOMRIGHT,
@@ -27,6 +30,7 @@ from core.window_chrome import (
     Win32WindowAdapter,
     WindowChromeController,
     default_restored_rect,
+    enable_nonclient_region_support,
     hit_test,
     point_from_lparam,
     resolve_window_chrome_mode,
@@ -232,6 +236,8 @@ class FakeAdapter:
         self.normal_position = None
         self.forwarded = []
         self.minmax_applied = []
+        self.nccalcsize_calls = []
+        self.borders = (11, 11)
 
     def _fail(self, name):
         if self.fail_at == name:
@@ -313,8 +319,14 @@ class FakeAdapter:
     def set_normal_position(self, hwnd, rect):
         self.normal_position = rect
 
-    def apply_minmax_info(self, hwnd, lparam):
-        self.minmax_applied.append((hwnd, lparam))
+    def apply_minmax_info(self, hwnd, lparam, min_track=None):
+        self.minmax_applied.append((hwnd, lparam, min_track))
+
+    def frame_borders(self, hwnd):
+        return self.borders
+
+    def apply_nccalcsize_borders(self, hwnd, lparam):
+        self.nccalcsize_calls.append((hwnd, lparam))
 
     def call_wndproc(self, proc, hwnd, msg, wparam, lparam):
         self.forwarded.append((msg, wparam, lparam))
@@ -471,28 +483,110 @@ def test_detach_forgets_the_fullscreen_state():
     assert controller.get_state()["state"] == "normal"
 
 
-def test_default_geometry_sets_the_restore_rect_using_the_monitor_dpi():
+def test_default_geometry_reserves_the_frame_on_top_of_the_content_minimum():
     controller, adapter = attached_controller()
     adapter.dpi = 144
     adapter.zoomed = True
 
     assert controller.apply_default_geometry(min_size=(1024, 600)) is True
 
-    # 80% de 1920x1128 = 1536x902, acima do minimo (1024x600 a 144 DPI = 1536x900).
-    assert adapter.normal_position == Rect(192, 113, 1536, 902)
+    # 80% de 1920x1128 seria 1536x902, mas o minimo do *conteudo* (1024x600 a
+    # 144 DPI = 1536x900) mais a moldura (11 px por lado) exige 1558x922 — senao
+    # o viewport do dashboard ficaria abaixo dos 1024 px logicos.
+    assert adapter.normal_position == Rect(181, 103, 1558, 922)
     # Definir o retangulo restaurado nao pode tirar a janela de maximizada.
     assert adapter.show_commands == []
 
 
-def test_minmax_info_is_forwarded_before_the_work_area_is_applied():
+def test_nccalcsize_reserves_a_resize_border_only_when_the_window_is_restored():
     controller, adapter = attached_controller()
+
+    # Restaurada: o WebView2 precisa ceder a faixa que recebe o WM_NCHITTEST
+    # das bordas, senao nao ha por onde redimensionar.
+    assert controller._wnd_proc(101, WM_NCCALCSIZE, 1, 4096) == 0
+    assert adapter.nccalcsize_calls == [(101, 4096)]
+
+    # Maximizada nao ha o que redimensionar, e a faixa viraria uma borda visivel.
+    adapter.zoomed = True
+    assert controller._wnd_proc(101, WM_NCCALCSIZE, 1, 4096) == 0
+    assert adapter.nccalcsize_calls == [(101, 4096)]
+
+    # Tela cheia segue a mesma regra da maximizada.
+    adapter.zoomed = False
+    assert controller.toggle_fullscreen() is True
+    assert controller._wnd_proc(101, WM_NCCALCSIZE, 1, 4096) == 0
+    assert adapter.nccalcsize_calls == [(101, 4096)]
+
+
+def test_nccalcsize_never_collapses_a_degenerate_rectangle():
+    adapter = Win32WindowAdapter.__new__(Win32WindowAdapter)
+    adapter.frame_borders = lambda hwnd: (12, 12)
+    rect = NATIVE_RECT(left=0, top=0, right=1920, bottom=1128)
+    adapter.apply_nccalcsize_borders(101, ctypes.addressof(rect))
+    assert (rect.left, rect.top, rect.right, rect.bottom) == (12, 12, 1908, 1116)
+
+    # Retangulo degenerado (o Windows propoe isso ao minimizar): manter como esta.
+    tiny = NATIVE_RECT(left=0, top=0, right=10, bottom=1128)
+    adapter.apply_nccalcsize_borders(101, ctypes.addressof(tiny))
+    assert (tiny.left, tiny.right) == (0, 10)
+    assert (tiny.top, tiny.bottom) == (12, 1116)
+
+
+def test_nonclient_region_support_is_enabled_and_reported_in_the_state():
+    class Settings:
+        IsNonClientRegionSupportEnabled = False
+
+    settings = Settings()
+
+    class Window:
+        native = type("Native", (), {"browser": type("B", (), {"webview": type("W", (), {
+            "CoreWebView2": type("C", (), {"Settings": settings})()
+        })()})()})()
+
+    window = Window()
+    assert enable_nonclient_region_support(window) is True
+    assert settings.IsNonClientRegionSupportEnabled is True
+
+    controller, _ = attached_controller()
+    assert controller.get_state()["nonclient"] is False
+    controller._window = window
+    assert controller.enable_nonclient_regions() is True
+    assert controller.get_state()["nonclient"] is True
+    # Idempotente: uma segunda chamada nao reprocessa nada.
+    assert controller.enable_nonclient_regions() is True
+
+
+def test_nonclient_region_support_is_absent_before_corewebview2_exists():
+    class Window:
+        native = type("Native", (), {"browser": None})()
+
+    assert enable_nonclient_region_support(Window()) is False
+
+    controller, _ = attached_controller()
+    controller._window = Window()
+    assert controller.enable_nonclient_regions() is False
+    assert controller.get_state()["nonclient"] is False
+
+
+def test_minmax_info_is_forwarded_and_raises_the_minimum_by_the_frame():
+    controller, adapter = attached_controller()
+    adapter.dpi = 144
+    controller.apply_default_geometry(min_size=(1024, 600))
 
     assert controller._wnd_proc(101, WM_GETMINMAXINFO, 0, 4096) == 1234
 
     # O WinForms precisa ver a mensagem para aplicar ``min_size``; so depois
-    # limitamos o tamanho maximizado.
+    # limitamos o tamanho maximizado e subimos o minimo pela moldura.
     assert adapter.forwarded == [(WM_GETMINMAXINFO, 0, 4096)]
-    assert adapter.minmax_applied == [(101, 4096)]
+    assert adapter.minmax_applied == [(101, 4096, (1558, 922))]
+
+
+def test_minmax_info_leaves_the_minimum_alone_before_any_geometry_is_applied():
+    controller, adapter = attached_controller()
+
+    assert controller._wnd_proc(101, WM_GETMINMAXINFO, 0, 4096) == 1234
+
+    assert adapter.minmax_applied == [(101, 4096, None)]
 
 
 def valid_payload():

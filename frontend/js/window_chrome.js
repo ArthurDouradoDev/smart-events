@@ -28,6 +28,9 @@ let _regionTimer = null;
 let _stateTimer = null;
 let _resizeObserver = null;
 let _lastToggleAt = 0;
+// Quando o WebView2 assume a regiao nao-cliente, arraste e duplo clique sao
+// dele; os handlers abaixo viram fallback para o caso de a opcao nao existir.
+let _nonclient = false;
 
 function _previewRequested() {
   return new URLSearchParams(window.location.search).get("chromePreview") === "1";
@@ -86,6 +89,7 @@ async function _syncState() {
   try {
     const result = await windowGetState();
     const custom = result?.mode === "custom" && result?.attached !== false;
+    _nonclient = result?.nonclient === true;
     if (custom !== _custom) _setCustomMode(custom);
     _setWindowState(result?.state || "normal");
     return result;
@@ -168,7 +172,7 @@ function _bindControls() {
   // nativo permite arrastar a janela — inclusive maximizada, caso em que o
   // proprio Windows a restaura sob o cursor.
   drag?.addEventListener("pointerdown", event => {
-    if (!_custom || event.button !== 0 || event.isPrimary === false) return;
+    if (!_custom || _nonclient || event.button !== 0 || event.isPrimary === false) return;
     // O segundo clique de um duplo clique e do handler de dblclick abaixo:
     // enviar outro WM_NCLBUTTONDOWN aqui inicia um move loop concorrente.
     if (event.detail > 1) return;
@@ -181,7 +185,7 @@ function _bindControls() {
   });
 
   drag?.addEventListener("dblclick", () => {
-    if (!_custom) return;
+    if (!_custom || _nonclient) return;
     void _toggle(windowToggleMaximize);
   });
 }
