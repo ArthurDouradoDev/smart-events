@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+﻿<!DOCTYPE html>
 <html lang="pt-BR">
 
 <head>
@@ -14,7 +14,7 @@
   <script src="lib/chart.umd.min.js"></script>
   <script src="lib/chartjs-plugin-annotation.min.js"></script>
 
-  <link rel="stylesheet" href="css/main.css?v=20260830-window-chrome-r2">
+  <link rel="stylesheet" href="css/main.css?v=20260831-window-chrome-r3">
 </head>
 
 <body>
@@ -26,9 +26,24 @@
       <span class="window-titlebar-title">Smart Events</span>
     </div>
     <div class="window-titlebar-controls" aria-label="Controles da janela">
+      <button id="window-fullscreen" class="window-control" type="button" aria-label="Tela cheia" title="Tela cheia" aria-pressed="false">
+        <svg viewBox="0 0 12 12" aria-hidden="true" focusable="false">
+          <rect x="0.5" y="1.5" width="11" height="8" rx="0.5" />
+          <path d="M4 11.5h4" />
+        </svg>
+      </button>
       <button id="window-minimize" class="window-control" type="button" aria-label="Minimizar" title="Minimizar">
         <svg viewBox="0 0 12 12" aria-hidden="true" focusable="false">
           <path d="M1.5 6.5h9" />
+        </svg>
+      </button>
+      <button id="window-maximize" class="window-control" type="button" aria-label="Maximizar" title="Maximizar">
+        <svg class="window-glyph-maximize" viewBox="0 0 12 12" aria-hidden="true" focusable="false">
+          <rect x="1.5" y="1.5" width="9" height="9" />
+        </svg>
+        <svg class="window-glyph-restore" viewBox="0 0 12 12" aria-hidden="true" focusable="false">
+          <rect x="1.5" y="3.5" width="7" height="7" />
+          <path d="M3.5 3.5v-2h7v7h-2" />
         </svg>
       </button>
       <button id="window-close" class="window-control window-control-close" type="button" aria-label="Fechar" title="Fechar">
@@ -638,7 +653,7 @@
   </div>
 
   <!-- Scripts (ES Modules) -->
-  <script type="module" src="js/app.js?v=20260830-window-chrome-r2"></script>
+  <script type="module" src="js/app.js?v=20260831-window-chrome-r3"></script>
 </body>
 
 </html>

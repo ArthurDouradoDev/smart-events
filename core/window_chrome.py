@@ -64,10 +64,16 @@ SWP_NOZORDER = 0x0004
 SWP_NOACTIVATE = 0x0010
 SWP_FRAMECHANGED = 0x0020
 MONITOR_DEFAULTTONEAREST = 2
+SPI_GETWORKAREA = 0x0030
 
 DEFAULT_TITLEBAR_HEIGHT = 36.0
 DEFAULT_RESIZE_BORDER = 8.0
 MAX_DRAG_REGIONS = 16
+
+# Tamanho restaurado padrao: fracao da area de trabalho do monitor atual. O
+# dashboard nao e responsivo abaixo de 1024 px logicos, entao a janela nunca
+# abre pequena; o minimo real continua sendo ``min_size`` do pywebview.
+DEFAULT_RESTORED_FRACTION = 0.8
 
 
 @dataclass(frozen=True)
@@ -208,6 +214,34 @@ def hit_test(
     return HTCLIENT
 
 
+def default_restored_rect(
+    work: Rect,
+    *,
+    fraction: float = DEFAULT_RESTORED_FRACTION,
+    min_width: float = 0.0,
+    min_height: float = 0.0,
+) -> Rect:
+    """Retangulo restaurado padrao: ``fraction`` da area util, centralizado.
+
+    Todos os valores estao em pixels fisicos de tela. O minimo tem prioridade
+    sobre a fracao, e a area util tem prioridade sobre o minimo — uma janela
+    nunca deve nascer maior que o monitor em que sera exibida.
+    """
+    if not 0 < fraction <= 1:
+        raise ValueError("fraction deve estar em (0, 1]")
+    if work.width <= 0 or work.height <= 0:
+        raise ValueError("area util invalida")
+
+    width = min(work.width, max(min_width, round(work.width * fraction)))
+    height = min(work.height, max(min_height, round(work.height * fraction)))
+    return Rect(
+        work.x + round((work.width - width) / 2),
+        work.y + round((work.height - height) / 2),
+        width,
+        height,
+    )
+
+
 def resolve_window_chrome_mode(
     argv: Sequence[str] | None = None,
     *,
@@ -282,6 +316,21 @@ class MONITORINFO(ctypes.Structure):
     ]
 
 
+class WINDOWPLACEMENT(ctypes.Structure):
+    _fields_ = [
+        ("length", wintypes.UINT),
+        ("flags", wintypes.UINT),
+        ("showCmd", wintypes.UINT),
+        ("ptMinPosition", POINT),
+        ("ptMaxPosition", POINT),
+        ("rcNormalPosition", NATIVE_RECT),
+    ]
+
+
+def _rect_from_native(rect: NATIVE_RECT) -> Rect:
+    return Rect(rect.left, rect.top, rect.right - rect.left, rect.bottom - rect.top)
+
+
 class Win32WindowAdapter:
     """Fachada fina e mockavel sobre user32/dwmapi."""
 
@@ -313,6 +362,8 @@ class Win32WindowAdapter:
         self.user32.GetClientRect.restype = wintypes.BOOL
         self.user32.ClientToScreen.argtypes = [hwnd, ctypes.POINTER(POINT)]
         self.user32.ClientToScreen.restype = wintypes.BOOL
+        self.user32.GetCursorPos.argtypes = [ctypes.POINTER(POINT)]
+        self.user32.GetCursorPos.restype = wintypes.BOOL
         self.user32.GetDpiForWindow.argtypes = [hwnd]
         self.user32.GetDpiForWindow.restype = wintypes.UINT
         self.user32.SetWindowPos.argtypes = [hwnd, hwnd, ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_int, wintypes.UINT]
@@ -333,6 +384,14 @@ class Win32WindowAdapter:
         self.user32.MonitorFromWindow.restype = wintypes.HANDLE
         self.user32.GetMonitorInfoW.argtypes = [wintypes.HANDLE, ctypes.POINTER(MONITORINFO)]
         self.user32.GetMonitorInfoW.restype = wintypes.BOOL
+        self.user32.GetWindowPlacement.argtypes = [hwnd, ctypes.POINTER(WINDOWPLACEMENT)]
+        self.user32.GetWindowPlacement.restype = wintypes.BOOL
+        self.user32.SetWindowPlacement.argtypes = [hwnd, ctypes.POINTER(WINDOWPLACEMENT)]
+        self.user32.SetWindowPlacement.restype = wintypes.BOOL
+        self.user32.SystemParametersInfoW.argtypes = [
+            wintypes.UINT, wintypes.UINT, ctypes.c_void_p, wintypes.UINT
+        ]
+        self.user32.SystemParametersInfoW.restype = wintypes.BOOL
         self.dwmapi.DwmDefWindowProc.argtypes = [hwnd, wintypes.UINT, wintypes.WPARAM, wintypes.LPARAM, ctypes.POINTER(lresult)]
         self.dwmapi.DwmDefWindowProc.restype = wintypes.BOOL
 
@@ -419,7 +478,7 @@ class Win32WindowAdapter:
         rect = NATIVE_RECT()
         if not self.user32.GetWindowRect(hwnd, ctypes.byref(rect)):
             self._raise_last_error("GetWindowRect")
-        return Rect(rect.left, rect.top, rect.right - rect.left, rect.bottom - rect.top)
+        return _rect_from_native(rect)
 
     def get_client_size(self, hwnd: int) -> tuple[int, int]:
         rect = NATIVE_RECT()
@@ -433,6 +492,12 @@ class Win32WindowAdapter:
             self._raise_last_error("ClientToScreen")
         window = self.get_window_rect(hwnd)
         return int(origin.x - window.x), int(origin.y - window.y)
+
+    def get_cursor_pos(self) -> tuple[int, int]:
+        point = POINT()
+        if not self.user32.GetCursorPos(ctypes.byref(point)):
+            self._raise_last_error("GetCursorPos")
+        return int(point.x), int(point.y)
 
     def get_dpi(self, hwnd: int) -> int:
         return int(self.user32.GetDpiForWindow(hwnd) or 96)
@@ -452,10 +517,65 @@ class Win32WindowAdapter:
 
     def begin_drag(self, hwnd: int) -> None:
         # WebView2 windowed usa um HWND filho e, portanto, recebe o mouse antes
-        # do formulario pai. Converter explicitamente o pointer-down HTML numa
-        # mensagem nao-cliente preserva o move loop nativo e o Aero Snap.
+        # do formulario pai. A mensagem precisa carregar a posicao real do
+        # cursor; (0, 0) pode ficar fora da janela e ser ignorado pelo WinForms,
+        # sobretudo em monitores com coordenadas negativas.
+        cursor_x, cursor_y = self.get_cursor_pos()
+        lparam = (cursor_x & 0xFFFF) | ((cursor_y & 0xFFFF) << 16)
         self.user32.ReleaseCapture()
-        self.user32.SendMessageW(hwnd, WM_NCLBUTTONDOWN, HTCAPTION, 0)
+        self.user32.SendMessageW(hwnd, WM_NCLBUTTONDOWN, HTCAPTION, lparam)
+
+    def get_monitor_rects(self, hwnd: int) -> tuple[Rect, Rect]:
+        """Retangulo total e area util do monitor que contem a janela."""
+        monitor = self.user32.MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST)
+        if not monitor:
+            raise RuntimeError("MonitorFromWindow nao encontrou um monitor")
+        info = MONITORINFO(cbSize=ctypes.sizeof(MONITORINFO))
+        if not self.user32.GetMonitorInfoW(monitor, ctypes.byref(info)):
+            self._raise_last_error("GetMonitorInfoW")
+        return (_rect_from_native(info.rcMonitor), _rect_from_native(info.rcWork))
+
+    def get_placement(self, hwnd: int) -> WINDOWPLACEMENT:
+        placement = WINDOWPLACEMENT(length=ctypes.sizeof(WINDOWPLACEMENT))
+        if not self.user32.GetWindowPlacement(hwnd, ctypes.byref(placement)):
+            self._raise_last_error("GetWindowPlacement")
+        return placement
+
+    def set_placement(self, hwnd: int, placement: WINDOWPLACEMENT) -> None:
+        placement.length = ctypes.sizeof(WINDOWPLACEMENT)
+        if not self.user32.SetWindowPlacement(hwnd, ctypes.byref(placement)):
+            self._raise_last_error("SetWindowPlacement")
+
+    def _workspace_origin(self) -> tuple[int, int]:
+        """Origem das coordenadas de ``rcNormalPosition`` (workspace coordinates).
+
+        WINDOWPLACEMENT nao usa coordenadas de tela: usa a area util do monitor
+        primario como origem. Com a barra de tarefas embaixo a diferenca e zero,
+        mas com ela a esquerda ou no topo a janela nasceria deslocada.
+        """
+        work = NATIVE_RECT()
+        if not self.user32.SystemParametersInfoW(SPI_GETWORKAREA, 0, ctypes.byref(work), 0):
+            return (0, 0)
+        return (int(work.left), int(work.top))
+
+    def set_normal_position(self, hwnd: int, rect: Rect) -> None:
+        """Define o retangulo restaurado sem tirar a janela do estado atual."""
+        placement = self.get_placement(hwnd)
+        offset_x, offset_y = self._workspace_origin()
+        placement.rcNormalPosition = NATIVE_RECT(
+            left=int(rect.x) - offset_x,
+            top=int(rect.y) - offset_y,
+            right=int(rect.x + rect.width) - offset_x,
+            bottom=int(rect.y + rect.height) - offset_y,
+        )
+        self.set_placement(hwnd, placement)
+
+    def set_window_rect(self, hwnd: int, rect: Rect) -> None:
+        flags = SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED
+        if not self.user32.SetWindowPos(
+            hwnd, None, int(rect.x), int(rect.y), int(rect.width), int(rect.height), flags
+        ):
+            self._raise_last_error("SetWindowPos(set_window_rect)")
 
     def apply_dpi_rect(self, hwnd: int, lparam: int) -> None:
         suggested = ctypes.cast(lparam, ctypes.POINTER(NATIVE_RECT)).contents
@@ -468,19 +588,15 @@ class Win32WindowAdapter:
                 self._raise_last_error("SetWindowPos(WM_DPICHANGED)")
 
     def apply_minmax_info(self, hwnd: int, lparam: int) -> None:
-        monitor = self.user32.MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST)
-        if not monitor:
-            return
-        info = MONITORINFO(cbSize=ctypes.sizeof(MONITORINFO))
-        if not self.user32.GetMonitorInfoW(monitor, ctypes.byref(info)):
+        try:
+            screen, work = self.get_monitor_rects(hwnd)
+        except Exception:
             return
         minmax = ctypes.cast(lparam, ctypes.POINTER(MINMAXINFO)).contents
-        work = info.rcWork
-        screen = info.rcMonitor
-        minmax.ptMaxPosition.x = work.left - screen.left
-        minmax.ptMaxPosition.y = work.top - screen.top
-        minmax.ptMaxSize.x = work.right - work.left
-        minmax.ptMaxSize.y = work.bottom - work.top
+        minmax.ptMaxPosition.x = int(work.x - screen.x)
+        minmax.ptMaxPosition.y = int(work.y - screen.y)
+        minmax.ptMaxSize.x = int(work.width)
+        minmax.ptMaxSize.y = int(work.height)
 
     def restore_native_frame(self, hwnd: int, previous_style: int) -> None:
         self.set_style(hwnd, previous_style | REQUIRED_WINDOW_STYLES | WS_CAPTION)
@@ -517,6 +633,9 @@ class WindowChromeController:
         self._last_error: str | None = None
         self._dpi = 96
         self._regions: ChromeRegions | None = None
+        # Placement salvo ao entrar em tela cheia; ``None`` significa "nao esta
+        # em tela cheia" e e a unica fonte de verdade desse estado.
+        self._fullscreen_placement: Any | None = None
 
     @property
     def attached(self) -> bool:
@@ -607,6 +726,7 @@ class WindowChromeController:
         self._callback = None
         self._attached = False
         self._regions = None
+        self._fullscreen_placement = None
 
     def _restore(self, *, destroying: bool = False) -> None:
         adapter = self._adapter
@@ -650,22 +770,73 @@ class WindowChromeController:
         return self._run_window_action("minimize", lambda adapter, hwnd: adapter.show_window(hwnd, SW_MINIMIZE))
 
     def begin_drag(self) -> bool:
-        def action(adapter: Any, hwnd: int) -> None:
-            # O move loop nativo restaura temporariamente uma janela maximizada
-            # para permitir que ela atravesse monitores. Ao soltar, voltamos a
-            # maximiza-la no monitor de destino para o app nunca ficar reduzido.
-            was_maximized = adapter.is_zoomed(hwnd)
-            adapter.begin_drag(hwnd)
-            if was_maximized:
-                adapter.show_window(hwnd, SW_MAXIMIZE)
-
-        return self._run_window_action("begin_drag", action)
+        # O move loop nativo ja sabe restaurar uma janela maximizada sob o
+        # cursor e re-maximizar no Aero Snap. Nao replicamos esse
+        # comportamento aqui: em monitores com DPI diferente, reposicionar a
+        # janela por conta propria antes do loop e o que a fazia "abrir torta".
+        return self._run_window_action(
+            "begin_drag", lambda adapter, hwnd: adapter.begin_drag(hwnd)
+        )
 
     def toggle_maximize(self) -> bool:
         def action(adapter: Any, hwnd: int) -> None:
+            if self._exit_fullscreen(adapter, hwnd):
+                return
             adapter.show_window(hwnd, SW_RESTORE if adapter.is_zoomed(hwnd) else SW_MAXIMIZE)
 
         return self._run_window_action("toggle_maximize", action)
+
+    def toggle_fullscreen(self) -> bool:
+        """Alterna entre o estado atual e o monitor inteiro, sem barra de tarefas."""
+        def action(adapter: Any, hwnd: int) -> None:
+            if self._exit_fullscreen(adapter, hwnd):
+                return
+            placement = adapter.get_placement(hwnd)
+            screen, _ = adapter.get_monitor_rects(hwnd)
+            if adapter.is_zoomed(hwnd):
+                # SetWindowPos e ignorado enquanto a janela esta maximizada; o
+                # placement salvo acima ja registra o estado para a volta.
+                adapter.show_window(hwnd, SW_RESTORE)
+            adapter.set_window_rect(hwnd, screen)
+            self._fullscreen_placement = placement
+            self._log.info("Tela cheia ativada | monitor=%s", screen)
+
+        return self._run_window_action("toggle_fullscreen", action)
+
+    def _exit_fullscreen(self, adapter: Any, hwnd: int) -> bool:
+        if self._fullscreen_placement is None:
+            return False
+        adapter.set_placement(hwnd, self._fullscreen_placement)
+        self._fullscreen_placement = None
+        self._log.info("Tela cheia desativada")
+        return True
+
+    def apply_default_geometry(
+        self,
+        min_size: tuple[float, float] = (1024.0, 600.0),
+        *,
+        fraction: float = DEFAULT_RESTORED_FRACTION,
+    ) -> bool:
+        """Define o tamanho restaurado padrao sem sair do estado maximizado.
+
+        ``min_size`` vem em pixels logicos (o mesmo valor passado ao pywebview)
+        e e convertido com o DPI do monitor atual.
+        """
+        def action(adapter: Any, hwnd: int) -> None:
+            dpi = adapter.get_dpi(hwnd)
+            _, work = adapter.get_monitor_rects(hwnd)
+            target = default_restored_rect(
+                work,
+                fraction=fraction,
+                min_width=scale_for_dpi(min_size[0], dpi),
+                min_height=scale_for_dpi(min_size[1], dpi),
+            )
+            adapter.set_normal_position(hwnd, target)
+            self._log.info(
+                "Geometria restaurada padrao | dpi=%s | area_util=%s | alvo=%s", dpi, work, target
+            )
+
+        return self._run_window_action("apply_default_geometry", action)
 
     def close(self) -> bool:
         return self._run_window_action("close", lambda adapter, hwnd: adapter.close_window(hwnd))
@@ -695,6 +866,8 @@ class WindowChromeController:
                     dpi = adapter.get_dpi(self._hwnd)
                     if adapter.is_iconic(self._hwnd):
                         state = "minimized"
+                    elif self._fullscreen_placement is not None:
+                        state = "fullscreen"
                     elif adapter.is_zoomed(self._hwnd):
                         state = "maximized"
                 except Exception as exc:
@@ -784,8 +957,14 @@ class WindowChromeController:
                     client_offset=client_offset,
                 )
             if msg == WM_GETMINMAXINFO and lparam:
+                # O WinForms aplica ``MinimumSize`` (o ``min_size`` do
+                # pywebview) nesta mensagem. Encaminhar primeiro preserva o
+                # limite minimo; so depois limitamos o tamanho maximizado a
+                # area util, senao a janela sem moldura vaza para fora do
+                # monitor pela espessura do frame.
+                result = adapter.call_wndproc(old_proc, hwnd, msg, wparam, lparam)
                 adapter.apply_minmax_info(hwnd, lparam)
-                return 0
+                return result
             if msg == WM_DPICHANGED and lparam:
                 self._dpi = (wparam >> 16) & 0xFFFF or wparam & 0xFFFF or 96
                 adapter.apply_dpi_rect(hwnd, lparam)
@@ -931,6 +1110,7 @@ __all__ = [
     "Rect",
     "WindowChromeController",
     "Win32WindowAdapter",
+    "default_restored_rect",
     "hit_test",
     "point_from_lparam",
     "resolve_titlebar_mode",

@@ -718,6 +718,17 @@ const _windowMocks = {
     _windowChromeMock.calls.push({ method: "window_begin_drag" });
     return true;
   },
+  window_toggle_maximize: () => {
+    _windowChromeMock.calls.push({ method: "window_toggle_maximize" });
+    _windowChromeMock.state = _windowChromeMock.state === "normal" ? "maximized" : "normal";
+    return true;
+  },
+  window_toggle_fullscreen: () => {
+    _windowChromeMock.calls.push({ method: "window_toggle_fullscreen" });
+    _windowChromeMock.state =
+      _windowChromeMock.state === "fullscreen" ? "maximized" : "fullscreen";
+    return true;
+  },
 };
 
 function _callWindowMethod(method, ...args) {
@@ -748,6 +759,8 @@ export const windowGetState = () => _callWindowMethod("window_get_state");
 export const windowSetChromeRegions = payload =>
   _callWindowMethod("window_set_chrome_regions", payload);
 export const windowBeginDrag = () => _callWindowMethod("window_begin_drag");
+export const windowToggleMaximize = () => _callWindowMethod("window_toggle_maximize");
+export const windowToggleFullscreen = () => _callWindowMethod("window_toggle_fullscreen");
 
 // ── Aguarda pywebview estar pronto ────────────────────────────────
 function _whenReady(fn) {

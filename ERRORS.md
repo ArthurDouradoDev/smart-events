@@ -600,3 +600,37 @@ quer manter (sessão). Qualquer arquivo servido sem query string de cache-bustin
 (`index.html`, `main.css`, `lib/*.js`) pode ficar preso em cache por tempo indefinido depois
 dessa mudança — ao depurar "editei mas não aparece" neste app, isso é suspeito #1 antes de
 desconfiar do código.
+
+---
+
+## 2026-08-31 — Janela maximizada abria "torta", com ~30% do app fora da tela
+
+**Como apareceu:** com a barra HTML ativa (`--custom-titlebar`), mover a janela para o
+monitor secundário com `Win+Shift+seta` a deixava pequena; o duplo clique na barra
+"maximizava" para um retângulo maior que o monitor — cerca de 70% do app ocupando a tela
+inteira, com a barra de controles e o painel de VIPs para fora à direita e o rodapé cortado.
+
+**Causa raiz (duas, somadas):**
+
+1. **Espaços de coordenadas divergentes.** O pywebview chama `SetProcessDPIAware()`
+   (*System* DPI aware) ao iniciar. Com monitores de escalas diferentes (notebook 144 DPI +
+   externo 96 DPI), o Windows *virtualiza* a janela no monitor secundário: `GetWindowRect`,
+   `GetMonitorInfoW` e o `WM_NCHITTEST` respondiam no espaço do DPI do sistema, enquanto o
+   WebView2 — processo próprio, per-monitor aware — desenhava no DPI real do monitor. O
+   retângulo calculado para maximizar estava certo num espaço e errado no outro.
+2. **`prepare_maximized_drag` reposicionava a janela à mão** antes de entrar no move loop
+   nativo (restaurar → ancorar sob o cursor → arrastar → re-maximizar). Feita com as
+   coordenadas divergentes acima, era ela quem produzia o salto e a re-maximização no
+   retângulo errado.
+
+**Correção:** o processo declara `DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2` **antes** de
+importar/subir o pywebview (a consciência de DPI só pode ser definida uma vez; quem chama
+primeiro vence), e `prepare_maximized_drag` foi removido — o move loop do Windows já faz
+drag-to-restore sob o cursor e Aero Snap no monitor de destino, sem ajuda.
+
+**Regra:** neste app, **nenhuma** conta de geometria Win32 é confiável enquanto o processo for
+System DPI aware e houver mais de um monitor com escalas diferentes. Antes de suspeitar da
+aritmética de retângulos, confirmar no log qual DPI o `attach` reportou (`Window chrome
+anexado | dpi=…`): 96 num monitor a 150% é o sintoma. E não reimplementar comportamento que o
+move loop nativo já entrega — `WM_NCLBUTTONDOWN`/`HTCAPTION` é o ponto de entrada, o resto é
+do Windows.

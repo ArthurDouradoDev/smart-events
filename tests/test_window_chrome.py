@@ -22,8 +22,11 @@ from core.window_chrome import (
     SW_RESTORE,
     WM_NCDESTROY,
     WM_NCHITTEST,
+    WM_GETMINMAXINFO,
     Rect,
+    Win32WindowAdapter,
     WindowChromeController,
+    default_restored_rect,
     hit_test,
     point_from_lparam,
     resolve_window_chrome_mode,
@@ -34,6 +37,8 @@ from core.window_chrome import (
 
 WINDOW = Rect(100, 200, 800, 600)
 TITLEBAR = Rect(0, 0, 800, 36)
+MONITOR = Rect(0, 0, 1920, 1200)
+WORK_AREA = Rect(0, 0, 1920, 1128)
 
 
 @pytest.mark.parametrize(
@@ -96,6 +101,70 @@ def test_negative_monitor_coordinates_and_lparam_conversion():
     assert point_from_lparam(packed) == (-1300, -40)
 
 
+def test_native_drag_message_carries_real_negative_screen_coordinates():
+    class FakeUser32:
+        def __init__(self):
+            self.released = False
+            self.message = None
+
+        def ReleaseCapture(self):
+            self.released = True
+            return True
+
+        def SendMessageW(self, hwnd, msg, wparam, lparam):
+            self.message = (hwnd, msg, wparam, lparam)
+            return 0
+
+    adapter = Win32WindowAdapter.__new__(Win32WindowAdapter)
+    adapter.user32 = FakeUser32()
+    adapter.get_cursor_pos = lambda: (-1300, 24)
+
+    adapter.begin_drag(101)
+
+    assert adapter.user32.released is True
+    assert adapter.user32.message[:3] == (101, 0x00A1, HTCAPTION)
+    assert point_from_lparam(adapter.user32.message[3]) == (-1300, 24)
+
+
+def test_default_restored_rect_centers_eighty_percent_of_the_work_area():
+    work = Rect(0, 0, 1920, 1128)
+
+    rect = default_restored_rect(work, fraction=0.8)
+
+    assert (rect.width, rect.height) == (1536, 902)
+    assert (rect.x, rect.y) == (192, 113)
+    # Centralizado: as folgas laterais e verticais sao simetricas.
+    assert rect.x - work.x == pytest.approx(work.right - rect.right, abs=1)
+    assert rect.y - work.y == pytest.approx(work.bottom - rect.bottom, abs=1)
+
+
+def test_default_restored_rect_respects_minimum_and_never_exceeds_the_monitor():
+    # Monitor pequeno: 80% ficaria abaixo do minimo do dashboard.
+    rect = default_restored_rect(
+        Rect(0, 0, 1366, 768), fraction=0.8, min_width=1024, min_height=600
+    )
+    assert (rect.width, rect.height) == (1093, 614)
+
+    # Monitor menor que o proprio minimo: a area util tem prioridade, senao a
+    # janela nasceria com parte fora da tela.
+    rect = default_restored_rect(
+        Rect(0, 0, 1000, 560), fraction=0.8, min_width=1024, min_height=600
+    )
+    assert (rect.x, rect.y, rect.width, rect.height) == (0, 0, 1000, 560)
+
+
+def test_default_restored_rect_uses_the_origin_of_a_monitor_at_the_left():
+    rect = default_restored_rect(Rect(-1920, -80, 1920, 1040), fraction=0.5)
+
+    assert (rect.x, rect.y, rect.width, rect.height) == (-1440, 180, 960, 520)
+
+
+@pytest.mark.parametrize("fraction", [0, -0.5, 1.5, math.nan])
+def test_default_restored_rect_rejects_invalid_fractions(fraction):
+    with pytest.raises(ValueError):
+        default_restored_rect(Rect(0, 0, 1920, 1128), fraction=fraction)
+
+
 @pytest.mark.parametrize(("dpi", "expected"), [(96, 8), (120, 10), (144, 12), (192, 16)])
 def test_dpi_conversion(dpi, expected):
     assert scale_for_dpi(8, dpi) == expected
@@ -153,11 +222,16 @@ class FakeAdapter:
         self.iconic = False
         self.closed = False
         self.drag_started = False
-        self.restore_during_drag = False
+        self.action_order = []
         self.client_size = (800, 600)
         self.dpi = 96
         self.last_callback = None
         self.dwm_result = (False, 0)
+        self.window_rects = []
+        self.restored_placement = None
+        self.normal_position = None
+        self.forwarded = []
+        self.minmax_applied = []
 
     def _fail(self, name):
         if self.fail_at == name:
@@ -205,6 +279,7 @@ class FakeAdapter:
         return self.client_size
 
     def show_window(self, hwnd, command):
+        self.action_order.append(("show", command))
         self.show_commands.append(command)
 
     def is_zoomed(self, hwnd):
@@ -217,11 +292,32 @@ class FakeAdapter:
         self.closed = True
 
     def begin_drag(self, hwnd):
+        self.action_order.append(("drag", None))
         self.drag_started = True
-        if self.restore_during_drag:
-            self.zoomed = False
+
+    def get_monitor_rects(self, hwnd):
+        return (MONITOR, WORK_AREA)
+
+    def get_placement(self, hwnd):
+        self.action_order.append(("get_placement", None))
+        return f"placement@{self.zoomed}"
+
+    def set_placement(self, hwnd, placement):
+        self.action_order.append(("set_placement", placement))
+        self.restored_placement = placement
+
+    def set_window_rect(self, hwnd, rect):
+        self.action_order.append(("set_rect", rect))
+        self.window_rects.append(rect)
+
+    def set_normal_position(self, hwnd, rect):
+        self.normal_position = rect
+
+    def apply_minmax_info(self, hwnd, lparam):
+        self.minmax_applied.append((hwnd, lparam))
 
     def call_wndproc(self, proc, hwnd, msg, wparam, lparam):
+        self.forwarded.append((msg, wparam, lparam))
         return 1234
 
     def dwm_def_window_proc(self, hwnd, msg, wparam, lparam):
@@ -328,15 +424,75 @@ def test_window_actions_and_state_transitions():
     assert adapter.closed is True
 
 
-def test_drag_remaximizes_on_the_destination_monitor():
+def test_drag_delegates_the_maximized_case_to_the_native_move_loop():
     controller, adapter = attached_controller()
     adapter.zoomed = True
-    adapter.restore_during_drag = True
 
     assert controller.begin_drag() is True
 
-    assert adapter.drag_started is True
-    assert adapter.show_commands[-1] == SW_MAXIMIZE
+    # Nada de restaurar/reposicionar por conta propria: o move loop do Windows
+    # ja faz o drag-to-restore e o Aero Snap no monitor de destino.
+    assert adapter.action_order == [("drag", None)]
+    assert adapter.show_commands == []
+    assert adapter.window_rects == []
+
+
+def test_fullscreen_toggle_covers_the_monitor_and_restores_the_previous_placement():
+    controller, adapter = attached_controller()
+    adapter.zoomed = True
+
+    assert controller.toggle_fullscreen() is True
+    assert adapter.window_rects == [MONITOR]
+    # A janela precisa sair de maximizada antes do SetWindowPos, senao o
+    # Windows ignora o novo retangulo.
+    assert adapter.show_commands == [SW_RESTORE]
+    assert controller.get_state()["state"] == "fullscreen"
+
+    assert controller.toggle_fullscreen() is True
+    assert adapter.restored_placement == "placement@True"
+    assert controller.get_state()["state"] == "maximized"
+
+
+def test_maximize_button_leaves_fullscreen_before_toggling():
+    controller, adapter = attached_controller()
+
+    assert controller.toggle_fullscreen() is True
+    assert controller.toggle_maximize() is True
+
+    assert adapter.restored_placement == "placement@False"
+    assert controller.get_state()["state"] == "normal"
+
+
+def test_detach_forgets_the_fullscreen_state():
+    controller, adapter = attached_controller()
+    assert controller.toggle_fullscreen() is True
+
+    assert controller.detach() is True
+    assert controller.get_state()["state"] == "normal"
+
+
+def test_default_geometry_sets_the_restore_rect_using_the_monitor_dpi():
+    controller, adapter = attached_controller()
+    adapter.dpi = 144
+    adapter.zoomed = True
+
+    assert controller.apply_default_geometry(min_size=(1024, 600)) is True
+
+    # 80% de 1920x1128 = 1536x902, acima do minimo (1024x600 a 144 DPI = 1536x900).
+    assert adapter.normal_position == Rect(192, 113, 1536, 902)
+    # Definir o retangulo restaurado nao pode tirar a janela de maximizada.
+    assert adapter.show_commands == []
+
+
+def test_minmax_info_is_forwarded_before_the_work_area_is_applied():
+    controller, adapter = attached_controller()
+
+    assert controller._wnd_proc(101, WM_GETMINMAXINFO, 0, 4096) == 1234
+
+    # O WinForms precisa ver a mensagem para aplicar ``min_size``; so depois
+    # limitamos o tamanho maximizado.
+    assert adapter.forwarded == [(WM_GETMINMAXINFO, 0, 4096)]
+    assert adapter.minmax_applied == [(101, 4096)]
 
 
 def valid_payload():

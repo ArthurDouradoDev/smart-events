@@ -219,15 +219,57 @@ def _wait_server_ready(port: int, timeout: float = 8.0) -> bool:
     return False
 
 
-def main():
-    import webview
-    from api.api import Api
-    from core.window_chrome import WindowChromeController, resolve_window_chrome_mode
+def _setup_per_monitor_dpi():
+    """
+    Declara o processo Per-Monitor-DPI-Aware V2 antes de o pywebview subir a janela.
 
+    O pywebview chama ``SetProcessDPIAware()`` (System DPI aware) ao iniciar. Num setup com
+    monitores de escalas diferentes — o caso real aqui, notebook a 150% e monitor externo a
+    100% — isso faz o Windows *virtualizar* a janela no monitor secundário: o Win32 responde
+    coordenadas de um espaço (o DPI do sistema) enquanto o WebView2, que é per-monitor aware
+    no processo dele, desenha em outro. É essa divergência que deixa a janela maximizada
+    "torta", com parte do app para fora da tela.
+
+    Com PMv2 não há virtualização: ``GetDpiForWindow``, ``GetMonitorInfoW`` e o WM_NCHITTEST
+    da barra passam a falar o mesmo idioma do WebView2, e ``WM_DPICHANGED`` chega ao trocar
+    de monitor. Chamado só no modo customizado — ``--native-titlebar`` continua com o
+    comportamento anterior, preservando o rollback.
+    """
+    if os.name != "nt":
+        return "nao-windows"
+    import ctypes
+
+    try:
+        # -4 = DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2
+        if ctypes.windll.user32.SetProcessDpiAwarenessContext(ctypes.c_void_p(-4)):
+            return "per-monitor-v2"
+    except (AttributeError, OSError) as exc:
+        logger.debug("SetProcessDpiAwarenessContext indisponível: %s", exc)
+    try:
+        # 2 = PROCESS_PER_MONITOR_DPI_AWARE (Windows 8.1+)
+        if ctypes.windll.shcore.SetProcessDpiAwareness(2) == 0:
+            return "per-monitor"
+    except (AttributeError, OSError) as exc:
+        logger.debug("SetProcessDpiAwareness indisponível: %s", exc)
+    return "system (fallback)"
+
+
+def main():
     mock_mode = "--mock" in sys.argv
     dev_mode = "--dev" in sys.argv
+
+    from core.window_chrome import resolve_window_chrome_mode
     chrome_decision = resolve_window_chrome_mode(sys.argv[1:], log=logger)
     custom_titlebar = chrome_decision.mode == "custom"
+
+    # Precisa acontecer antes de qualquer import/janela do pywebview: a consciência de DPI
+    # de um processo só pode ser definida uma vez, e quem chamar primeiro vence.
+    if custom_titlebar:
+        logger.info("Consciência de DPI do processo: %s", _setup_per_monitor_dpi())
+
+    import webview
+    from api.api import Api
+    from core.window_chrome import WindowChromeController
 
     logger.info(
         "Iniciando Smart Events | mock=%s | dev=%s | titlebar=%s | motivo=%s",
@@ -321,12 +363,20 @@ def main():
     def window_begin_drag():
         return chrome_controller.begin_drag()
 
+    def window_toggle_maximize():
+        return chrome_controller.toggle_maximize()
+
+    def window_toggle_fullscreen():
+        return chrome_controller.toggle_fullscreen()
+
     window.expose(
         window_minimize,
         window_close,
         window_get_state,
         window_set_chrome_regions,
         window_begin_drag,
+        window_toggle_maximize,
+        window_toggle_fullscreen,
     )
 
     def _on_before_show():
@@ -334,6 +384,9 @@ def main():
             logger.info("Window chrome nao instalado: moldura nativa ativa")
             return
         if chrome_controller.attach(window):
+            # A janela abre maximizada; isto define apenas para onde ela volta ao
+            # restaurar, para o app nunca cair num retângulo menor que o dashboard.
+            chrome_controller.apply_default_geometry(min_size=(1024, 600))
             logger.info("Window chrome instalado: %s", chrome_controller.get_state())
         else:
             # ``attach`` restaura WS_CAPTION e os estilos nativos antes de

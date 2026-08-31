@@ -11,16 +11,23 @@ import {
   windowGetState,
   windowMinimize,
   windowSetChromeRegions,
+  windowToggleFullscreen,
+  windowToggleMaximize,
 } from "./bridge.js";
 
 const REGION_DEBOUNCE_MS = 120;
 const STATE_POLL_MS = 500;
+// O duplo clique na barra pode chegar por dois caminhos — o handler abaixo e o
+// WM_NCLBUTTONDBLCLK nativo, quando o hit-test alcanca o HWND pai. Sem esta
+// janela de guarda a janela alternaria duas vezes e voltaria ao estado inicial.
+const TOGGLE_GUARD_MS = 400;
 
 let _initialized = false;
 let _custom = false;
 let _regionTimer = null;
 let _stateTimer = null;
 let _resizeObserver = null;
+let _lastToggleAt = 0;
 
 function _previewRequested() {
   return new URLSearchParams(window.location.search).get("chromePreview") === "1";
@@ -38,7 +45,24 @@ function _rect(element) {
 }
 
 function _setWindowState(state) {
-  document.documentElement.dataset.windowState = state || "normal";
+  const value = state || "normal";
+  document.documentElement.dataset.windowState = value;
+
+  const maximize = document.getElementById("window-maximize");
+  if (maximize) {
+    const restores = value === "maximized" || value === "fullscreen";
+    const label = restores ? "Restaurar" : "Maximizar";
+    maximize.setAttribute("aria-label", label);
+    maximize.title = label;
+  }
+  const fullscreen = document.getElementById("window-fullscreen");
+  if (fullscreen) {
+    const active = value === "fullscreen";
+    fullscreen.setAttribute("aria-pressed", String(active));
+    const label = active ? "Sair da tela cheia" : "Tela cheia";
+    fullscreen.setAttribute("aria-label", label);
+    fullscreen.title = label;
+  }
 }
 
 function _announceLayoutChange() {
@@ -78,14 +102,18 @@ async function _sendRegions() {
   const bar = document.getElementById("window-titlebar");
   const drag = document.getElementById("window-titlebar-drag");
   const minimize = document.getElementById("window-minimize");
+  const maximize = document.getElementById("window-maximize");
   const close = document.getElementById("window-close");
-  if (!bar || !drag || !minimize || !close) return;
+  if (!bar || !drag || !minimize || !maximize || !close) return;
 
   const payload = {
     titlebar: _rect(bar),
     draggable: [_rect(drag)],
     buttons: {
       minimize: _rect(minimize),
+      // O backend devolve HTMAXBUTTON nesta regiao; e ela que faz o Windows 11
+      // mostrar os Snap Layouts ao pousar o ponteiro sobre o botao.
+      maximize: _rect(maximize),
       close: _rect(close),
     },
   };
@@ -107,23 +135,54 @@ function _scheduleStateSync() {
   window.setTimeout(_syncState, 260);
 }
 
+async function _toggle(action) {
+  const now = Date.now();
+  if (now - _lastToggleAt < TOGGLE_GUARD_MS) return;
+  _lastToggleAt = now;
+  try {
+    await action();
+  } catch (error) {
+    console.error("Falha ao alternar o estado da janela:", error);
+  }
+  _scheduleStateSync();
+}
+
 function _bindControls() {
   const drag = document.getElementById("window-titlebar-drag");
   const minimize = document.getElementById("window-minimize");
+  const maximize = document.getElementById("window-maximize");
+  const fullscreen = document.getElementById("window-fullscreen");
   const close = document.getElementById("window-close");
 
   minimize?.addEventListener("click", async () => {
     await windowMinimize();
     _scheduleStateSync();
   });
+  maximize?.addEventListener("click", () => void _toggle(windowToggleMaximize));
+  fullscreen?.addEventListener("click", () => void _toggle(windowToggleFullscreen));
   close?.addEventListener("click", () => {
     void windowClose();
   });
 
   // O WebView2 recebe o ponteiro antes do HWND pai. Iniciar o move loop
-  // nativo permite arrastar a janela maximizada entre monitores.
+  // nativo permite arrastar a janela — inclusive maximizada, caso em que o
+  // proprio Windows a restaura sob o cursor.
   drag?.addEventListener("pointerdown", event => {
-    if (_custom && event.button === 0 && event.isPrimary !== false) void windowBeginDrag();
+    if (!_custom || event.button !== 0 || event.isPrimary === false) return;
+    // O segundo clique de um duplo clique e do handler de dblclick abaixo:
+    // enviar outro WM_NCLBUTTONDOWN aqui inicia um move loop concorrente.
+    if (event.detail > 1) return;
+    event.preventDefault();
+    void windowBeginDrag().then(ok => {
+      if (!ok) console.error("O controlador nativo recusou o arraste da janela.");
+    }).catch(error => {
+      console.error("Falha ao iniciar o arraste da janela:", error);
+    });
+  });
+
+  drag?.addEventListener("dblclick", () => {
+    if (!_custom) return;
+    void _toggle(windowToggleMaximize);
   });
 }
 

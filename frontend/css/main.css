@@ -183,6 +183,15 @@ html.chrome-custom #window-titlebar { display: flex; }
   shape-rendering: geometricPrecision;
 }
 
+/* O glifo segue o estado real da janela reportado pelo controlador Win32:
+   restaurar quando maximizada ou em tela cheia, maximizar no resto. */
+.window-glyph-restore,
+html[data-window-state="maximized"] .window-glyph-maximize,
+html[data-window-state="fullscreen"] .window-glyph-maximize { display: none; }
+
+html[data-window-state="maximized"] .window-glyph-restore,
+html[data-window-state="fullscreen"] .window-glyph-restore { display: block; }
+
 .window-control:hover,
 .window-control:focus-visible {
   color: var(--text-primary);
@@ -192,6 +201,11 @@ html.chrome-custom #window-titlebar { display: flex; }
 .window-control:focus-visible {
   outline: 2px solid var(--info);
   outline-offset: -2px;
+}
+
+.window-control[aria-pressed="true"] {
+  color: var(--text-primary);
+  background: var(--bg-active);
 }
 
 .window-control-close:hover,

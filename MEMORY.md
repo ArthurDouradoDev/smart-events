@@ -1429,3 +1429,38 @@ desmarcado**. Só saía fechando o modal.
 
 Cobertura: `test_api.py::TestClusters::test_cluster_de_uma_tecnologia_so_declara_a_familia` e
 três testes de UI em `test_frontend_kpi_overview_ui.py` (purga, re-semeadura, vazio deliberado).
+
+---
+
+## 2026-08-31 — Janela restaurável (implementação A), tela cheia e DPI por monitor
+
+**Decisão:** a janela do shell customizado passa a se comportar como um app Windows normal.
+Descartada a alternativa "manter sempre maximizada e só mover entre monitores": ela não
+resolvia a queixa central (não dá para restaurar) e o Windows já oferece `Win+Shift+setas`
+de graça para mover janela maximizada entre telas.
+
+**O que ficou travado:**
+
+- **Mínimo continua `1024 × 600` lógicos.** O "mínimo de 80%" pedido foi reinterpretado como
+  *tamanho restaurado padrão*: 80% da área útil do monitor atual, centralizado, com piso no
+  mínimo e teto na própria área útil. Um mínimo dinâmico de 80% seria hostil (num 4K travaria
+  a janela em 3072 px) e mataria o Aero Snap de meia tela.
+- O tamanho restaurado é aplicado via `SetWindowPlacement`/`rcNormalPosition`, **sem** tirar a
+  janela do estado maximizado em que ela abre. `rcNormalPosition` usa *workspace coordinates*
+  (origem = área útil do monitor primário), não coordenadas de tela — o offset é descontado.
+- **Tela cheia** é um botão à parte (ícone de monitor), separado de maximizar: salva o
+  `WINDOWPLACEMENT` atual e cobre `rcMonitor` inteiro. O placement salvo é a única fonte de
+  verdade do estado `fullscreen`.
+- **O processo declara Per-Monitor-DPI-Aware V2** antes de o pywebview subir a janela (ele
+  chama `SetProcessDPIAware()`, System aware, e quem chama primeiro vence). Só no modo
+  `--custom-titlebar`; `--native-titlebar` mantém o comportamento anterior como rollback.
+- `WM_GETMINMAXINFO` é **encaminhado ao WNDPROC do WinForms antes** de limitarmos o tamanho
+  maximizado à área útil — é lá que o `min_size` do pywebview é aplicado. Engolir a mensagem
+  descartava o mínimo.
+
+**Verificado no app real (2026-08-31):** `dpi=144`, área útil `1920×1128`, alvo restaurado
+`1536×902` centralizado em `(192, 113)`. Note que neste notebook a 150% os 80% coincidem com
+o mínimo do dashboard (1024×601 lógicos) — é esperado, não é bug.
+
+**Pendente de validação do usuário:** matriz com dois monitores de escalas diferentes
+(notebook 150% + externo 100%), que é onde o sintoma original aparecia.
