@@ -684,3 +684,58 @@ comportamento real** — o HWND pai só recebe `WM_NCHITTEST` onde o WebView2 n�
 cima. Antes de depurar aritmética de retângulo, medir o recuo real
 (`GetWindowRect` vs `ClientToScreen`) e perguntar o hit-test à janela viva. E qualquer acesso
 ao `CoreWebView2` fora de `before_show` precisa passar por `BeginInvoke`.
+
+---
+
+## 2026-08-31 — `app-region` ligado tarde demais: a barra continuava sem arrastar
+
+**Como apareceu:** com a barra HTML ativa, o resize pelas bordas funcionava (correção da
+entrada anterior), mas clicar e segurar a barra de título não movia a janela. O log dizia
+`Regiao nao-cliente do WebView2 (app-region): ativa`, ou seja, a correção anterior *parecia*
+aplicada.
+
+**Causa raiz:** `CoreWebView2Settings.IsNonClientRegionSupportEnabled` só vale para o
+documento navegado **depois** de ela ser ligada. O `main.py` ligava em duas etapas: no
+`before_show` (onde o `CoreWebView2` ainda é `None`, então falhava em silêncio) e no `loaded`
+— com a página já carregada. A propriedade passava a ler `True` e não surtia efeito algum.
+
+Sem o recurso ativo para aquele documento, o WebView2 não cria a janela auxiliar
+(`Chrome_WidgetWin_0`, da altura da faixa arrastável) que responde `HTCAPTION`. Todo o ponteiro
+sobre o app continua pertencendo ao `Chrome_RenderWidgetHostHWND`, que responde `HTCLIENT`. O
+`WM_NCHITTEST` do HWND pai respondia `HTCAPTION` certinho — e nunca era consultado.
+
+**Agravante que escondeu o problema:** `get_state()["nonclient"]` significava "consegui
+escrever na propriedade", não "o recurso está ativo neste documento". O
+`frontend/js/window_chrome.js` usa esse flag para **desligar** o fallback de arraste, então
+não sobrava caminho nenhum — e o fallback `begin_drag` também não funcionaria (ver entrada
+anterior: a captura do mouse pertence ao processo do WebView2).
+
+**Como foi confirmado:** sonda externa com drag sintético (`SetCursorPos` + `mouse_event`) e
+`WindowFromPoint`/`WM_NCHITTEST`, na janela real com o controlador anexado, a 144 DPI:
+
+| | ligando no `loaded` | ligando em `CoreWebView2InitializationCompleted` |
+|---|---|---|
+| HWND sob a faixa da barra | `Chrome_RenderWidgetHostHWND` | `Chrome_WidgetWin_0` (54 px = 36 lógicos) |
+| hit-test desse HWND | `1` (HTCLIENT) | `2` (HTCAPTION) |
+| hit-test do HWND pai | `2` (HTCAPTION), ignorado | `2` |
+| arraste de (120, 60) | janela não moveu | moveu exatamente (120, 60) |
+| resize pela borda | funciona | funciona |
+
+**Correção:** `WindowChromeController.arm_nonclient_regions(window)` assina
+`CoreWebView2InitializationCompleted` no `before_show` — que o pywebview executa **síncrono na
+thread de UI** (`Event(self, True)` em `webview/window.py`) — e liga a propriedade dentro do
+handler, antes de o documento existir. O `_nonclient` só é escrito nesse handler, então o
+`nonclient` do `get_state()` passa a significar "ativo neste documento". Se o `CoreWebView2`
+já existir quando o arm for chamado, o controlador **recusa** e loga, em vez de produzir o
+falso positivo. A chamada no `loaded` e o `BeginInvoke` saíram; ficou só um aviso no log.
+
+**Verificado na janela real** (`--mock --custom-titlebar`, 144 DPI): arraste move a janela,
+duplo clique na barra maximiza e restaura, clique no botão maximizar funciona, e os três
+botões continuam pertencendo ao `Chrome_RenderWidgetHostHWND` (o `no-drag` é honrado).
+
+**Regra:** propriedade de `CoreWebView2Settings` mudada depois da navegação vale para a
+*próxima* navegação — ler `True` de volta não prova nada. Configuração de WebView2 que precisa
+valer para a primeira página se liga em `CoreWebView2InitializationCompleted`, assinado em
+`before_show`. E flag de diagnóstico deve descrever o efeito observado, nunca a escrita: um
+`nonclient: True` que só significava "escrevi na propriedade" foi o que desligou o fallback e
+escondeu a falha.

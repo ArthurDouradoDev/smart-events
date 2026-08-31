@@ -532,40 +532,87 @@ def test_nccalcsize_never_collapses_a_degenerate_rectangle():
     assert (tiny.top, tiny.bottom) == (12, 1116)
 
 
-def test_nonclient_region_support_is_enabled_and_reported_in_the_state():
-    class Settings:
-        IsNonClientRegionSupportEnabled = False
+class FakeSettings:
+    IsNonClientRegionSupportEnabled = False
 
-    settings = Settings()
 
-    class Window:
-        native = type("Native", (), {"browser": type("B", (), {"webview": type("W", (), {
-            "CoreWebView2": type("C", (), {"Settings": settings})()
-        })()})()})()
+class FakeWebView2Control:
+    """Controle WebView2 minimo: CoreWebView2 so nasce quando o evento dispara."""
 
-    window = Window()
-    assert enable_nonclient_region_support(window) is True
+    def __init__(self) -> None:
+        self.CoreWebView2 = None
+        self.CoreWebView2InitializationCompleted = None
+        self.handlers: list = []
+
+    def initialize(self, settings: FakeSettings) -> None:
+        self.CoreWebView2 = type("Core", (), {"Settings": settings})()
+        for handler in self.handlers:
+            handler(self, None)
+
+
+class FakeEvent:
+    def __init__(self, control: FakeWebView2Control) -> None:
+        self._control = control
+
+    def __iadd__(self, handler):
+        self._control.handlers.append(handler)
+        return self
+
+
+def fake_window(control: FakeWebView2Control):
+    control.CoreWebView2InitializationCompleted = FakeEvent(control)
+    return type("Window", (), {
+        "native": type("Native", (), {
+            "browser": type("Browser", (), {"webview": control})()
+        })()
+    })()
+
+
+def test_nonclient_region_support_is_armed_before_the_first_navigation():
+    settings = FakeSettings()
+    control = FakeWebView2Control()
+    controller, _ = attached_controller()
+
+    assert controller.get_state()["nonclient"] is False
+    assert controller.arm_nonclient_regions(fake_window(control)) is True
+    # Enquanto o CoreWebView2 nao existir nada foi ligado ainda.
+    assert controller.get_state()["nonclient"] is False
+
+    control.initialize(settings)
     assert settings.IsNonClientRegionSupportEnabled is True
-
-    controller, _ = attached_controller()
-    assert controller.get_state()["nonclient"] is False
-    controller._window = window
-    assert controller.enable_nonclient_regions() is True
     assert controller.get_state()["nonclient"] is True
-    # Idempotente: uma segunda chamada nao reprocessa nada.
-    assert controller.enable_nonclient_regions() is True
+
+    # Idempotente: a segunda chamada nao assina o evento de novo.
+    assert controller.arm_nonclient_regions(fake_window(control)) is True
+    assert len(control.handlers) == 1
 
 
-def test_nonclient_region_support_is_absent_before_corewebview2_exists():
-    class Window:
-        native = type("Native", (), {"browser": None})()
-
-    assert enable_nonclient_region_support(Window()) is False
+def test_nonclient_region_support_is_refused_after_corewebview2_exists():
+    """Ligar com o documento a caminho produziria so um falso positivo."""
+    control = FakeWebView2Control()
+    control.CoreWebView2 = type("Core", (), {"Settings": FakeSettings()})()
 
     controller, _ = attached_controller()
-    controller._window = Window()
-    assert controller.enable_nonclient_regions() is False
+    assert controller.arm_nonclient_regions(fake_window(control)) is False
     assert controller.get_state()["nonclient"] is False
+
+
+def test_nonclient_region_support_is_absent_without_a_webview2_control():
+    window = type("Window", (), {"native": type("Native", (), {"browser": None})()})()
+
+    controller, _ = attached_controller()
+    assert controller.arm_nonclient_regions(window) is False
+    assert controller.get_state()["nonclient"] is False
+
+
+def test_enable_nonclient_region_support_needs_the_corewebview2_settings():
+    assert enable_nonclient_region_support(FakeWebView2Control()) is False
+
+    settings = FakeSettings()
+    control = FakeWebView2Control()
+    control.CoreWebView2 = type("Core", (), {"Settings": settings})()
+    assert enable_nonclient_region_support(control) is True
+    assert settings.IsNonClientRegionSupportEnabled is True
 
 
 def test_minmax_info_is_forwarded_and_raises_the_minimum_by_the_frame():

@@ -1491,3 +1491,38 @@ no ERRORS.md.
 Ferramenta útil: a sonda externa que restaura a janela viva e pergunta o `WM_NCHITTEST` das
 oito direções via `SendMessageW` — é a única forma de provar que o hit-test real funciona,
 já que o teste unitário exercita a função pura, não o caminho de mensagens.
+
+---
+
+## 2026-08-31 — Correção do contrato de arraste (substitui o ponto do `app-region` acima)
+
+A entrada anterior estava certa no mecanismo e errada no momento. Ficou assim:
+
+- **`IsNonClientRegionSupportEnabled` é armada, não ligada.**
+  `WindowChromeController.arm_nonclient_regions(window)` assina
+  `CoreWebView2InitializationCompleted` no `before_show` e liga a propriedade dentro do
+  handler, **antes da primeira navegação**. Ligar depois (no `loaded`) não tem efeito nenhum
+  sobre a página já carregada, apesar de a propriedade ler `True`.
+- **`get_state()["nonclient"]` significa "ativo neste documento".** É escrito só dentro
+  daquele handler. O frontend continua usando o flag para decidir se precisa do fallback
+  `windowBeginDrag` — que segue sendo inútil na prática, então `nonclient: False` hoje quer
+  dizer "sem arraste".
+- **Como provar que o arraste funciona:** `WindowFromPoint` sobre a faixa da barra tem que
+  devolver `Chrome_WidgetWin_0` (a janela auxiliar que o WebView2 cria só quando o recurso
+  está ativo) e o `WM_NCHITTEST` dela tem que ser `2` (HTCAPTION). Se devolver
+  `Chrome_RenderWidgetHostHWND`/`HTCLIENT`, o recurso não pegou. Teste unitário não alcança
+  isso; a sonda com drag sintético (`SetCursorPos` + `mouse_event` + `GetWindowRect`) alcança.
+
+Vem de graça do Windows, sem código nosso: arraste, duplo clique para maximizar/restaurar,
+Aero Snap e menu de sistema com o botão direito.
+
+**Limitação conhecida (não é regressão):** o flyout de Snap Layouts ao pousar o mouse sobre o
+botão maximizar (Windows 11) não aparece. O botão é `no-drag`, então o ponto pertence ao
+`Chrome_RenderWidgetHostHWND` e o `HTMAXBUTTON` que o `hit_test()` do HWND pai devolve
+(medido: `ht_pai=9`) nunca é alcançado. O clique no botão funciona normalmente.
+
+**Defeito conhecido e ainda aberto (anterior a esta correção, veio junto com o recuo do
+`WM_NCCALCSIZE`):** cada ciclo maximizar → restaurar encolhe a janela restaurada em exatamente
+a espessura da moldura (22×22 px físicos a 144 DPI), até parar no mínimo. Medido com o
+código de antes e de depois desta correção, idêntico:
+`1800×1000 → 1778×978 → 1756×956 → 1734×934 → 1712×922`.

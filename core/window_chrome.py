@@ -685,6 +685,7 @@ class WindowChromeController:
         # em tela cheia" e e a unica fonte de verdade desse estado.
         self._fullscreen_placement: Any | None = None
         self._nonclient = False
+        self._nonclient_handler: Any | None = None
         self._min_client_size: tuple[float, float] | None = None
 
     @property
@@ -778,6 +779,7 @@ class WindowChromeController:
         self._regions = None
         self._fullscreen_placement = None
         self._nonclient = False
+        self._nonclient_handler = None
 
     def _restore(self, *, destroying: bool = False) -> None:
         adapter = self._adapter
@@ -817,47 +819,51 @@ class WindowChromeController:
                 self._log.exception("Falha ao desanexar window chrome")
                 return False
 
-    def enable_nonclient_regions(self) -> bool:
-        """Liga o ``app-region`` do WebView2; idempotente e seguro antes do CoreWebView2.
+    def arm_nonclient_regions(self, window: Any) -> bool:
+        """Agenda o ``app-region`` do WebView2 para o primeiro documento.
 
-        O CoreWebView2 so pode ser tocado na thread dona do formulario. O evento
-        ``loaded`` do pywebview chega numa thread de trabalho, e ler a propriedade
-        de la trava esperando a thread de UI. Quando preciso, o trabalho e
-        despachado com ``BeginInvoke`` e o resultado chega de forma assincrona.
+        ``IsNonClientRegionSupportEnabled`` so vale para documentos navegados
+        depois de ela ser ligada: escrever nela com a pagina ja carregada faz a
+        propriedade ler ``True`` sem nenhum efeito. Em ``before_show`` o
+        CoreWebView2 ainda nao existe, entao a ativacao vai para o
+        ``CoreWebView2InitializationCompleted``, que roda na thread de UI antes
+        de o documento ser criado. Chamadas repetidas sao inofensivas.
         """
         with self._lock:
-            if self._nonclient or self._window is None:
-                return self._nonclient
-            native = getattr(self._window, "native", None)
+            if self._nonclient_handler is not None:
+                return True
+            control = _webview_control(window)
+            if control is None or not hasattr(control, "CoreWebView2InitializationCompleted"):
+                self._log.warning(
+                    "Controle WebView2 indisponivel: app-region nao sera ativado."
+                )
+                return False
+            if getattr(control, "CoreWebView2", None) is not None:
+                # Tarde demais: o evento ja passou e o documento sera criado sem
+                # o recurso. Ligar aqui so produziria um falso positivo.
+                self._log.warning(
+                    "CoreWebView2 ja inicializado: app-region nao pode mais valer "
+                    "para este documento."
+                )
+                return False
 
-        if getattr(native, "InvokeRequired", False):
-            try:
-                from System import Action  # type: ignore[import-not-found]
+            def _on_webview_ready(sender: Any, _args: Any) -> None:
+                try:
+                    enabled = enable_nonclient_region_support(sender)
+                except Exception:
+                    self._log.exception("Falha ao ligar app-region no WebView2")
+                    enabled = False
+                with self._lock:
+                    self._nonclient = enabled
+                self._log.info(
+                    "Regiao nao-cliente do WebView2 (app-region): %s",
+                    "ativa" if enabled else "indisponivel",
+                )
 
-                native.BeginInvoke(Action(self._apply_nonclient_regions))
-            except Exception as exc:
-                self._log.warning("Nao foi possivel despachar app-region para a UI: %s", exc)
-            return False
-
-        return self._apply_nonclient_regions()
-
-    def _apply_nonclient_regions(self) -> bool:
-        """Executa na thread dona do formulario."""
-        with self._lock:
-            if self._nonclient or self._window is None:
-                return self._nonclient
-            try:
-                self._nonclient = enable_nonclient_region_support(self._window)
-            except Exception as exc:
-                self._log.warning("Nao foi possivel ligar app-region no WebView2: %s", exc)
-                self._nonclient = False
-            if self._nonclient:
-                self._log.info("Regiao nao-cliente do WebView2 (app-region): ativa")
-            else:
-                # Antes do ``loaded`` o CoreWebView2 ainda nao existe; so o
-                # chamador sabe se esta era a ultima tentativa.
-                self._log.debug("Regiao nao-cliente do WebView2 ainda indisponivel")
-            return self._nonclient
+            # A referencia precisa sobreviver: o delegate .NET aponta para ela.
+            self._nonclient_handler = _on_webview_ready
+            control.CoreWebView2InitializationCompleted += _on_webview_ready
+            return True
 
     def minimize(self) -> bool:
         return self._run_window_action("minimize", lambda adapter, hwnd: adapter.show_window(hwnd, SW_MINIMIZE))
@@ -1221,7 +1227,14 @@ def validate_regions(
     )
 
 
-def enable_nonclient_region_support(window: Any) -> bool:
+def _webview_control(window: Any) -> Any:
+    """Controle WinForms do WebView2 dentro da janela do pywebview."""
+    native = getattr(window, "native", None)
+    browser = getattr(native, "browser", None)
+    return getattr(browser, "webview", None)
+
+
+def enable_nonclient_region_support(control: Any) -> bool:
     """Faz o WebView2 honrar ``app-region: drag`` na barra de titulo.
 
     Sem isso o arraste depende de converter um ``pointerdown`` HTML numa mensagem
@@ -1230,13 +1243,11 @@ def enable_nonclient_region_support(window: Any) -> bool:
     Com a opcao ligada e o proprio navegador que classifica a regiao e entrega o
     arraste, o duplo clique e o Aero Snap ao Windows — sem intermediarios.
 
-    Requer WebView2 SDK 1.0.2210+ (o empacotado pelo pywebview e bem mais novo).
-    Retorna ``False`` quando a propriedade nao existe ou o CoreWebView2 ainda nao
-    foi criado; nesse caso o chamador deve tentar de novo apos o ``loaded``.
+    ``control`` e o controle WebView2 (o ``sender`` de
+    ``CoreWebView2InitializationCompleted``). Requer WebView2 SDK 1.0.2210+ e
+    precisa ser chamada antes da navegacao do documento — ver
+    ``WindowChromeController.arm_nonclient_regions``.
     """
-    native = getattr(window, "native", None)
-    browser = getattr(native, "browser", None)
-    control = getattr(browser, "webview", None)
     core = getattr(control, "CoreWebView2", None)
     settings = getattr(core, "Settings", None)
     if settings is None or not hasattr(settings, "IsNonClientRegionSupportEnabled"):
