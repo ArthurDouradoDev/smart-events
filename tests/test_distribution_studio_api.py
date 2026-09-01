@@ -1,4 +1,9 @@
-"""Fase 2 — serviço e endpoints de distribuição.
+"""Fase 2 — serviço e endpoints do Distribution Studio.
+
+A geração de distribuições é uma **ferramenta de repositório**, não um recurso do
+produto: ela vive em `tools/distribution_studio.py`, num processo e numa porta
+próprios. O `server.py` da Central não conhece nada disto — o último teste deste
+arquivo trava exatamente isso.
 
 Os testes chamam as funções dos endpoints diretamente (sem subir HTTP): o projeto
 não tem `httpx` instalado e o TestClient do FastAPI depende dele. Todo estado vive
@@ -15,6 +20,7 @@ import pytest
 import server
 from core import distribution_service as ds
 from core import event_package as ep
+from tools import distribution_studio as studio
 
 
 # ── Construtores de dados ────────────────────────────────────────────
@@ -98,21 +104,49 @@ def service(tmp_path, source):
 
 @pytest.fixture
 def api(monkeypatch, service):
-    """Endpoints do server.py apontados para o serviço temporário."""
-    monkeypatch.setattr(server, "DISTRIBUTION_SERVICE", service)
+    """Endpoints do estúdio apontados para o serviço temporário."""
+    monkeypatch.setattr(studio, "DISTRIBUTION_SERVICE", service)
     return service
 
 
 def _http_error(call, *args, **kwargs):
-    with pytest.raises(server.HTTPException) as excinfo:
+    with pytest.raises(studio.HTTPException) as excinfo:
         call(*args, **kwargs)
     return excinfo.value
+
+
+# ── Lista de eventos ─────────────────────────────────────────────────
+
+def test_event_list_summarizes_without_shipping_the_whole_event(api, source):
+    rows = studio.get_studio_events()
+
+    assert [row["id"] for row in rows] == ["barretos-2026", "rock-2026"]
+    barretos = rows[0]
+    assert barretos["name"] == "Barretos 2026"
+    assert barretos["client"] == "Vivo"
+    assert barretos["region"] == "SP"
+    assert barretos["sites"] == 1
+    assert barretos["cells"] == 2
+    # A tela desenha uma caixa de seleção: polígono, células e tasks nao precisam
+    # atravessar a rede para isso.
+    assert set(barretos) == {
+        "id", "name", "status", "start_time", "end_time",
+        "client", "region", "sites", "cells",
+    }
+
+
+def test_event_list_skips_unreadable_files_instead_of_failing(api, source):
+    (source / "events" / "quebrado.json").write_text("{ nao e json", encoding="utf-8")
+
+    assert [row["id"] for row in studio.get_studio_events()] == [
+        "barretos-2026", "rock-2026",
+    ]
 
 
 # ── Capacidades ──────────────────────────────────────────────────────
 
 def test_capabilities_lists_event_package_only_in_phase2(api):
-    capabilities = server.get_distribution_capabilities()
+    capabilities = studio.get_distribution_capabilities()
 
     assert capabilities["formats"] == ["event_package"]
     formats = {item["id"]: item for item in capabilities["available_formats"]}
@@ -126,7 +160,7 @@ def test_capabilities_lists_event_package_only_in_phase2(api):
 # ── Revisão ──────────────────────────────────────────────────────────
 
 def test_preview_returns_dependencies_counts_warnings_and_errors(api):
-    preview = server.post_distribution_preview(
+    preview = studio.post_distribution_preview(
         {"event_ids": ["barretos-2026", "rock-2026"], "name": "Dois clientes"}
     )
 
@@ -169,7 +203,7 @@ def test_preview_reports_blocking_errors_without_creating_anything(api, source, 
     # Evento sem cliente cadastrado: erro bloqueante, e nenhum artefato criado.
     _write_json(source / "events" / "orfao.json", _event("orfao", "Órfão", "Claro"))
 
-    preview = server.post_distribution_preview({"event_ids": ["orfao"]})
+    preview = studio.post_distribution_preview({"event_ids": ["orfao"]})
 
     assert preview["ok"] is False
     assert "reference.client_missing" in [item["code"] for item in preview["errors"]]
@@ -177,7 +211,7 @@ def test_preview_reports_blocking_errors_without_creating_anything(api, source, 
 
 
 def test_preview_rejects_unknown_event_id(api):
-    error = _http_error(server.post_distribution_preview, {"event_ids": ["nao-existe"]})
+    error = _http_error(studio.post_distribution_preview, {"event_ids": ["nao-existe"]})
 
     assert error.status_code == 400
     assert error.detail["code"] == "event.unknown"
@@ -185,12 +219,12 @@ def test_preview_rejects_unknown_event_id(api):
 
 
 def test_preview_rejects_unknown_vip_policy_and_empty_selection(api):
-    empty = _http_error(server.post_distribution_preview, {"event_ids": []})
+    empty = _http_error(studio.post_distribution_preview, {"event_ids": []})
     assert empty.status_code == 400
     assert empty.detail["code"] == "selection.empty"
 
     policy = _http_error(
-        server.post_distribution_preview,
+        studio.post_distribution_preview,
         {"event_ids": ["barretos-2026"], "vip_policy": "todos"},
     )
     assert policy.status_code == 400
@@ -203,7 +237,7 @@ def test_selection_larger_than_the_limit_is_rejected(api, service, source):
         _write_json(source / "events" / f"{event_id}.json", _event(event_id, event_id, "Vivo"))
 
     ids = sorted(service.known_event_ids())
-    error = _http_error(server.post_distribution_preview, {"event_ids": ids})
+    error = _http_error(studio.post_distribution_preview, {"event_ids": ids})
 
     assert error.status_code == 400
     assert error.detail["code"] == "selection.too_large"
@@ -219,12 +253,12 @@ def test_create_job_uses_only_server_selected_paths(api, service, tmp_path):
         "iss": "installer/SmartEvents.iss",
     }
 
-    error = _http_error(server.post_distribution, hostile)
+    error = _http_error(studio.post_distribution, hostile)
     assert error.status_code == 400
     assert "source" in error.detail and "output" in error.detail
 
     # O caminho aceito é sempre o do próprio servidor.
-    record = server.post_distribution({"event_ids": ["barretos-2026"]})
+    record = studio.post_distribution({"event_ids": ["barretos-2026"]})
     job = service.wait_for(record["job_id"])
     artifact, _entry = service.artifact(job["job_id"], "package")
     assert artifact.parent == service.root / job["job_id"]
@@ -233,7 +267,7 @@ def test_create_job_uses_only_server_selected_paths(api, service, tmp_path):
 
 def test_create_job_rejects_the_setup_format_until_phase3(api):
     error = _http_error(
-        server.post_distribution, {"event_ids": ["barretos-2026"], "format": "full_setup"}
+        studio.post_distribution, {"event_ids": ["barretos-2026"], "format": "full_setup"}
     )
 
     assert error.status_code == 400
@@ -242,13 +276,13 @@ def test_create_job_rejects_the_setup_format_until_phase3(api):
 
 
 def test_job_transitions_to_ready_and_downloads_registered_file(api, service):
-    record = server.post_distribution(
+    record = studio.post_distribution(
         {"event_ids": ["barretos-2026", "rock-2026"], "name": "Dois clientes"}
     )
     assert record["state"] == "queued"
 
     service.wait_for(record["job_id"])
-    job = server.get_distribution(record["job_id"])
+    job = studio.get_distribution(record["job_id"])
 
     assert job["state"] == "ready"
     assert [step["state"] for step in job["steps"]] == [
@@ -262,12 +296,12 @@ def test_job_transitions_to_ready_and_downloads_registered_file(api, service):
     assert package["bytes"] > 0
     assert len(package["sha256"]) == 64
 
-    response = server.download_distribution(record["job_id"])
+    response = studio.download_distribution(record["job_id"])
     assert Path(response.path).name == package["name"]
     assert response.filename == package["name"]
     assert ep.sha256_of(response.path) == package["sha256"]
 
-    manifest_response = server.download_distribution_manifest(record["job_id"])
+    manifest_response = studio.download_distribution_manifest(record["job_id"])
     assert json.loads(Path(manifest_response.path).read_text(encoding="utf-8")) == job["manifest"]
 
     # O pacote baixado é um .sepack válido e importável.
@@ -283,9 +317,9 @@ def test_failed_job_keeps_redacted_diagnostic(api, service, monkeypatch):
         raise OSError(f"disco cheio ao gravar {leaked} (token=abc123)")
 
     monkeypatch.setattr(ds.ep, "build_package", _boom)
-    record = server.post_distribution({"event_ids": ["barretos-2026"]})
+    record = studio.post_distribution({"event_ids": ["barretos-2026"]})
     service.wait_for(record["job_id"])
-    job = server.get_distribution(record["job_id"])
+    job = studio.get_distribution(record["job_id"])
 
     assert job["state"] == "failed"
     assert job["failed_step"] == "packaging"
@@ -302,13 +336,13 @@ def test_failed_job_keeps_redacted_diagnostic(api, service, monkeypatch):
 
 def test_failed_job_can_be_retried_after_the_cause_is_gone(api, service, source):
     _write_json(source / "events" / "orfao.json", _event("orfao", "Órfão", "Claro"))
-    failed = service.wait_for(server.post_distribution({"event_ids": ["orfao"]})["job_id"])
+    failed = service.wait_for(studio.post_distribution({"event_ids": ["orfao"]})["job_id"])
     assert failed["state"] == "failed"
     assert failed["failed_step"] == "validating"
     assert "reference.client_missing" in [item["code"] for item in failed["errors"]]
 
     _write_json(source / "clientes" / "claro.json", _client("claro", "Claro"))
-    retried = service.wait_for(server.post_distribution({"event_ids": ["orfao"]})["job_id"])
+    retried = service.wait_for(studio.post_distribution({"event_ids": ["orfao"]})["job_id"])
 
     assert retried["state"] == "ready"
     assert retried["job_id"] != failed["job_id"]
@@ -317,13 +351,13 @@ def test_failed_job_can_be_retried_after_the_cause_is_gone(api, service, source)
 # ── Download ─────────────────────────────────────────────────────────
 
 def test_download_rejects_unready_or_unknown_job(api, service, monkeypatch):
-    unknown = _http_error(server.download_distribution, "0" * 32)
+    unknown = _http_error(studio.download_distribution, "0" * 32)
     assert unknown.status_code == 404
     assert unknown.detail["code"] == "job.unknown"
 
     # Um job_id fora do formato nunca chega a compor um caminho.
     for hostile in ("../../server_data", "..", "a" * 31, "nao-e-hex" + "0" * 23):
-        invalid = _http_error(server.download_distribution, hostile)
+        invalid = _http_error(studio.download_distribution, hostile)
         assert invalid.status_code == 400
         assert invalid.detail["code"] == "job.invalid_id"
 
@@ -331,17 +365,17 @@ def test_download_rejects_unready_or_unknown_job(api, service, monkeypatch):
     blocked = ds.DistributionService(root=service.root, source_dir=service.source_dir)
     monkeypatch.setattr(blocked, "_run_job", lambda _job_id: None)
     queued = blocked.create_job(["barretos-2026"], background=False)
-    not_ready = _http_error(server.download_distribution, queued["job_id"])
+    not_ready = _http_error(studio.download_distribution, queued["job_id"])
     assert not_ready.status_code == 409
     assert not_ready.detail["code"] == "job.not_ready"
 
 
 def test_download_rejects_artifact_removed_from_disk(api, service):
-    job = service.wait_for(server.post_distribution({"event_ids": ["barretos-2026"]})["job_id"])
+    job = service.wait_for(studio.post_distribution({"event_ids": ["barretos-2026"]})["job_id"])
     artifact, _entry = service.artifact(job["job_id"], "package")
     artifact.unlink()
 
-    missing = _http_error(server.download_distribution, job["job_id"])
+    missing = _http_error(studio.download_distribution, job["job_id"])
     assert missing.status_code == 410
     assert missing.detail["code"] == "artifact.missing"
 
@@ -372,7 +406,7 @@ def test_concurrent_writers_are_serialized(api, service, monkeypatch):
     monkeypatch.setattr(ds.ep, "build_package", _counted_build)
 
     def _create(event_id):
-        record = server.post_distribution({"event_ids": [event_id], "name": event_id})
+        record = studio.post_distribution({"event_ids": [event_id], "name": event_id})
         with lock:
             records.append(record)
 
@@ -420,7 +454,7 @@ def test_job_never_stays_stuck_when_its_record_cannot_be_read(api, service, monk
 
     monkeypatch.setattr(ds.DistributionService, "_load", _flaky)
     job = service.wait_for(
-        server.post_distribution({"event_ids": ["rock-2026"]})["job_id"], timeout=10
+        studio.post_distribution({"event_ids": ["rock-2026"]})["job_id"], timeout=10
     )
 
     assert job["state"] == "failed"
@@ -429,7 +463,7 @@ def test_job_never_stays_stuck_when_its_record_cannot_be_read(api, service, monk
 
 
 def test_restart_recovers_completed_job_metadata(api, service, tmp_path, source):
-    job = service.wait_for(server.post_distribution({"event_ids": ["rock-2026"]})["job_id"])
+    job = service.wait_for(studio.post_distribution({"event_ids": ["rock-2026"]})["job_id"])
 
     # Uma instância nova (página recarregada, servidor reiniciado) lê o mesmo estado.
     restarted = ds.DistributionService(root=tmp_path / "distributions", source_dir=source)
@@ -444,7 +478,7 @@ def test_restart_recovers_completed_job_metadata(api, service, tmp_path, source)
 
 
 def test_cleanup_removes_stale_incomplete_jobs_and_never_a_ready_one(api, service, monkeypatch):
-    ready = service.wait_for(server.post_distribution({"event_ids": ["rock-2026"]})["job_id"])
+    ready = service.wait_for(studio.post_distribution({"event_ids": ["rock-2026"]})["job_id"])
 
     stale = ds.DistributionService(root=service.root, source_dir=service.source_dir)
     monkeypatch.setattr(stale, "_run_job", lambda _job_id: None)
@@ -466,4 +500,67 @@ def test_redact_removes_operator_paths_and_secret_values():
     assert ds.redact("SMARTEVENTS_TOKEN=abc-123 recusado") == "SMARTEVENTS_TOKEN=<oculto> recusado"
     assert ds.redact("senha: hunter2") == "senha=<oculto>"
     # Rota de API não é caminho de usuário e continua legível.
-    assert ds.redact("erro em /api/distributions/preview") == "erro em /api/distributions/preview"
+    assert (
+        ds.redact("erro em /distribution-studio/api/preview")
+        == "erro em /distribution-studio/api/preview"
+    )
+
+
+# ── A Central nao gera distribuicao ──────────────────────────────────
+
+def test_central_server_exposes_no_distribution_endpoint():
+    """O `server.py` voltou ao que era antes da Fase 2.
+
+    A Central é o que o usuário final recebe; gerar artefato é operação de quem
+    distribui. Nenhum endpoint, serviço ou import de distribuição pode sobreviver
+    aqui — se sobrevivesse, entraria no bundle junto com `server` (que é
+    `hiddenimport` do `main.spec`).
+    """
+    for name in (
+        "DISTRIBUTION_SERVICE", "DistributionService", "DistributionError",
+        "get_distribution_capabilities", "post_distribution_preview",
+        "post_distribution", "get_distribution",
+        "download_distribution", "download_distribution_manifest",
+    ):
+        assert not hasattr(server, name), f"server.py ainda expõe {name}"
+
+    paths = {getattr(route, "path", "") for route in server.app.routes}
+    assert [path for path in paths if "distribution" in path] == []
+
+    source = Path(server.__file__).read_text(encoding="utf-8")
+    assert "distribution" not in source.lower()
+    assert "sepack" not in source.lower()
+
+
+def test_central_frontend_has_no_selection_or_generation_ui():
+    html = (Path(__file__).parents[1] / "server_frontend" / "index.html").read_text(
+        encoding="utf-8"
+    )
+
+    for marker in (
+        "distribution", "sepack", "event-select", "Gerar distribuição",
+        "Selecionar todos visíveis",
+    ):
+        assert marker.lower() not in html.lower(), f"a Central ainda tem {marker!r}"
+
+
+def test_studio_never_enters_the_distributed_executable():
+    """O estúdio fica no repositório; o `.exe` leva só o resultado dele."""
+    spec = (Path(__file__).parents[1] / "main.spec").read_text(encoding="utf-8")
+
+    assert "distribution_studio" not in spec
+    assert "distribution_service" not in spec
+    # `tools/` não é empacotado como dado nem como pacote.
+    assert "'tools'" not in spec and '"tools"' not in spec
+    # O importador de pacote continua embarcado: quem recebe o .sepack precisa dele.
+    assert "core.event_package" in spec
+
+
+def test_studio_serves_nothing_outside_its_own_prefix():
+    """Sem o link não há tela: `/` não existe no app do estúdio."""
+    paths = {getattr(route, "path", "") for route in studio.app.routes}
+
+    assert studio.STUDIO_PATH in paths
+    assert "/" not in paths
+    for path in paths:
+        assert path.startswith(studio.STUDIO_PATH), f"rota fora do prefixo: {path}"

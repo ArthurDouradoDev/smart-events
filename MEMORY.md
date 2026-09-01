@@ -1784,3 +1784,65 @@ window chrome rejeitadas ... cliente_logico=143.33x11.33" quando a janela é con
 instante em que o Win32 devolve um cliente minúsculo (janela minimizada/em transição). A
 entrada mais antiga é de 2026-08-31 09:12, antes desta fase; é um aviso benigno (as regiões
 são reenviadas no resize seguinte), mas vale investigar em tarefa própria.
+
+---
+
+## 2026-09-01 — Fase 2 refeita: geração sai da Central e vira Distribution Studio
+
+**Decisão:** o SmartEvents distribuído ao usuário final **não gera distribuições**. Selecionar
+eventos, revisar dependências e produzir `.sepack` (e, na Fase 3, `Setup.exe`) é operação de quem
+distribui, e passa a viver numa ferramenta interna do repositório: o **Distribution Studio**
+(`tools/distribution_studio.py` + `tools/distribution_studio.html`). Registrada como **decisão 8**
+do plano `docs/plans/2026-08-31-001-feat-distribuicao-automatizada-eventos-plan.md`.
+
+**Razão:** a primeira execução da Fase 2 colocou a seleção múltipla e o modal de geração dentro do
+Smart Events Central. Isso confunde os dois papéis: a Central é o produto entregue, e o que será
+distribuído são os **resultados** deste plano (o `.sepack` e o instalador), não a ferramenta que os
+produz. Manter a geração no `server.py` também a arrastaria para dentro do `.exe`, porque `server` é
+`hiddenimport` do `main.spec`.
+
+**O que foi revertido (estado idêntico ao commit `f3534ea`):**
+
+- `server.py`: nenhum endpoint `/api/distributions/*`, nenhum import de `core.distribution_service`;
+- `server_frontend/index.html`: sem checkbox por card, sem barra de seleção, sem modal de revisão.
+
+**O que existe agora:**
+
+- `tools/distribution_studio.py` — app FastAPI própria, `python -m tools.distribution_studio`
+  (porta padrão 8010). Prefixo `/distribution-studio`; **não existe rota em `/`**, então sem o link
+  não há tela. Bind fixo em `127.0.0.1` e nenhum CORS (a Central serve a rede local; o estúdio não).
+- `tools/distribution_studio.html` — página única, CSS/JS inline, fora de `frontend/` e
+  `server_frontend/` (as duas pastas entram no bundle). `robots: noindex` e aviso permanente de que
+  a tela é interna.
+- Endpoints: `GET /distribution-studio`, e sob `.../api/`: `events`, `capabilities`, `preview`,
+  `jobs`, `jobs/{id}`, `jobs/{id}/download`, `jobs/{id}/manifest`.
+- `GET .../api/events` é novo: devolve só o resumo que a lista desenha (id, nome, status, datas,
+  cliente, regional, contagem de sites/células). O evento inteiro não precisa atravessar a rede
+  para alguém marcar uma caixa.
+- O estúdio é **somente-leitura** sobre `server_data`: nenhum POST/PUT/DELETE de cadastro.
+
+**Fatos que sustentam o isolamento (e os testes que os travam):**
+
+- `core/distribution_service.py` não é importado por `server.py` nem citado no `main.spec` — logo,
+  não entra no bundle do PyInstaller (`test_studio_never_enters_the_distributed_executable`);
+- `core/event_package.py` **continua** `hiddenimport`: quem recebe o `.sepack` precisa importá-lo;
+- `test_central_server_exposes_no_distribution_endpoint` e
+  `test_central_frontend_has_no_selection_or_generation_ui` reprovam se a geração voltar à Central;
+- `test_studio_serves_nothing_outside_its_own_prefix` reprova se qualquer rota escapar do prefixo.
+
+**Renomeações:** `tests/test_distribution_api.py` → `tests/test_distribution_studio_api.py`;
+`tests/test_server_frontend_distribution_ui.py` → `tests/test_distribution_studio_ui.py`.
+
+**Esconder a tela não é o controle de segurança.** As decisões 2 e 6 (nenhum segredo no pacote;
+endpoints aceitam apenas IDs e opções enumeradas, nunca caminho ou comando) continuam valendo
+dentro do estúdio, e são elas que os testes travam. O prefixo obscuro só evita que a geração vire
+um botão a um clique de quem não distribui.
+
+**Validação executada:** suíte completa (726 passed, 10 skipped); estúdio real subido em
+`127.0.0.1:8017` contra o `server_data` do repositório — `/` respondeu 404, `/distribution-studio`
+respondeu 200, `/api/distributions/capabilities` (rota antiga) respondeu 404; preview de dois
+eventos de clientes diferentes (Vivo + TIM) com contagens corretas e sem `source_dir` no corpo;
+job real percorreu `queued → validating → packaging → ready` e produziu um `.sepack` de 4578 B,
+validado por `python -m tools.event_package inspect` ("Situacao: valido"); Central subida em
+`127.0.0.1:8018` respondeu 200 em `/` e em `/api/events`, e 404 tanto em
+`/api/distributions/capabilities` quanto em `/distribution-studio`.

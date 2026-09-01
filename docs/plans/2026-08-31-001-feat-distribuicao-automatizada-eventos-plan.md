@@ -2,9 +2,10 @@
 
 **Data:** 2026-08-31  
 **Tipo:** feature  
-**Objetivo:** permitir selecionar um ou mais eventos no Smart Events Central e gerar, sem montagem
-manual, um pacote de eventos compacto ou um instalador Inno Setup completo contendo todas as
-configurações necessárias para esses eventos.
+**Objetivo:** permitir selecionar um ou mais eventos e gerar, sem montagem manual, um pacote de
+eventos compacto ou um instalador Inno Setup completo contendo todas as configurações necessárias
+para esses eventos. A geração é uma operação de **quem distribui** e fica numa ferramenta interna
+do repositório (decisão 8); o aplicativo entregue ao usuário final apenas **importa** o resultado.
 
 ---
 
@@ -55,7 +56,7 @@ A divisão em fases é necessária por dependência técnica, não apenas por ta
 ```text
 Fase 1 — contrato .sepack, validação e importação segura
    |
-   +--> Fase 2 — seleção múltipla e geração pela interface
+   +--> Fase 2 — seleção múltipla e geração pela interface interna (estúdio)
            |
            +--> Fase 3 — build-base e Setup.exe completo sem novo PyInstaller
                    |
@@ -63,6 +64,7 @@ Fase 1 — contrato .sepack, validação e importação segura
 ```
 
 - A interface não pode oferecer a geração antes de existir um formato estável e importável.
+- A geração nunca entra na interface do produto: ela vive no estúdio interno (decisão 8).
 - O instalador completo só pode reutilizar o programa depois que houver um build-base sem evento
   embutido.
 - Assinatura e homologação dependem do formato e do pipeline já estabilizados.
@@ -179,7 +181,7 @@ Resultado esperado:
 
 ### 6. Geração restrita e sem comandos arbitrários
 
-Os endpoints da Central recebem IDs de eventos e opções enumeradas. Eles não recebem comandos de
+Os endpoints de geração (do estúdio da decisão 8) recebem IDs de eventos e opções enumeradas. Eles não recebem comandos de
 shell, caminho de saída livre, caminho de `.iss` ou argumentos de PyInstaller/Inno Setup. Toda
 saída fica dentro de um diretório controlado pelo aplicativo.
 
@@ -194,6 +196,34 @@ seleção de eventos nunca deve dispará-lo. O manifesto do build-base é a chav
 - hashes do executável, bundle e dependências;
 - revisão dos navegadores Playwright;
 - versão do schema `.sepack` suportada.
+
+### 8. A geração fica no repositório; o produto só recebe o resultado
+
+O SmartEvents distribuído ao usuário final **não gera distribuições**. Selecionar eventos, revisar
+dependências e produzir `.sepack`/`Setup.exe` é operação de quem distribui, e vive numa ferramenta
+separada do repositório — o **Distribution Studio** (`tools/distribution_studio.py` +
+`tools/distribution_studio.html`).
+
+O que é distribuído são os **resultados** deste plano; não a ferramenta que os produz.
+
+Consequências que valem para as Fases 2, 3 e 4:
+
+- o `server.py` da Central não expõe nenhum endpoint de distribuição e o
+  `server_frontend/index.html` não tem seleção múltipla, botão de gerar nem link para o estúdio: a
+  interface do produto é exatamente a que era antes desta feature;
+- o estúdio roda em outro processo e em outra porta (`python -m tools.distribution_studio`), sob o
+  prefixo `/distribution-studio`. Não existe rota em `/`: sem o link, não há tela;
+- ele escuta apenas em `127.0.0.1` e não habilita CORS. A Central serve a rede local; o estúdio não
+  sai da máquina de quem gera;
+- nem `server.py` nem `main.spec` importam `core/distribution_service.py`, então o serviço de
+  geração **não entra no bundle do PyInstaller**. O importador (`core/event_package.py`) continua
+  embarcado — quem recebe o `.sepack` precisa dele;
+- o estúdio lê o mesmo `server_data` da Central (`core.paths.server_data_dir()`) e é somente-leitura
+  sobre ele: cadastrar, editar e excluir evento continua sendo função exclusiva da Central.
+
+Esconder a tela não é o controle de segurança: as regras das decisões 2 e 6 (nada de segredo no
+pacote, nenhum caminho ou comando vindo do navegador) continuam valendo integralmente dentro do
+estúdio, e são elas que os testes travam.
 
 ---
 
@@ -470,12 +500,32 @@ Critérios:
 
 ---
 
-# Fase 2 — Seleção múltipla e geração no Smart Events Central
+# Fase 2 — Seleção múltipla e geração no Distribution Studio
+
+## Correção de rota (2026-09-01)
+
+A primeira execução desta fase colocou a seleção múltipla e o fluxo de geração **dentro do Smart
+Events Central**. Isso estava errado: a Central é o produto que o usuário final recebe, e gerar
+artefato é operação de quem distribui. A fase foi refeita conforme a decisão 8.
+
+O que mudou em relação à versão anterior deste plano:
+
+- `server.py` e `server_frontend/index.html` voltaram exatamente ao estado anterior à fase — sem
+  endpoints, sem checkbox, sem barra de seleção, sem modal e sem link;
+- o mesmo fluxo (seleção → revisão → job → download) passou para o Distribution Studio, uma
+  ferramenta interna servida em outro processo, sob `/distribution-studio`;
+- `tests/test_distribution_api.py` virou `tests/test_distribution_studio_api.py` e
+  `tests/test_server_frontend_distribution_ui.py` virou `tests/test_distribution_studio_ui.py`,
+  com testes novos que travam a limpeza da Central e a ausência do estúdio no bundle.
+
+A Fase 1 não foi afetada: o formato, o gerador, o validador e o importador continuam no `core/`, e
+a importação por linha de comando continua sendo função do executável distribuído.
 
 ## Explicação simples
 
-Esta fase transforma os comandos da Fase 1 em um fluxo visual. O operador seleciona eventos na
-lista, revisa dependências e avisos, escolhe “Pacote de eventos” e baixa o `.sepack` pronto.
+Esta fase transforma os comandos da Fase 1 em um fluxo visual **para quem distribui**. Quem gera
+abre `http://127.0.0.1:8010/distribution-studio`, seleciona eventos na lista, revisa dependências e
+avisos, escolhe “Pacote de eventos” e baixa o `.sepack` pronto.
 
 O backend expõe operações específicas de distribuição e executa o trabalho em segundo plano para
 que a página não trave. A mesma infraestrutura de job será reutilizada pelo instalador completo na
@@ -496,38 +546,60 @@ Fase 3.
 - Limpar jobs incompletos antigos por política configurável, sem apagar jobs `ready` automaticamente.
 - Redigir logs antes de expô-los para a UI: nenhum segredo, variável de ambiente completa ou
   caminho de usuário desnecessário.
+- Não pode ser importado por `server.py` nem declarado em `main.spec`: é o import que arrastaria a
+  geração para dentro do executável distribuído.
 
-**`server.py`**
+**Novo `tools/distribution_studio.py`**
 
-Adicionar endpoints locais:
+Aplicação FastAPI própria, com o seu próprio `uvicorn`:
+
+```powershell
+python -m tools.distribution_studio            # http://127.0.0.1:8010/distribution-studio
+python -m tools.distribution_studio --port 8020
+```
+
+Endpoints, todos sob o prefixo da ferramenta:
 
 ```text
-GET  /api/distributions/capabilities
-POST /api/distributions/preview
-POST /api/distributions
-GET  /api/distributions/{job_id}
-GET  /api/distributions/{job_id}/download
-GET  /api/distributions/{job_id}/manifest
+GET  /distribution-studio
+GET  /distribution-studio/api/events
+GET  /distribution-studio/api/capabilities
+POST /distribution-studio/api/preview
+POST /distribution-studio/api/jobs
+GET  /distribution-studio/api/jobs/{job_id}
+GET  /distribution-studio/api/jobs/{job_id}/download
+GET  /distribution-studio/api/jobs/{job_id}/manifest
 ```
 
 Regras:
 
+- não existe rota em `/`, e nenhuma rota fora do prefixo: sem o link não há tela;
+- bind fixo em `127.0.0.1` e nenhum middleware de CORS;
 - aceitar somente IDs existentes e opções enumeradas;
 - validar quantidade máxima de eventos;
-- não aceitar caminho de origem/saída vindo do navegador;
+- não aceitar caminho de origem/saída vindo do navegador — um campo `source`/`output`/`iss` extra no
+  corpo é recusado com 400;
 - validar `job_id` antes de compor qualquer caminho;
 - usar `FileResponse` apenas para arquivo registrado no manifesto do job;
 - bloquear download enquanto o job não estiver `ready`;
 - nesta fase, `capabilities.formats` retorna apenas `event_package`;
-- chamadas continuam limitadas ao servidor local; não ampliar CORS ou bind para rede.
+- `GET .../api/events` devolve só o resumo que a lista desenha (id, nome, status, datas, cliente,
+  regional, contagem de sites e células) — o evento inteiro não precisa atravessar a rede para o
+  operador marcar uma caixa;
+- a origem é sempre `core.paths.server_data_dir()`, a mesma pasta lida pela Central, e o estúdio
+  nunca grava nela: não há POST/PUT/DELETE de cadastro.
 
-**`server_frontend/index.html`**
+**Novo `tools/distribution_studio.html`**
 
-- Acrescentar checkbox acessível a cada card de evento.
-- Acrescentar “Selecionar todos visíveis”, contador de selecionados e botão
-  **“Gerar distribuição”**.
-- Manter ações Editar/Excluir independentes do clique de seleção.
-- Criar modal de revisão com:
+Página única e autocontida (CSS e JS inline, sem dependência externa), fora de `frontend/` e de
+`server_frontend/` — as duas pastas entram no bundle do PyInstaller.
+
+- `<meta name="robots" content="noindex, nofollow">` e um aviso permanente de que a tela é interna e
+  não é distribuída com o aplicativo.
+- Lista de eventos somente-leitura, com checkbox acessível por card.
+- “Selecionar todos visíveis”, contador de selecionados e botão **“Gerar distribuição”**.
+- Nenhuma ação de editar/excluir: o estúdio não altera `server_data`.
+- Modal de revisão com:
   - nome da distribuição e nome de arquivo sugerido;
   - eventos, clientes e regionais;
   - sites, células, clusters e tasks PM por evento;
@@ -542,26 +614,36 @@ Regras:
 - Mostrar progresso por etapa usando polling com backoff.
 - Em sucesso, mostrar tamanho, SHA-256, data e botões Baixar pacote/Baixar manifesto.
 - Em falha, mostrar resumo, etapa que falhou e um bloco de diagnóstico copiável.
-- Seleção deve sobreviver à re-renderização da lista, mas ser limpa ao trocar de aba ou concluir
-  o download, conforme decisão de UX documentada no código.
+- Seleção deve sobreviver à re-renderização da lista e ser limpa ao concluir o download, conforme
+  decisão de UX documentada no código.
+- Toda requisição sai pela constante `STUDIO_API`; nenhuma URL é montada à mão.
+
+**`server.py` e `server_frontend/index.html`**
+
+Nada a fazer além de **não** ter nada: os dois permanecem no estado anterior a esta fase. Os testes
+travam isso explicitamente, porque `server` é `hiddenimport` do `main.spec` e qualquer endpoint
+adicionado aqui viajaria dentro do executável.
 
 ### Interface
 
-Fluxo esperado:
+Fluxo esperado, na tela do estúdio:
 
 ```text
-[x] Evento A       [Editar] [Excluir]
-[x] Evento B       [Editar] [Excluir]
-[ ] Evento C       [Editar] [Excluir]
+Distribution Studio                          SmartEvents 1.0.0
+Ferramenta interna — não distribuída com o aplicativo
 
-2 eventos selecionados                     [Gerar distribuição]
+[x] Selecionar todos visíveis   2 eventos selecionados  [Gerar distribuição]
+
+[x] Evento A   Vivo · SP · 14 sites · 240 células      Ativo
+[x] Evento B   TIM · RJ · 5 sites · 33 células         Ativo
+[ ] Evento C   TIM · SP · 5 sites · 33 células         Agendado
 
                 ┌ Revisar distribuição ────────────────┐
-                │ 2 eventos · 2 clientes · 4 VIPs     │
-                │ ⚠ 2 VIPs vieram do fallback legado  │
+                │ 2 eventos · 2 clientes · 4 VIPs      │
+                │ ⚠ 2 VIPs vieram do fallback legado   │
                 │ Formato: Pacote .sepack              │
                 │ [Cancelar]                  [Gerar]  │
-                └───────────────────────────────────────┘
+                └──────────────────────────────────────┘
 ```
 
 Estados visuais obrigatórios:
@@ -576,10 +658,12 @@ Estados visuais obrigatórios:
 
 ### Testes
 
-**Novo `tests/test_distribution_api.py`**
+**Novo `tests/test_distribution_studio_api.py`**
 
 | teste | comportamento travado |
 |---|---|
+| `test_event_list_summarizes_without_shipping_the_whole_event` | a lista expõe só o que desenha |
+| `test_event_list_skips_unreadable_files_instead_of_failing` | um JSON quebrado não derruba a tela |
 | `test_capabilities_lists_event_package_only_in_phase2` | capacidade real, sem opção falsa |
 | `test_preview_returns_dependencies_counts_warnings_and_errors` | contrato da revisão |
 | `test_preview_rejects_unknown_event_id` | entrada controlada |
@@ -589,11 +673,18 @@ Estados visuais obrigatórios:
 | `test_download_rejects_unready_or_unknown_job` | sem acesso indevido |
 | `test_concurrent_writers_are_serialized` | dois artefatos não se misturam |
 | `test_restart_recovers_completed_job_metadata` | atualização da página não perde saída |
+| `test_central_server_exposes_no_distribution_endpoint` | a Central não gera nada |
+| `test_central_frontend_has_no_selection_or_generation_ui` | a interface do produto voltou ao que era |
+| `test_studio_never_enters_the_distributed_executable` | `main.spec` não empacota o estúdio |
+| `test_studio_serves_nothing_outside_its_own_prefix` | sem o link, não há tela |
 
-**Novo `tests/test_server_frontend_distribution_ui.py`**
+**Novo `tests/test_distribution_studio_ui.py`**
 
 - Testes estruturais de IDs, labels e funções JS do fluxo.
-- Garantir que checkbox não aciona Editar/Excluir.
+- Garantir que a página vive fora de `server_frontend/` e de `frontend/`.
+- Garantir que a Central não tem link nem menção ao estúdio.
+- Garantir que o estúdio é somente-leitura (sem `editEvent`, `deleteEvent`, `PUT` ou `DELETE`).
+- Garantir que toda chamada sai pelo prefixo `/distribution-studio/api`.
 - Garantir que erros bloqueiam Gerar e avisos não bloqueiam.
 - Garantir que o formato Setup fica desabilitado sem capability.
 
@@ -610,33 +701,41 @@ Estados visuais obrigatórios:
 ### Testes automatizados
 
 ```powershell
-.venv-build\Scripts\python.exe -m pytest tests\test_distribution_api.py tests\test_server_frontend_distribution_ui.py -q
+.venv-build\Scripts\python.exe -m pytest tests\test_distribution_studio_api.py tests\test_distribution_studio_ui.py -q
 .venv-build\Scripts\python.exe -m pytest tests -q --basetemp=.pytest-work\event-package-fase2
 ```
 
 ### Validação visual
 
-1. Abrir o Smart Events Central com pelo menos três eventos cadastrados.
-2. Selecionar um evento pelo checkbox e confirmar que o formulário de edição não abre.
-3. Selecionar vários eventos, incluindo clientes diferentes.
-4. Abrir a revisão e comparar todas as contagens com os cards e JSONs de origem.
-5. Conferir que credenciais/sessões/histórico aparecem explicitamente como excluídos.
-6. Gerar o pacote e acompanhar os estados sem congelamento da página.
-7. Baixar o `.sepack`, inspecioná-lo pela CLI da Fase 1 e importar em uma pasta limpa.
-8. Recarregar a Central durante/depois do job e confirmar que o estado final pode ser recuperado.
-9. Repetir em largura estreita: modal, cards e barra de seleção não devem cortar ações.
-10. Navegar apenas com teclado e confirmar foco, `Esc`, seleção e geração.
+1. Abrir o Smart Events Central e confirmar que a interface é a de sempre: nenhum checkbox, nenhuma
+   barra de seleção, nenhum botão de gerar e nenhum link para o estúdio.
+2. Confirmar que `http://localhost:8000/api/distributions/capabilities` e
+   `http://localhost:8000/distribution-studio` respondem 404 na Central.
+3. Subir `python -m tools.distribution_studio` e confirmar que `http://127.0.0.1:8010/` responde 404
+   e que só o link completo abre a tela.
+4. Selecionar um evento pelo checkbox e confirmar que nada é editado nem excluído.
+5. Selecionar vários eventos, incluindo clientes diferentes.
+6. Abrir a revisão e comparar todas as contagens com os cards da Central e com os JSONs de origem.
+7. Conferir que credenciais/sessões/histórico aparecem explicitamente como excluídos.
+8. Gerar o pacote e acompanhar os estados sem congelamento da página.
+9. Baixar o `.sepack`, inspecioná-lo pela CLI da Fase 1 e importar em uma pasta limpa.
+10. Recarregar o estúdio durante/depois do job e confirmar que o estado final pode ser recuperado.
+11. Repetir em largura estreita: modal, cards e barra de seleção não devem cortar ações.
+12. Navegar apenas com teclado e confirmar foco, `Esc`, seleção e geração.
 
 ### Critério de aceite da fase
 
-- Um usuário não técnico consegue selecionar eventos e baixar um `.sepack` válido sem editar JSON
-  ou executar comandos.
+- Quem distribui consegue selecionar eventos e baixar um `.sepack` válido sem editar JSON ou
+  executar comandos de empacotamento.
 - A revisão mostra tudo que entra no pacote e tudo que fica de fora.
+- O Smart Events Central continua idêntico ao que era antes desta feature: nenhuma rota, nenhum
+  controle e nenhum link de geração.
+- O serviço de geração não é alcançável a partir do executável distribuído.
 - A interface não oferece Setup completo enquanto o host não possuir os requisitos da Fase 3.
 
 ## Sugestão de commit
 
-`feat: generate event packages from the central event list`
+`feat: generate event packages from an internal distribution studio`
 
 ---
 
@@ -758,7 +857,7 @@ otimização que deixe arquivos órfãos. Referências:
 - Após importação feita com o app aberto, sincronizar somente IDs afetados; na instalação, o
   próximo boot faz a sincronização completa local.
 
-**`core/distribution_service.py` e `server.py`**
+**`core/distribution_service.py` e `tools/distribution_studio.py`**
 
 - `capabilities` passa a informar:
 
@@ -778,7 +877,7 @@ otimização que deixe arquivos órfãos. Referências:
 
 ### Interface
 
-No modal da Fase 2:
+No modal do estúdio (Fase 2):
 
 - habilitar “Instalador completo (.exe)” quando `capabilities` permitir;
 - explicar:
@@ -789,7 +888,9 @@ No modal da Fase 2:
 - mostrar progresso separado de pacote, compilação e teste;
 - em sucesso, disponibilizar Setup, manifesto e SHA-256;
 - se o build-base estiver ausente/desatualizado, mostrar a ação administrativa necessária, sem
-  tentar executar PyInstaller automaticamente por um clique comum da interface.
+  tentar executar PyInstaller automaticamente por um clique comum da interface;
+- o Setup completo continua sendo gerado apenas pelo estúdio: a Central não ganha nenhuma rota
+  nova nesta fase.
 
 ### Testes
 
@@ -889,7 +990,7 @@ No modal da Fase 2:
 ## Explicação simples
 
 Esta fase transforma o fluxo funcional em um processo de distribuição confiável. Pacotes e
-instaladores passam a ter autenticidade verificável, a Central mantém histórico do que foi
+instaladores passam a ter autenticidade verificável, o estúdio mantém histórico do que foi
 gerado e o fluxo antigo por perfil deixa de ser o caminho padrão somente depois da homologação.
 
 Alguns itens dependem de infraestrutura externa, especialmente o certificado Authenticode. A
@@ -944,7 +1045,7 @@ Referência: [SignTool](https://jrsoftware.org/ishelp/topic_setup_signtool.htm).
   - hashes e status das assinaturas;
   - resultado dos testes/smoke;
   - timestamps de início/fim e duração por etapa.
-- Criar endpoint/lista “Distribuições geradas” na Central.
+- Criar endpoint/lista “Distribuições geradas” no estúdio, sob o mesmo prefixo.
 - Permitir baixar novamente artefato e manifesto enquanto estiver dentro da retenção.
 - Permitir excluir artefato individual com confirmação; manter manifesto de auditoria sem os dados
   do pacote, conforme política definida.
@@ -965,7 +1066,8 @@ Referência: [SignTool](https://jrsoftware.org/ishelp/topic_setup_signtool.htm).
   - **Assinado e validado**;
   - **Não assinado — desenvolvimento**;
   - **Assinatura inválida** (sem download como produção).
-- Nova seção “Distribuições geradas” com filtros por data, evento, cliente, formato e status.
+- Nova seção “Distribuições geradas” **no estúdio**, com filtros por data, evento, cliente,
+  formato e status. O histórico é registro de quem distribui e não aparece no produto.
 - Exibir versão do build-base e validade da assinatura sem mostrar caminhos/chaves.
 - Botão Excluir exige confirmação com nome do artefato e informa que o manifesto será preservado.
 - Documentar na própria tela quando usar `.sepack` ou Setup completo.
@@ -1023,7 +1125,7 @@ Referência: [SignTool](https://jrsoftware.org/ishelp/topic_setup_signtool.htm).
 
 ### Validação visual e operacional
 
-1. Gerar um `.sepack` e um Setup pela Central; ambos aparecem no histórico.
+1. Gerar um `.sepack` e um Setup pelo estúdio; ambos aparecem no histórico.
 2. Confirmar badge “Assinado e validado” e hashes iguais aos manifestos baixados.
 3. Abrir propriedades do Setup no Windows e conferir a aba Assinaturas Digitais/publicador.
 4. Instalar em VM limpa e confirmar que o UAC mostra o publicador esperado.
@@ -1051,7 +1153,7 @@ Referência: [SignTool](https://jrsoftware.org/ishelp/topic_setup_signtool.htm).
 
 A implementação completa estará concluída quando:
 
-- for possível selecionar um ou mais eventos na Central;
+- for possível selecionar um ou mais eventos no Distribution Studio;
 - a revisão resolver automaticamente clientes, regionais, logos, tasks e VIPs;
 - o usuário puder gerar `.sepack` ou Setup completo;
 - a seleção de eventos nunca executar PyInstaller;
@@ -1063,6 +1165,8 @@ A implementação completa estará concluída quando:
 - credenciais, sessões, histórico, bancos e logs nunca entrarem no artefato;
 - pacote e Setup de produção tiverem autenticidade e integridade verificadas;
 - instalação/atualização preservarem `%LOCALAPPDATA%\SmartEvents`;
+- o Smart Events Central e o executável distribuído continuarem sem qualquer recurso de
+  geração — nem rota, nem controle, nem serviço empacotado;
 - os testes automatizados e a matriz visual/VM passarem sem regressão;
 - documentação de operador e desenvolvimento refletirem o novo fluxo.
 
@@ -1079,6 +1183,7 @@ A implementação completa estará concluída quando:
 | ZIP malicioso ou corrompido | gravação fora da pasta/DoS | path validation, limites, hashes e assinatura antes de extrair |
 | Setup usar build-base errado | app/pacote incompatíveis | manifesto, hashes e `minimum_app_version` |
 | Interface disparar comando arbitrário | execução de código | endpoints aceitam IDs/opções, nunca comando/caminho livre |
+| Geração viajar dentro do app do usuário | superfície e operação indevidas no cliente | estúdio em processo/porta próprios, fora de `server.py` e do `main.spec`, com testes que travam a limpeza |
 | Job concorrente misturar artefatos | Setup inconsistente | staging por UUID e lock de escrita/compilação |
 | Otimização de archive deixar arquivos órfãos | uninstall incompleto | smoke de instalação/update/uninstall e fallback para `[Files]` recursivo |
 | Certificado não disponível | release sem confiança | separar dev/release; produção falha sem assinatura |
@@ -1108,7 +1213,7 @@ Não iniciar a fase seguinte com testes vermelhos ou critério de aceite pendent
 
 - `core/event_package.py` e testes de segurança/importação;
 - CLI de geração, inspeção e importação;
-- seleção múltipla e revisão na Central;
+- Distribution Studio interno: seleção múltipla, revisão e download, fora do produto;
 - serviço e APIs de jobs de distribuição;
 - `.sepack` importável e associado ao Windows;
 - build-base genérico e cacheado;

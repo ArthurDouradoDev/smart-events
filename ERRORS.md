@@ -859,3 +859,39 @@ lido. Teste de regressão:
 gêmeo, sem repetição. O risco lá é bem menor (grava uma vez por importação, sem ninguém
 consultando em paralelo), mas o mesmo `ACCESS_DENIED` do antivírus é possível. Corrigir em
 tarefa própria, com o mesmo `_retrying()`.
+
+---
+
+## 2026-09-01 — Fase 2 entregue no lugar errado: geração dentro do produto
+
+**O que quebrou:** a Fase 2 do plano de distribuição foi implementada dentro do Smart Events
+Central — checkbox por card de evento, barra "Gerar distribuição", modal de revisão e seis
+endpoints `/api/distributions/*` no `server.py`. Nada disso falhava tecnicamente: os testes
+passavam e o `.sepack` saía correto. O erro foi de **produto**, não de código.
+
+**Causa raiz:** o plano dizia "Seleção múltipla e geração no Smart Events Central" e a implementação
+seguiu à risca, sem questionar o papel de cada peça. A Central é o aplicativo que o **usuário final**
+recebe; gerar artefato de distribuição é operação de **quem distribui**. O plano confundiu os dois
+papéis, e a implementação herdou a confusão.
+
+**Consequência agravante:** `server` é `hiddenimport` do `main.spec`. Qualquer endpoint adicionado
+ao `server.py` arrasta `core/distribution_service.py` para dentro do bundle do PyInstaller. O
+executável entregue ao cliente passaria a carregar — e a expor localmente — o serviço que monta
+pacotes de eventos, sem que ninguém tivesse decidido isso.
+
+**Correção:** `server.py` e `server_frontend/index.html` restaurados ao estado do commit `f3534ea`
+(`git checkout f3534ea -- ...`); o fluxo migrou para `tools/distribution_studio.py` +
+`tools/distribution_studio.html`, num processo e numa porta próprios, sob `/distribution-studio`,
+sem rota em `/`, com bind em `127.0.0.1` e sem CORS. Registrado como decisão 8 do plano.
+
+**Regras:**
+
+1. Antes de escolher onde uma feature mora, perguntar **quem a executa**. Recurso de quem distribui
+   não pertence à interface de quem consome — mesmo quando os dados são os mesmos.
+2. `hiddenimport` é uma porta de entrada silenciosa para o bundle. Adicionar um import ao `server.py`
+   ou ao `main.py` é decidir o que viaja no `.exe`; tratar como decisão explícita, não como detalhe.
+3. Um plano aprovado não dispensa a pergunta do item 1. Se o plano posiciona a feature no lugar
+   errado, corrigir o plano faz parte da entrega — e não depois dela.
+4. Teste de ausência vale tanto quanto teste de presença: `test_central_server_exposes_no_...`
+   e `test_studio_never_enters_the_distributed_executable` existem para que a geração não volte
+   sozinha ao produto num refactor futuro.

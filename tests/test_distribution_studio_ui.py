@@ -1,8 +1,10 @@
-"""Fase 2 — seleção múltipla e fluxo de geração no Smart Events Central.
+"""Fase 2 — seleção múltipla e fluxo de geração no Distribution Studio.
 
-Os testes estruturais travam IDs, labels e funções do fluxo diretamente no HTML;
-os testes de Playwright exercitam o fluxo real contra um servidor de mentira que
-imita os endpoints de distribuição.
+A tela de geração **não** é a Central: ela vive em `tools/distribution_studio.html`,
+é servida por outro processo, sob o prefixo `/distribution-studio`, e não é
+alcançável por nenhum link da interface do produto. Os testes estruturais travam
+IDs, labels e funções do fluxo no HTML do estúdio; os de Playwright exercitam o
+fluxo real contra um servidor de mentira que imita os endpoints do estúdio.
 """
 
 import json
@@ -14,8 +16,12 @@ from threading import Thread
 import pytest
 
 
-HTML_PATH = Path(__file__).parents[1] / "server_frontend" / "index.html"
-SERVER_FRONTEND_ROOT = HTML_PATH.parent
+REPO_ROOT = Path(__file__).parents[1]
+HTML_PATH = REPO_ROOT / "tools" / "distribution_studio.html"
+CENTRAL_HTML_PATH = REPO_ROOT / "server_frontend" / "index.html"
+
+STUDIO_PATH = "/distribution-studio"
+STUDIO_API = STUDIO_PATH + "/api"
 
 PACKAGE_BYTES = b"PK\x03\x04-pacote-de-eventos-de-mentira"
 FAILING_EVENT_ID = "evento-sem-cliente"
@@ -25,27 +31,65 @@ def _html() -> str:
     return HTML_PATH.read_text(encoding="utf-8")
 
 
-# ── Testes estruturais ───────────────────────────────────────────────
+# ── A tela é interna, e só isso ──────────────────────────────────────
 
-def test_event_cards_expose_an_accessible_selection_checkbox():
+def test_studio_page_lives_outside_the_distributed_frontend():
+    # Nem `server_frontend/` nem `frontend/` são a casa desta tela: os dois vão
+    # para dentro do bundle do PyInstaller.
+    assert HTML_PATH.parent.name == "tools"
+    assert not (REPO_ROOT / "server_frontend" / "distribution_studio.html").exists()
+
+
+def test_central_has_no_link_to_the_studio():
+    central = CENTRAL_HTML_PATH.read_text(encoding="utf-8")
+
+    assert "distribution-studio" not in central
+    assert "distribution" not in central.lower()
+    assert "sepack" not in central.lower()
+
+
+def test_studio_page_says_it_is_internal_and_is_not_indexed():
+    html = _html()
+
+    assert 'name="robots" content="noindex, nofollow"' in html
+    assert "Ferramenta interna." in html
+    assert "não é distribuída com o" in html
+
+
+def test_studio_is_read_only_over_the_event_data():
+    """O estúdio seleciona e gera; editar e excluir continuam só na Central."""
+    html = _html()
+
+    for forbidden in ("editEvent", "deleteEvent", "method: 'DELETE'", "method: 'PUT'"):
+        assert forbidden not in html
+    # O único POST é a geração (revisão e job); nada grava em server_data.
+    assert html.count("method: 'POST'") == 2
+
+
+def test_every_studio_request_stays_under_the_studio_prefix():
+    html = _html()
+
+    import re
+
+    assert "const STUDIO_API = '/distribution-studio/api';" in html
+    # Toda requisição sai pela constante do prefixo; nenhuma monta a URL na mão.
+    calls = re.findall(r"fetch\(([^,)]+)", html)
+    assert calls, "a tela precisa chamar a API do estúdio"
+    for call in calls:
+        assert "${STUDIO_API}" in call, f"chamada fora do prefixo: {call}"
+    # Nenhuma chamada à API da Central sobrou no caminho.
+    assert "'/api/" not in html and '"/api/' not in html
+
+
+# ── Testes estruturais do fluxo ──────────────────────────────────────
+
+def test_event_rows_expose_an_accessible_selection_checkbox():
     html = _html()
 
     assert 'class="event-select" id="event-select-${eventId}"' in html
     assert 'aria-label="Selecionar o evento ${escapeHTML(event.name)} para a distribuição"' in html
     assert 'onchange="toggleEventSelection(\'${eventId}\', this.checked)"' in html
     assert '<label class="event-select-label" for="event-select-${eventId}"' in html
-
-
-def test_selection_checkbox_never_triggers_edit_or_delete():
-    html = _html()
-
-    # O checkbox para a propagação; Editar/Excluir continuam sendo os únicos
-    # gatilhos de edição e exclusão.
-    assert html.count('onclick="event.stopPropagation()"') >= 2
-    assert 'onclick="editEvent(\'${escapeHTML(event.id)}\')"' in html
-    assert 'onclick="deleteEvent(\'${escapeHTML(event.id)}\', event)"' in html
-    assert "toggleEventSelection" in html
-    assert "editEvent(" not in html.split("function toggleEventSelection")[1].split("}")[0]
 
 
 def test_selection_bar_has_select_all_counter_and_generate_button():
@@ -130,21 +174,20 @@ def test_failure_shows_failed_step_copyable_diagnostic_and_retry():
     assert "function retryDistributionJob" in html
 
 
-def test_selection_survives_rerender_and_is_cleared_on_tab_switch_and_download():
+def test_selection_survives_rerender_and_is_cleared_on_download():
     html = _html()
 
     assert "const selectedEventIds = new Set();" in html
     assert "${selectedEventIds.has(event.id) ? 'checked' : ''}" in html
-    assert "if (tab !== 'eventos') { closeDistributionModal(); clearEventSelection(); }" in html
     assert "if (kind === 'download') {" in html
-    # Evento excluído não pode continuar selecionado de forma invisível.
+    # Evento que sumiu da origem não pode continuar selecionado de forma invisível.
     assert "[...selectedEventIds].forEach(id => { if (!visible.has(id)) selectedEventIds.delete(id); });" in html
 
 
 def test_frontend_never_sends_a_path_to_the_distribution_endpoints():
     html = _html()
 
-    body = html.split("await fetch('/api/distributions', {")[1].split("});")[0]
+    body = html.split("await fetch(`${STUDIO_API}/jobs`, {")[1].split("});")[0]
     assert "event_ids" in body and "format" in body and "name" in body
     for forbidden in ("source", "output", "iss", "data_dir", "path"):
         assert f"{forbidden}:" not in body
@@ -156,21 +199,17 @@ _EVENTS = [
     {
         "id": "evento-a", "name": "Barretos 2026", "status": "ACTIVE",
         "start_time": "2026-08-20T10:00:00Z", "end_time": "2026-08-25T22:00:00Z",
-        "sites": [{"id": "S1", "cells": [{"id": "C1", "azimuth": 0}]}],
-        "oss": {"cliente": "Vivo", "region": "SP"},
-        "integration": {"pm_tasks": [{"tech": "4G", "task_id": 2279}]},
+        "client": "Vivo", "region": "SP", "sites": 1, "cells": 1,
     },
     {
         "id": "evento-b", "name": "Rock 2026", "status": "SCHEDULED",
         "start_time": "2026-09-20T10:00:00Z", "end_time": "2026-09-25T22:00:00Z",
-        "sites": [{"id": "S2", "cells": [{"id": "C2", "azimuth": 0}]}],
-        "oss": {"cliente": "TIM", "region": "RJ"},
-        "integration": {"pm_tasks": [{"tech": "4G", "task_id": 2280}]},
+        "client": "TIM", "region": "RJ", "sites": 1, "cells": 1,
     },
     {
         "id": FAILING_EVENT_ID, "name": "Evento sem cliente", "status": "SCHEDULED",
         "start_time": "2026-10-01T10:00:00Z", "end_time": "2026-10-02T22:00:00Z",
-        "sites": [], "oss": {"cliente": "Claro", "region": "MG"}, "integration": {},
+        "client": "Claro", "region": "MG", "sites": 0, "cells": 0,
     },
 ]
 
@@ -211,8 +250,8 @@ def _preview_for(event_ids):
         "clients": ["TIM", "Vivo"],
         "events": [{
             "id": event["id"], "name": event["name"], "status": event["status"],
-            "client": event["oss"]["cliente"], "region": event["oss"]["region"],
-            "sites": len(event["sites"]), "cells": 1, "clusters": 0, "pm_tasks": 1,
+            "client": event["client"], "region": event["region"],
+            "sites": event["sites"], "cells": 1, "clusters": 0, "pm_tasks": 1,
         } for event in rows],
         "clientes": [
             {"id": "vivo", "name": "Vivo", "regions": ["SP"], "logo": "vivo.png"},
@@ -237,8 +276,8 @@ def _preview_for(event_ids):
     }
 
 
-class _DistributionHandler(SimpleHTTPRequestHandler):
-    """Imita os endpoints da Fase 2. O job vira `ready` (ou `failed`) na 2ª consulta."""
+class _StudioHandler(SimpleHTTPRequestHandler):
+    """Imita os endpoints do estúdio. O job vira `ready` (ou `failed`) na 2ª consulta."""
 
     polls: dict = {}
 
@@ -274,16 +313,21 @@ class _DistributionHandler(SimpleHTTPRequestHandler):
 
     def do_GET(self):
         clean = self.path.split("?", 1)[0]
-        if clean == "/api/events":
+        if clean == STUDIO_PATH:
+            body = HTML_PATH.read_bytes()
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+            return
+        if clean == STUDIO_API + "/events":
             self._json(_EVENTS)
             return
-        if clean in ("/api/clientes", "/api/vips"):
-            self._json([])
-            return
-        if clean == "/api/distributions/capabilities":
+        if clean == STUDIO_API + "/capabilities":
             self._json(_CAPABILITIES)
             return
-        if clean.startswith("/api/distributions/") and clean.endswith("/download"):
+        if clean.startswith(STUDIO_API + "/jobs/") and clean.endswith("/download"):
             self.send_response(200)
             self.send_header("Content-Type", "application/octet-stream")
             self.send_header("Content-Disposition", 'attachment; filename="pacote.sepack"')
@@ -291,10 +335,10 @@ class _DistributionHandler(SimpleHTTPRequestHandler):
             self.end_headers()
             self.wfile.write(PACKAGE_BYTES)
             return
-        if clean.startswith("/api/distributions/"):
+        if clean.startswith(STUDIO_API + "/jobs/"):
             job_id = clean.rsplit("/", 1)[-1]
-            seen = _DistributionHandler.polls.get(job_id, 0) + 1
-            _DistributionHandler.polls[job_id] = seen
+            seen = _StudioHandler.polls.get(job_id, 0) + 1
+            _StudioHandler.polls[job_id] = seen
             if seen < 2:
                 self._json(self._job(job_id, "packaging"))
             elif job_id.startswith("fail"):
@@ -315,55 +359,43 @@ class _DistributionHandler(SimpleHTTPRequestHandler):
                     finished_at_utc="2026-08-31T12:00:05Z",
                 ))
             return
-        super().do_GET()
+        # Fora do prefixo do estúdio não existe nada — inclusive a raiz.
+        self._json({"detail": "not found"}, 404)
 
     def do_POST(self):
         clean = self.path.split("?", 1)[0]
-        if clean == "/api/distributions/preview":
+        if clean == STUDIO_API + "/preview":
             self._json(_preview_for(self._read_json().get("event_ids") or []))
             return
-        if clean == "/api/distributions":
+        if clean == STUDIO_API + "/jobs":
             payload = self._read_json()
             prefix = "fail" if FAILING_EVENT_ID in (payload.get("event_ids") or []) else "ok"
             self._json(self._job(f"{prefix}{'0' * 28}", "queued"))
             return
-        if clean == "/api/parse-sites":
-            self._json({"ok": True, "sites": [], "clusters": []})
-            return
         self._json({"detail": "not found"}, 404)
-
-    def translate_path(self, path):
-        clean = path.split("?", 1)[0]
-        if clean == "/":
-            relative = "index.html"
-        elif clean.startswith("/static/"):
-            relative = clean.removeprefix("/static/")
-        else:
-            relative = clean.lstrip("/")
-        return str(SERVER_FRONTEND_ROOT / relative)
 
 
 @contextmanager
-def _distribution_server():
-    _DistributionHandler.polls = {}
-    server = ThreadingHTTPServer(("127.0.0.1", 0), _DistributionHandler)
-    thread = Thread(target=server.serve_forever, daemon=True)
+def _studio_server():
+    _StudioHandler.polls = {}
+    httpd = ThreadingHTTPServer(("127.0.0.1", 0), _StudioHandler)
+    thread = Thread(target=httpd.serve_forever, daemon=True)
     thread.start()
     try:
-        yield f"http://127.0.0.1:{server.server_port}"
+        yield f"http://127.0.0.1:{httpd.server_port}"
     finally:
-        server.shutdown()
+        httpd.shutdown()
         thread.join(timeout=2)
 
 
 @contextmanager
-def _central_page():
+def _studio_page():
     sync_api = pytest.importorskip("playwright.sync_api")
     try:
-        with _distribution_server() as url, sync_api.sync_playwright() as playwright:
+        with _studio_server() as url, sync_api.sync_playwright() as playwright:
             browser = playwright.chromium.launch(headless=True)
             page = browser.new_page()
-            page.goto(url, wait_until="domcontentloaded")
+            page.goto(url + STUDIO_PATH, wait_until="domcontentloaded")
             page.locator("#event-select-evento-a").wait_for(timeout=5000)
             try:
                 yield page
@@ -382,30 +414,28 @@ def _select(page, *event_ids):
 
 # ── Testes de Playwright ─────────────────────────────────────────────
 
-def test_selecting_events_never_opens_the_edit_form():
-    with _central_page() as page:
+def test_selecting_an_event_enables_generation():
+    with _studio_page() as page:
         _select(page, "evento-a")
 
-        assert page.locator("#eventos-form-view").is_visible() is False
-        assert page.locator("#eventos-list-view").is_visible() is True
         assert page.locator("#distribution-selection-count").inner_text() == "1 evento selecionado"
         assert page.locator("#btn-generate-distribution").is_disabled() is False
 
 
-def test_select_all_visible_marks_every_card_and_clearing_resets_it():
-    with _central_page() as page:
+def test_select_all_visible_marks_every_row_and_clearing_resets_it():
+    with _studio_page() as page:
         page.locator("#select-all-visible-events").check()
 
-        assert page.locator("#events-list .event-select:checked").count() == len(_EVENTS)
+        assert page.locator("#studio-events-list .event-select:checked").count() == len(_EVENTS)
         assert "3 eventos selecionados" in page.locator("#distribution-selection-count").inner_text()
 
         page.locator("#btn-clear-event-selection").click()
-        assert page.locator("#events-list .event-select:checked").count() == 0
+        assert page.locator("#studio-events-list .event-select:checked").count() == 0
         assert page.locator("#btn-generate-distribution").is_disabled() is True
 
 
 def test_review_modal_shows_names_counts_and_the_legacy_vip_warning():
-    with _central_page() as page:
+    with _studio_page() as page:
         _select(page, "evento-a", "evento-b")
         page.locator("#btn-generate-distribution").click()
         page.locator("#distribution-preview-content").wait_for(state="visible", timeout=5000)
@@ -429,7 +459,7 @@ def test_review_modal_shows_names_counts_and_the_legacy_vip_warning():
 
 
 def test_blocking_error_keeps_the_generate_button_disabled():
-    with _central_page() as page:
+    with _studio_page() as page:
         _select(page, FAILING_EVENT_ID)
         page.locator("#btn-generate-distribution").click()
         page.locator("#distribution-preview-content").wait_for(state="visible", timeout=5000)
@@ -439,7 +469,7 @@ def test_blocking_error_keeps_the_generate_button_disabled():
 
 
 def test_job_progress_reaches_ready_and_downloads_the_package():
-    with _central_page() as page:
+    with _studio_page() as page:
         _select(page, "evento-a", "evento-b")
         page.locator("#btn-generate-distribution").click()
         page.locator("#distribution-preview-content").wait_for(state="visible", timeout=5000)
@@ -459,11 +489,11 @@ def test_job_progress_reaches_ready_and_downloads_the_package():
 
         # Concluído o download, a seleção é limpa e o modal fecha.
         page.locator("#distribution-modal").wait_for(state="hidden", timeout=5000)
-        assert page.locator("#events-list .event-select:checked").count() == 0
+        assert page.locator("#studio-events-list .event-select:checked").count() == 0
 
 
 def test_failed_job_shows_the_step_diagnostic_and_retry_button():
-    with _central_page() as page:
+    with _studio_page() as page:
         _select(page, FAILING_EVENT_ID, "evento-a")
         page.locator("#btn-generate-distribution").click()
         page.locator("#distribution-preview-content").wait_for(state="visible", timeout=5000)
@@ -482,7 +512,7 @@ def test_failed_job_shows_the_step_diagnostic_and_retry_button():
 
 
 def test_modal_traps_focus_and_closes_with_escape():
-    with _central_page() as page:
+    with _studio_page() as page:
         _select(page, "evento-a")
         page.locator("#btn-generate-distribution").click()
         page.locator("#distribution-preview-content").wait_for(state="visible", timeout=5000)
@@ -506,20 +536,20 @@ def test_modal_traps_focus_and_closes_with_escape():
         page.keyboard.press("Escape")
         page.locator("#distribution-modal").wait_for(state="hidden", timeout=5000)
         # Fechar não descarta a seleção: o operador pode revisar de novo.
-        assert page.locator("#events-list .event-select:checked").count() == 1
+        assert page.locator("#studio-events-list .event-select:checked").count() == 1
 
 
 def test_selection_survives_the_list_being_rerendered():
-    with _central_page() as page:
+    with _studio_page() as page:
         _select(page, "evento-b")
-        page.evaluate("renderEvents(loadedEventsList)")
+        page.evaluate("renderStudioEvents(loadedEventsList)")
 
         assert page.locator("#event-select-evento-b").is_checked() is True
         assert page.locator("#distribution-selection-count").inner_text() == "1 evento selecionado"
 
 
 def test_keyboard_navigation_selects_an_event_by_its_label():
-    with _central_page() as page:
+    with _studio_page() as page:
         checkbox = page.locator("#event-select-evento-a")
         checkbox.focus()
         page.keyboard.press("Space")

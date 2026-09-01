@@ -294,6 +294,23 @@ O catálogo de clientes e regionais (`Cliente → Regional → IP`) fica em `dat
 - **1º acesso:** ao ativar um evento cuja regional ainda não tem credencial, o app abre um modal pedindo usuário/senha daquele Cliente/Regional.
 - **Atualizar:** botão de credenciais no cabeçalho abre o gerenciador por Cliente. Marque **"usar a mesma credencial para todas as regionais deste cliente"** para uma conta única (compartilhada), ou preencha por regional (override). A credencial por regional tem precedência sobre a compartilhada.
 
+### 7. Distribution Studio (ferramenta interna de distribuição)
+
+Gerar pacotes de eventos (`.sepack`) é operação de **quem distribui**, não do usuário final. Por isso ela não vive no Smart Events Central nem no `.exe`: fica numa ferramenta separada, servida em outro processo e em outra porta.
+
+```bash
+python -m tools.distribution_studio            # http://127.0.0.1:8010/distribution-studio
+python -m tools.distribution_studio --port 8020
+```
+
+- A tela lista os eventos do mesmo `server_data` lido pela Central (somente leitura — cadastrar e editar continua sendo função da Central), permite selecionar vários, revisar clientes/regionais/VIPs/logos incluídos e baixar o `.sepack` com o SHA-256 e o manifesto.
+- **Não há rota em `/`**: sem o link completo não existe tela. O bind é fixo em `127.0.0.1` e não há CORS — ao contrário da Central, que serve a rede local.
+- O `server.py` e o `server_frontend/index.html` **não** conhecem nada disso, e o `main.spec` não empacota o estúdio: o executável distribuído sabe apenas **importar** um `.sepack` (`SmartEvents.exe --import-event-package <arquivo> --show-dialog`).
+- As saídas ficam em `data/distributions/<job-id>/`; o estado de cada job em `data/distributions/jobs/<job-id>.json`, para o resultado sobreviver a um F5.
+- Para inspecionar ou importar um pacote pela linha de comando, veja [tools/event_package.py](tools/event_package.py) (`preview`, `build`, `inspect`, `import`).
+
+O plano completo (formato do `.sepack`, conciliação de cadastros, build-base e assinatura) está em [docs/plans/2026-08-31-001-feat-distribuicao-automatizada-eventos-plan.md](docs/plans/2026-08-31-001-feat-distribuicao-automatizada-eventos-plan.md).
+
 ---
 
 ## 📈 Especificações Técnicas e de Design
