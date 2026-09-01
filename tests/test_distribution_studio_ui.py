@@ -145,6 +145,50 @@ def test_setup_format_is_disabled_without_capability():
     assert "distributionCapabilities = { formats: ['event_package'], available_formats: [] };" in html
 
 
+def test_missing_base_shows_the_administrative_action_instead_of_building_it():
+    """Fase 3: a tela nunca dispara o PyInstaller; ela diz o que precisa ser feito."""
+    html = _html()
+
+    assert "function renderDistributionBaseNote" in html
+    assert 'id="distribution-base-note"' in html
+    assert "caps.setup_reason" in html
+    assert "caps.setup_action" in html
+    # Nenhum controle da página inicia uma compilação do programa: a ação vem do
+    # servidor como texto e nenhuma requisição pede um build.
+    import re
+
+    calls = re.findall(r"fetch\(([^,)]+)", html)
+    assert calls
+    for call in calls:
+        assert "base" not in call and "build" not in call
+    assert "btn-build-base" not in html
+
+
+def test_ready_base_shows_its_version_date_and_the_size_warning():
+    html = _html()
+
+    assert "Build-base ${escapeHTML(caps.base_version || '?')}" in html
+    assert "escapeHTML(caps.base_built_at_utc || '?')" in html
+    assert "o arquivo final é grande" in html
+    # As capacidades são relidas a cada revisão: um base recém-criado aparece
+    # sem recarregar a página.
+    assert "await loadDistributionCapabilities(true);" in html
+
+
+def test_setup_job_shows_the_compiling_and_testing_steps_and_its_own_download():
+    html = _html()
+
+    assert "compiling: 'Compilando', testing: 'Testando'" in html
+    assert "compiling: 'Compilando o instalador...'," in html
+    assert "testing: 'Executando os testes do artefato...'," in html
+    assert 'id="btn-distribution-download-setup"' in html
+    assert 'id="distribution-setup-summary"' in html
+    assert "<span>Build-base</span>" in html
+    # O botão do instalador só existe quando o job realmente produziu um Setup.
+    assert "done && distributionJobFormat === 'full_setup'" in html
+    assert "downloadDistributionArtifact('setup')" in html
+
+
 def test_progress_is_polled_with_backoff_and_stops_on_terminal_state():
     html = _html()
 

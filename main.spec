@@ -1,10 +1,25 @@
 # -*- mode: python ; coding: utf-8 -*-
 
 import os
+import sys
 import json
 import importlib.util
 from pathlib import Path
 from PyInstaller.utils.hooks import collect_submodules, collect_data_files, collect_all
+
+# Fase 3 — dois modos de build, escolhidos por SMARTEVENTS_BUILD_MODE:
+#
+#   base   → build-base GENERICO, feito uma vez por versao. Sem evento, sem VIP e
+#            sem catalogo de cliente; a selecao de eventos vira depois, num
+#            `.sepack`, e nunca dispara o PyInstaller de novo.
+#   legacy → caminho historico por perfil (`build.py legacy-profile`), preservado
+#            durante a migracao para permitir rollback. E o default: sem a
+#            variavel, o build antigo continua identico.
+_build_mode = (os.environ.get('SMARTEVENTS_BUILD_MODE') or 'legacy').strip().lower()
+if _build_mode not in ('base', 'legacy'):
+    raise RuntimeError(
+        f"SMARTEVENTS_BUILD_MODE invalido: {_build_mode!r} (use 'base' ou 'legacy')."
+    )
 
 # requests é importado por core/collector.py e core/database.py. A análise estática do
 # PyInstaller não estava empacotando o pacote (provável conflito de resolução — ver
@@ -28,10 +43,14 @@ _pw_datas, _pw_binaries, _pw_hidden = collect_all('playwright')
 # <pasta do .exe>/data/clientes.json (gravável e editável depois, sem recompilar). As CREDENCIAIS
 # (data/credentials.json) NÃO são embutidas — seed_files() cria um arquivo vazio para o operador
 # digitar suas contas (o .exe circula entre clientes e não pode carregar segredos).
+#
+# No modo `base` nada disso e embutido: o catalogo Cliente→Regional→IP e um cadastro
+# especifico e chega junto com o `.sepack`, conciliado por id na importacao.
 _cred_seed = []
-_cat_file = Path(os.environ.get('SMARTEVENTS_CLIENT_CATALOG_SEED', 'data/clientes.json'))
-if _cat_file.exists():
-    _cred_seed = [(str(_cat_file), 'data')]
+if _build_mode != 'base':
+    _cat_file = Path(os.environ.get('SMARTEVENTS_CLIENT_CATALOG_SEED', 'data/clientes.json'))
+    if _cat_file.exists():
+        _cred_seed = [(str(_cat_file), 'data')]
 
 _profile_datas = []
 _profile_file = os.environ.get('SMARTEVENTS_BUILD_PROFILE_FILE', '').strip()
@@ -80,6 +99,19 @@ _browser_datas = [
 # instalação de desenvolvimento. Sem a variável, o build normal continua usando a
 # pasta padrão do projeto.
 _server_data_seed = Path(os.environ.get("SMARTEVENTS_SERVER_DATA_SEED", "server_data"))
+
+# O build-base é o ganho arquitetural da Fase 3: ele só pode ser reusado por
+# qualquer seleção de eventos porque não carrega nenhuma. A checagem vive aqui, e
+# não só no build.py, para que nenhum caminho consiga produzir um "base" com
+# semente de perfil — o cache ficaria válido no manifesto e errado no conteúdo.
+if _build_mode == 'base':
+    if not os.environ.get("SMARTEVENTS_SERVER_DATA_SEED", "").strip():
+        raise RuntimeError(
+            "O build-base exige SMARTEVENTS_SERVER_DATA_SEED apontando para a semente generica."
+        )
+    sys.path.insert(0, str(Path(SPECPATH).resolve()))
+    from core.base_build import assert_generic_seed
+    assert_generic_seed(_server_data_seed)
 
 a = Analysis(
     ['main.py'],

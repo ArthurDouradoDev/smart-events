@@ -20,6 +20,11 @@ então a seleção enxerga exatamente os eventos cadastrados. As regras de segur
 Fase 2 continuam valendo: os endpoints recebem ids de evento e opções enumeradas,
 nunca caminho de origem, saída ou compilador, e toda saída fica em
 ``data/distributions/<job-id>/``.
+
+Na Fase 3 o estúdio passa a oferecer também o **instalador completo**. O caminho do
+build-base e o do compilador Inno Setup vêm do repositório, nunca do navegador; se
+o cache estiver ausente ou adulterado, o formato some das ``capabilities`` com o
+motivo e a ação administrativa — o PyInstaller jamais é disparado por um clique.
 """
 
 from __future__ import annotations
@@ -198,6 +203,12 @@ def download_distribution(job_id: str):
 @app.get(STUDIO_PATH + "/api/jobs/{job_id}/manifest")
 def download_distribution_manifest(job_id: str):
     return _distribution_artifact(job_id, "manifest")
+
+
+@app.get(STUDIO_PATH + "/api/jobs/{job_id}/setup")
+def download_distribution_setup(job_id: str):
+    """Instalador completo da Fase 3, quando o job foi gerado no formato `full_setup`."""
+    return _distribution_artifact(job_id, "setup")
 
 
 def main(argv=None) -> int:

@@ -1892,3 +1892,125 @@ Central real subida em `127.0.0.1:8021` — `GET /` 200, preview do `.sepack` de
 importação idempotente ("Pacote ja aplicado; nenhum arquivo foi alterado."), SHA divergente 409 e
 extensão errada 400; Playwright confirmou o modal de revisão renderizando as 5 linhas com o botão
 Importar habilitado e o item "+ Adicionar evento" no dropdown do app sem erro de página.
+
+---
+
+## 2026-09-01 - Fase 3: build-base reutilizavel e Setup completo por selecao
+
+**O que mudou.** O ciclo do programa foi separado do ciclo do conteudo. `python build.py base`
+roda o PyInstaller **uma vez por versao** e produz um build-base **generico** em
+`dist/base/<versao>/`; `python build.py distribution --format setup` combina esse cache com um
+`.sepack` e compila um `Setup.exe` novo **sem chamar o PyInstaller**. Selecionar eventos deixou
+de custar um build de ~900 MiB.
+
+**Modulo novo `core/base_build.py`.** E a fronteira entre os dois ciclos: semente generica,
+manifesto do cache, verificacao de integridade, definicoes do wrapper `.iss` e compilacao do
+Setup. Importado por `build.py` e por `core/distribution_service.py` - nenhum dos dois entra no
+bundle, entao o gerador continua fora do executavel distribuido (decisao 8 do plano).
+
+**`main.spec` ganhou `SMARTEVENTS_BUILD_MODE`.** `base` recusa catalogo de cliente e semente com
+cadastro (a guarda `assert_generic_seed` roda dentro do proprio spec, nao so no `build.py`);
+`legacy` e o default e preserva o fluxo por perfil para rollback. Sem a variavel, o build antigo
+e byte-a-byte o mesmo.
+
+**Semente generica.** Um `seed-manifest.json` com `"generic": true` e nada mais. `validate_seed()`
+aceita colecao vazia nesse modo e `seed_operator_data()` passou a criar `events/clientes/vips/logos`
+vazias - o primeiro boot sem pacote abre normalmente, em vez de falhar por pasta ausente.
+
+**Verificacao em dois niveis.** `verify_quick` (hash so do executavel) atende as `capabilities` da
+tela, consultadas a cada abertura do modal; `verify_base` (hash de cada arquivo do bundle, sem
+tolerar sobra) roda imediatamente antes de compilar. Sem essa divisao, abrir a tela reprocessaria
+894 MiB.
+
+**Ordem de pos-instalacao travada no `.iss`:** validar o `.sepack` -> importar com
+`--conflict preserve` e relatorio -> `--self-test --expect-package-report --expect-events` -> so
+entao oferecer abrir o app. Reinicio por pre-requisito grava um `post-install.cmd` que repete as
+DUAS etapas; agendar so o self-test deixaria a instalacao sem os eventos. A associacao do `.sepack`
+usa `HKA\Software\Classes` com `uninsdeletekey`, e o `[UninstallDelete]` continua tocando apenas
+`{app}`: `%LOCALAPPDATA%\SmartEvents` sobrevive a desinstalacao.
+
+**`sync_events_from_local_files()` (novo em `core/database.py`).** Sincronizacao incremental do
+`server_data` para o banco, sem HTTP e **sem remover nada** - o oposto de
+`sync_events_from_server()`, que e autoritativo e apaga evento local ausente na resposta. Usada
+depois de `--import-event-package` (so os ids que o pacote tocou) e pelo self-test do instalador.
+
+**Payload pre-comprimido: prototipado e REPROVADO.** O plano previa armazenar
+`SmartEvents-base.zip` no Setup com `nocompression` + `extractarchive` para nao recomprimir ~894 MiB
+a cada selecao. O compilador recusa: `Flag "external" must be used if flag "extractarchive" is
+used` - o ZIP teria de viajar FORA do `Setup.exe`, quebrando o criterio de aceite "o destinatario
+recebe um unico Setup autocontido". Ficou o `[Files]` recursivo, que e o caminho homologado para
+atualizacao/desinstalacao. O ZIP continua sendo gerado: ele e o artefato que move o cache para
+outra maquina de release sem recompilar, e a sua entrada no manifesto prova que o cache nao foi
+trocado. Custo registrado: a compressao LZMA2 do bundle continua sendo paga por distribuicao; o
+ganho da fase (nao rodar o PyInstaller) esta intacto.
+
+**Capacidade resolvida em tempo de execucao.** `capabilities.formats` passa a incluir `full_setup`
+somente quando ha build-base integro da versao, ISCC presente e espaco em disco; caso contrario o
+formato aparece desabilitado com o motivo e a acao administrativa
+(`python build.py base`). A tela **nunca** dispara o PyInstaller por um clique.
+
+**Validacao executada:** suite completa (`769 passed, 10 skipped`, contra 741 antes da fase);
+`installer/SmartEvents.iss` compilado de verdade pelo ISCC nas duas formas - com pacote (Fase 3) e
+sem pacote (legado) -, ambas rc=0; `python build.py base` real produzindo o bundle generico de
+894 MiB; estudio real em `127.0.0.1:8031` com `/` em 404, a pagina em 200 e `capabilities`
+reportando `base_ready=false` com motivo e acao antes do cache existir.
+
+---
+
+## 2026-09-01 — Coluna de escopo na EP + mapa do cadastro (zoom e desempenho)
+
+Três pedidos do operador, com uma causa raiz compartilhada entre os dois últimos.
+
+**1. Coluna opcional de escopo na EP (`server.py::parse_sites`).** Segue exatamente o precedente
+da coluna `cluster` (Fase 4): fora de `required`, apelidos em `col_mappings`
+(`is_event_site/site_evento/no_evento/dentro/dentro_poligono/in_event/in_polygon`), normalizada por
+`_normalize_event_site_flag`. Aceita `1/0`, `sim/não`, `dentro/fora`, `in/out`, `true/false`.
+
+**Decisões travadas:**
+
+- **O campo já existia; só a origem faltava.** `is_event_site` estava plumbado ponta a ponta
+  (`core/models.py`, schema em `core/database.py`, agregação em `Api._as_merged_site`, filtro
+  "só sites do evento" em `frontend/js/map.js`), mas `parse_sites` gravava `True` fixo. A coluna
+  não criou conceito novo — passou a alimentar um campo que nascia morto.
+- **Célula vazia não vota; sem nenhum voto o site fica dentro.** Preserva as planilhas legadas sem
+  a coluna, que não podem mudar de comportamento.
+- **Linhas divergentes do mesmo site resolvem por OR** — um "dentro" basta. É a mesma semântica de
+  `Api._as_merged_site`, para a fusão 4G/5G e a EP não discordarem sobre o mesmo site.
+
+**2. Zoom travado no mapa do cadastro — causa raiz.** `map.on('zoomend', () => plotSitesOnMap())`
+e `plotSitesOnMap` terminava em `map.fitBounds(...)`. Todo zoom (roda ou botões +/−) reenquadrava
+o mapa no mesmo nível: o controle funcionava e era revertido logo em seguida. Uma causa só para os
+dois sintomas relatados. `fitBounds` passou a viver atrás de `plotSitesOnMap({ fit: true })`,
+chamado apenas na carga explícita de dados (upload da planilha e abertura de evento para edição) —
+o mesmo desenho que o app cliente já usava em `frontend/js/map.js` (`fitToEvent` separado do
+`zoomend`). O cadastro tinha divergido desse padrão.
+
+**3. Culling de viewport.** Medido nos eventos reais: Rock In Rio 2026 tem **2.479 sites / 24.086
+células**. Cada `zoomend` destruía e recriava os 2.479 marcadores, remontando ~24 mil `<path>` SVG
+e religando 2.479 popups, de forma síncrona. Agora só os sites dentro da viewport (mais margem de
+25%) ficam no DOM, `zoomend`/`moveend` entram por debounce de 120 ms e o marcador visível é
+reaproveitado via `setIcon` — mesmo padrão que `refreshClusterRings` já usava. `siteMarkersById`
+virou o único registro de marcadores (o array paralelo `siteMarkers` era redundante).
+
+**4. Polígono automático: envoltória convexa em vez de bounding box.** Só os sites com
+`is_event_site !== false` entram no cálculo (`polygonSourceSites`). Numa EP de teste com evento
+compacto + anel de vizinhos, a área caiu de 79,97 km² (bbox de todos) para 6,90 km² — **91% menor**.
+
+**Decisão travada: o afastamento é a envoltória dos círculos, não um offset por normal.** A
+primeira implementação usava junta em miter (normal externa por aresta + bissetriz). Ela **falhou
+no corredor retilíneo** — sites alinhados numa avenida (caso RoadShow) fazem a envoltória degenerar
+num sliver, o sinal da área de Gauss vira ruído numérico e a orientação "para fora" se inverte:
+folga medida de 0 m com padding de 500 m. `bufferedHull` troca isso por: cada vértice do contorno
+vira um círculo de `padding` (24 segmentos) e a envoltória desses pontos **é** o buffer. Sem
+normal, orientação, junta nem caso degenerate — um site só, dois sites, sites colineares e nuvem
+passam pelo mesmo caminho. Custo: 2.479 sites → 67 vértices em 8 ms. O erro de corda inscrita é de
+0,85% (496 m para padding de 500 m), irrelevante.
+
+**Sinal visual:** site marcado como fora aparece com setor esmaecido (opacidade 0,28) e miolo
+vazado, e o popup diz "Fora do polígono (vizinho)". A mensagem do upload informa quantos sites
+vieram marcados como fora — o operador confere a leitura da planilha sem abrir o mapa.
+
+**Validação executada:** `tests/test_server_parse_sites.py` (53 passed) e
+`tests/test_server_frontend_polygon_map.py` (9 passed, Chromium real). A regressão do zoom foi
+verificada por reintrodução deliberada do bug: com `zoomend` reenquadrando de novo, 4 dos 9 testes
+falham, incluindo o clique real no botão `+` do Leaflet.

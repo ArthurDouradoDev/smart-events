@@ -9,6 +9,12 @@ from pathlib import Path
 from core.paths import data_dir, resource_dir
 
 
+# Pastas que a instalacao precisa ter mesmo antes de qualquer pacote ser aplicado.
+# O build-base da Fase 3 e generico: ele nao carrega evento algum, e o primeiro
+# boot precisa abrir num estado vazio valido em vez de falhar por pasta ausente.
+SEED_DIRS = ("events", "clientes", "vips", "logos")
+
+
 def bundled_seed_dir() -> Path:
     return resource_dir() / "server_data"
 
@@ -17,12 +23,19 @@ def operator_seed_dir() -> Path:
     return data_dir() / "server_data"
 
 
+def ensure_data_layout(root: Path) -> Path:
+    """Cria as pastas vazias da estrutura padrao, sem tocar no que ja existe."""
+    for name in SEED_DIRS:
+        (root / name).mkdir(parents=True, exist_ok=True)
+    return root
+
+
 def seed_operator_data() -> Path:
     """Copia somente arquivos ausentes, preservando ajustes do operador."""
     source = bundled_seed_dir()
     target = operator_seed_dir()
     if source.resolve() == target.resolve():
-        return target
+        return ensure_data_layout(target)
     if not source.is_dir():
         raise FileNotFoundError(f"Semente embutida ausente: {source}")
     target.mkdir(parents=True, exist_ok=True)
@@ -34,7 +47,7 @@ def seed_operator_data() -> Path:
         elif not target_path.exists():
             target_path.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(source_path, target_path)
-    return target
+    return ensure_data_layout(target)
 
 
 def _json_files(path: Path) -> list[tuple[Path, dict]]:
@@ -254,7 +267,7 @@ def _validate_profile_seed(
 
 
 def validate_seed(path: Path | None = None) -> dict:
-    """Valida o recorte declarado no manifesto ou o legado RoadShow/TIM."""
+    """Valida a semente generica, o recorte por perfil ou o legado RoadShow/TIM."""
     root = path or bundled_seed_dir()
     errors: list[str] = []
     try:
@@ -264,6 +277,24 @@ def validate_seed(path: Path | None = None) -> dict:
         manifest = _load_manifest(root)
     except Exception as exc:
         return {"ok": False, "errors": [str(exc)], "path": str(root)}
+
+    # Build-base da Fase 3: semente sem evento, sem cliente e sem VIP. O que sobra
+    # para validar sao as regras estruturais de qualquer colecao — que, num
+    # conjunto vazio, passam sem erro. Um cadastro que apareca aqui por engano
+    # ainda e validado normalmente.
+    if manifest and manifest.get("generic") is True:
+        generic_profile = manifest.get("profile") if isinstance(manifest.get("profile"), dict) else {}
+        errors.extend(validate_collection(events, clientes, vips))
+        return {
+            "ok": not errors,
+            "errors": errors,
+            "path": str(root),
+            "events": len(events),
+            "clientes": len(clientes),
+            "vips": len(vips),
+            "generic": True,
+            "profile": generic_profile or {"id": "smartevents-base", "client": ""},
+        }
 
     profile = manifest.get("profile") if manifest and manifest.get("schema_version") == 2 else None
     if isinstance(profile, dict):
@@ -296,5 +327,6 @@ def validate_seed(path: Path | None = None) -> dict:
         "events": len(events),
         "clientes": len(clientes),
         "vips": len(vips),
+        "generic": False,
         "profile": profile or {"id": "roadshow-tim", "client": "TIM"},
     }

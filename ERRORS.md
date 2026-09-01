@@ -965,3 +965,81 @@ substituição de logo com extensão diferente, cliente inexistente (404) e form
    nada sobre nomes resolvidos dentro das funções.
 3. Uma varredura AST de nomes carregados mas nunca ligados custa segundos e pega essa classe inteira
    de erro; vale rodar sobre `server.py`, `main.py` e `api/api.py` ao mexer nos imports deles.
+
+---
+
+## 2026-09-01 - `#13#10` no inicio de linha aborta a compilacao do Inno Setup
+
+**Como apareceu:** a primeira compilacao do `installer/SmartEvents.iss` da Fase 3 falhou com
+`Error on line 341: Unknown preprocessor directive. Compile aborted.` A linha era apenas a
+continuacao de uma concatenacao Pascal:
+
+```pascal
+Detail := 'A importacao dos eventos falhou (codigo ' + IntToStr(ResultCode) + ').' +
+  #13#10 + 'Relatorio: ' + ImportReportPath;
+```
+
+**Causa raiz:** o pre-processador do Inno Setup (ISPP) trata qualquer linha cujo primeiro
+caractere nao-branco seja `#` como uma **diretiva** (`#define`, `#ifdef`, `#include`). Ele age
+antes do compilador Pascal, entao nao importa que ali `#13#10` seja uma constante de caractere
+perfeitamente valida dentro de uma expressao. O codigo anterior nunca tinha esbarrado nisso porque
+todos os `#13#10` estavam no meio da linha.
+
+**Por que sobreviveu ate a compilacao:** nenhum teste compila o `.iss`. Os testes estruturais leem
+o arquivo como texto e confirmam ordem, flags e chaves de registro - o que e util, mas nao substitui
+passar o script pelo compilador de verdade.
+
+**Correcao:** reposicionar as quebras para que `#13#10` nunca abra uma linha. No mesmo ciclo o ISCC
+apontou mais duas recusas que so aparecem compilando: `SolidCompression` declarado duas vezes (um
+`#ifdef` acrescentava a diretiva que ja existia no `[Setup]`) e `Flag "external" must be used if
+flag "extractarchive" is used`.
+
+**Regras:**
+
+1. Em `.iss`, `#13#10` (e qualquer `#`) nunca abre uma linha; quebre a concatenacao **depois** do
+   `+`, mantendo a constante no fim da linha anterior.
+2. Um `#ifdef` que acrescenta diretiva de `[Setup]` precisa do `#else` correspondente, ou a
+   diretiva incondicional que ele duplica tem de sair.
+3. Alterar o `.iss` exige **compila-lo** antes de entregar - nas duas formas que o projeto gera
+   (com pacote, da Fase 3, e sem pacote, do fluxo legado). Teste estrutural de texto nao pega erro
+   de preprocessador, diretiva duplicada nem combinacao invalida de flags.
+
+---
+
+## 2026-09-01 — Offset de polígono por normal externa colapsou em sites colineares
+
+**O que quebrou:** a primeira versão do polígono automático por envoltória convexa afastava o
+contorno com junta em miter — normal externa de cada aresta, bissetriz no vértice, `padding/cos`
+como comprimento do canto. Passou no caso da nuvem de sites (folga medida de exatos 500 m para
+padding de 500 m) e **falhou no corredor retilíneo**: folga de 0 m, com sites caindo em cima da
+aresta do polígono.
+
+**Causa raiz:** sites alinhados numa avenida (o caso RoadShow, que existe no `server_data`) fazem a
+envoltória convexa degenerar num sliver — um polígono cuja área é da ordem do erro de ponto
+flutuante da conversão graus→metros. O sinal da área de Gauss, que decidia a orientação do anel
+(e portanto qual lado é "fora"), passa a ser ruído numérico. Com a orientação invertida em parte do
+anel, as normais apontam para dentro e o afastamento colapsa a figura em vez de expandi-la.
+
+**Por que quase passou:** o teste da nuvem circular — o caso "óbvio" — dava 500 m exatos. Sem um
+caso colinear explícito o erro entraria na entrega. O sintoma também não é uma exceção: o polígono
+sai desenhado, só que errado.
+
+**Correção:** trocar o offset por normal pela **envoltória dos círculos**. Cada vértice do contorno
+vira um círculo de raio `padding` (24 segmentos) e a envoltória convexa desses pontos já é o buffer,
+com cantos arredondados. Não existe normal, orientação, junta nem ramo degenerado: um site só, dois
+sites, sites colineares, corredor leste-oeste, corredor norte-sul e nuvem passam pelo mesmo caminho
+e todos medem a folga correta. Menos código que a versão com miter.
+
+**Regras:**
+
+1. Geometria que depende da **orientação** de um anel (normal externa, sinal da área de Gauss,
+   winding) é frágil quando o anel pode degenerar. Antes de escolher esse desenho, pergunte se a
+   entrada pode ser colinear — numa EP de telecom, pode: evento em avenida, rodovia ou orla.
+2. Teste de geometria precisa de **casos degenerados explícitos**: 1 ponto, 2 pontos, N pontos
+   colineares (e colineares nos dois eixos, não só na diagonal). O caso "bonito" não prova nada
+   sobre eles.
+3. Prefira a formulação que **não tem ramo especial**. Quando uma alternativa elimina a
+   classificação de casos em vez de tratá-la, ela costuma ser ao mesmo tempo mais curta e mais
+   robusta — foi o que aconteceu aqui.
+4. Verifique geometria por **medição**, não por inspeção visual: distância mínima de cada ponto de
+   entrada às arestas do resultado tem de bater com o padding pedido.

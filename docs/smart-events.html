@@ -609,6 +609,7 @@ const API = {
     <li><strong>Mapeamento flexível de colunas</strong> (case-insensitive), ex.: <code>lat/latitude/coordenada y</code>, <code>lng/lon/longitude</code>, <code>enodebid/site_id/codigo site</code>, <code>cellid/celula</code>, <code>nename/sitename/estacao</code>, <code>cellname</code>, <code>azimuth/azimute/direcao</code>.</li>
     <li>Colunas obrigatórias: <code>enodebid, cellid, nename, cellname, longitude, latitude, azimuth</code> — ausências retornam 400.</li>
     <li>Agrupa células por site (<code>enodebid</code>), pula linhas sem coordenada, deduplica células e devolve a hierarquia normalizada com <code>beamwidth</code> padrão de 120°.</li>
+    <li><strong>Coluna opcional de escopo</strong> (<code>is_event_site/site_evento/no_evento/dentro/dentro_poligono/in_event/in_polygon</code>): marca o site como dentro ou fora do polígono do evento. Aceita <code>1/0</code>, <code>sim/não</code>, <code>dentro/fora</code>, <code>in/out</code> e <code>true/false</code>. Célula vazia não vota; linhas divergentes do mesmo site resolvem por OR, como a fusão 4G/5G. Sem a coluna, todo site continua dentro. Alimenta o <code>is_event_site</code> e restringe o cálculo automático do polígono aos sites de dentro.</li>
   </ul>
   <pre><code>{ "ok": true, "sites": [
   { "id": "136785", "name": "18NLRJCE44", "lat": -22.906, "lng": -43.182,

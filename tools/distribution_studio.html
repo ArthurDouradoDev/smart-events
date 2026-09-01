@@ -395,6 +395,9 @@
         <button class="btn btn-primary" id="btn-distribution-download" style="display:none;">
           Baixar pacote
         </button>
+        <button class="btn btn-primary" id="btn-distribution-download-setup" style="display:none;">
+          Baixar instalador
+        </button>
         <button class="btn btn-primary" id="btn-distribution-generate" disabled>
           Gerar
         </button>
@@ -421,6 +424,7 @@
     let distributionCapabilities = null;
     let distributionPreview = null;
     let distributionJobId = null;
+    let distributionJobFormat = 'event_package';
     let distributionPollTimer = null;
     let distributionPollDelay = 0;
 
@@ -553,6 +557,8 @@
         .addEventListener('click', () => downloadDistributionArtifact('download'));
       document.getElementById('btn-distribution-download-manifest')
         .addEventListener('click', () => downloadDistributionArtifact('manifest'));
+      document.getElementById('btn-distribution-download-setup')
+        .addEventListener('click', () => downloadDistributionArtifact('setup'));
       // <dialog> já entrega foco preso e Esc; só precisamos parar o polling.
       distributionModal.addEventListener('cancel', () => stopDistributionPolling());
       distributionModal.addEventListener('close', () => stopDistributionPolling());
@@ -568,6 +574,9 @@
       const done = pane === 'success';
       document.getElementById('btn-distribution-download').style.display = done ? '' : 'none';
       document.getElementById('btn-distribution-download-manifest').style.display = done ? '' : 'none';
+      // O botão do instalador só existe quando o job realmente produziu um Setup.
+      document.getElementById('btn-distribution-download-setup').style.display =
+        done && distributionJobFormat === 'full_setup' ? '' : 'none';
     }
 
     async function openDistributionModal() {
@@ -579,7 +588,9 @@
       document.getElementById('distribution-preview-content').style.display = 'none';
       document.getElementById('btn-distribution-generate').disabled = true;
       if (!distributionModal.open) distributionModal.showModal();
-      await loadDistributionCapabilities();
+      // Sempre relê: o operador pode ter rodado `python build.py base` entre uma
+      // revisão e outra, e a tela precisa refletir isso sem recarregar a página.
+      await loadDistributionCapabilities(true);
       await requestDistributionPreview();
     }
 
@@ -588,8 +599,8 @@
       if (distributionModal.open) distributionModal.close();
     }
 
-    async function loadDistributionCapabilities() {
-      if (distributionCapabilities) return distributionCapabilities;
+    async function loadDistributionCapabilities(force) {
+      if (distributionCapabilities && !force) return distributionCapabilities;
       try {
         const res = await fetch(`${STUDIO_API}/capabilities`);
         if (!res.ok) throw new Error('HTTP ' + res.status);
@@ -712,6 +723,7 @@
         <div class="distribution-section">
           <h4>Formato</h4>
           <div id="distribution-format-list">${renderDistributionFormats()}</div>
+          ${renderDistributionBaseNote()}
         </div>`;
 
       document.getElementById('distribution-preview-loading').style.display = 'none';
@@ -738,6 +750,24 @@
       }).join('');
     }
 
+    // Build-base usado pelo instalador completo. Quando ele falta ou está
+    // desatualizado, a tela mostra a ação administrativa — nunca dispara o
+    // PyInstaller por um clique comum.
+    function renderDistributionBaseNote() {
+      const caps = distributionCapabilities || {};
+      if (caps.base_ready && (caps.formats || []).includes('full_setup')) {
+        return `<div class="distribution-issue info" id="distribution-base-note">
+          Build-base ${escapeHTML(caps.base_version || '?')} de
+          ${escapeHTML(caps.base_built_at_utc || '?')}. O instalador completo reaproveita
+          esse programa já compilado: gerar é rápido, mas o arquivo final é grande.
+        </div>`;
+      }
+      return `<div class="distribution-issue warning" id="distribution-base-note">
+        ⚠ Instalador completo indisponível: ${escapeHTML(caps.setup_reason || 'build-base ausente')}
+        ${caps.setup_action ? '<br><span class="mono">' + escapeHTML(caps.setup_action) + '</span>' : ''}
+      </div>`;
+    }
+
     function selectedDistributionFormat() {
       const checked = document.querySelector('input[name="distribution-format"]:checked');
       return checked ? checked.value : 'event_package';
@@ -745,6 +775,7 @@
 
     async function startDistributionJob() {
       const nameInputEl = document.getElementById('distribution-name-input');
+      distributionJobFormat = selectedDistributionFormat();
       showDistributionPane('progress');
       renderDistributionSteps({ state: 'queued', progress: { steps: ['queued'], step: 'queued' } });
       document.getElementById('distribution-progress-msg').textContent = 'Enviando a seleção...';
@@ -755,7 +786,7 @@
           body: JSON.stringify({
             event_ids: [...selectedEventIds],
             name: nameInputEl ? nameInputEl.value.trim() : '',
-            format: selectedDistributionFormat(),
+            format: distributionJobFormat,
           }),
         });
         const payload = await res.json();
@@ -828,7 +859,10 @@
     function renderDistributionJob(job) {
       if (job.state === 'ready') {
         stopDistributionPolling();
+        distributionJobFormat = job.format || distributionJobFormat;
         const pkg = (job.artifacts && job.artifacts.package) || {};
+        const setup = (job.artifacts && job.artifacts.setup) || null;
+        const base = job.base || null;
         const counts = job.counts || {};
         document.getElementById('distribution-success').innerHTML = `
           <div class="distribution-issue info">Distribuição pronta para download.</div>
@@ -839,6 +873,13 @@
             <div class="distribution-row"><span>Gerado em</span><span>${escapeHTML(job.finished_at_utc || '')}</span></div>
             <div class="distribution-row"><span>Conteúdo</span><span>${counts.events || 0} eventos · ${counts.clientes || 0} clientes · ${counts.vips || 0} VIPs</span></div>
           </div>
+          ${setup ? `<div class="distribution-section" id="distribution-setup-summary">
+            <h4>Instalador completo</h4>
+            <div class="distribution-row"><span>Arquivo</span><span class="mono">${escapeHTML(setup.name || '')}</span></div>
+            <div class="distribution-row"><span>Tamanho</span><span>${formatDistributionBytes(setup.bytes)}</span></div>
+            <div class="distribution-row"><span>SHA-256</span><span class="mono" style="word-break:break-all;">${escapeHTML(setup.sha256 || '')}</span></div>
+            <div class="distribution-row"><span>Build-base</span><span>${escapeHTML((base && base.version) || '')} · ${escapeHTML((base && base.built_at_utc) || '')}</span></div>
+          </div>` : ''}
           ${(job.warnings || []).map(item =>
             `<div class="distribution-issue warning">⚠ ${escapeHTML(item)}</div>`).join('')}`;
         showDistributionPane('success');
@@ -895,6 +936,11 @@
       document.body.appendChild(link);
       link.click();
       link.remove();
+      if (kind === 'setup') {
+        clearEventSelection();
+        closeDistributionModal();
+        return;
+      }
       if (kind === 'download') {
         // A distribuição foi entregue: manter os eventos marcados convidaria a
         // gerar o mesmo pacote de novo sem perceber.

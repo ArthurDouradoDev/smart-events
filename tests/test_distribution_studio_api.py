@@ -99,7 +99,15 @@ def source(tmp_path):
 
 @pytest.fixture
 def service(tmp_path, source):
-    return ds.DistributionService(root=tmp_path / "distributions", source_dir=source)
+    # `dist_dir` aponta para uma pasta vazia de propósito: estes testes cobrem o
+    # formato `.sepack`, e o resultado não pode depender de o desenvolvedor ter (ou
+    # não) um build-base real em `dist/base`. O Setup completo tem os seus em
+    # `tests/test_distribution_build.py`.
+    return ds.DistributionService(
+        root=tmp_path / "distributions",
+        source_dir=source,
+        dist_dir=tmp_path / "sem-build-base",
+    )
 
 
 @pytest.fixture
@@ -145,15 +153,23 @@ def test_event_list_skips_unreadable_files_instead_of_failing(api, source):
 
 # ── Capacidades ──────────────────────────────────────────────────────
 
-def test_capabilities_lists_event_package_only_in_phase2(api):
+def test_capabilities_hide_full_setup_when_the_host_has_no_base(api):
+    """Sem build-base no host, o Setup completo aparece desabilitado e com o motivo.
+
+    Na Fase 3 essa capacidade passou a ser resolvida em tempo de execução: o
+    formato existe, mas só é oferecido quando o cache e o compilador existem.
+    """
     capabilities = studio.get_distribution_capabilities()
 
     assert capabilities["formats"] == ["event_package"]
+    assert capabilities["base_ready"] is False
     formats = {item["id"]: item for item in capabilities["available_formats"]}
     assert formats["event_package"]["enabled"] is True
-    # O Setup completo é oferecido como opção visível e desabilitada, com o motivo.
+    # O Setup completo é oferecido como opção visível e desabilitada, com o motivo
+    # e a ação administrativa — a interface nunca dispara o PyInstaller sozinha.
     assert formats["full_setup"]["enabled"] is False
-    assert "build-base" in formats["full_setup"]["reason"]
+    assert "build-base" in formats["full_setup"]["reason"].lower()
+    assert formats["full_setup"]["action"] == ds.FULL_SETUP_ACTION
     assert capabilities["max_events"] == ds.MAX_EVENTS_PER_JOB
 
 
@@ -265,14 +281,14 @@ def test_create_job_uses_only_server_selected_paths(api, service, tmp_path):
     assert not (tmp_path / "outra-origem").exists()
 
 
-def test_create_job_rejects_the_setup_format_until_phase3(api):
+def test_create_job_rejects_the_setup_format_without_a_base(api):
     error = _http_error(
         studio.post_distribution, {"event_ids": ["barretos-2026"], "format": "full_setup"}
     )
 
     assert error.status_code == 400
     assert error.detail["code"] == "format.unsupported"
-    assert "build-base" in error.detail["message"]
+    assert "build-base" in error.detail["message"].lower()
 
 
 def test_job_transitions_to_ready_and_downloads_registered_file(api, service):

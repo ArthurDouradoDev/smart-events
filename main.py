@@ -150,6 +150,19 @@ def _get_arg(flag: str, default=None):
     return default
 
 
+def _get_list_arg(flag: str) -> list[str]:
+    """Lê `--flag a,b` ou `--flag a b c` (o instalador passa a lista separada por vírgula)."""
+    raw = _get_arg(flag)
+    if not raw or raw.startswith("--"):
+        return []
+    values = [raw]
+    idx = sys.argv.index(flag) + 2
+    while idx < len(sys.argv) and not sys.argv[idx].startswith("--"):
+        values.append(sys.argv[idx])
+        idx += 1
+    return [part.strip() for value in values for part in value.split(",") if part.strip()]
+
+
 def _show_message_box(title: str, message: str, failed: bool, warning: bool = False) -> None:
     """Diálogo curto de resultado; não abre a janela principal."""
     if os.name != "nt":
@@ -160,6 +173,21 @@ def _show_message_box(title: str, message: str, failed: bool, warning: bool = Fa
         ctypes.windll.user32.MessageBoxW(None, message, title, icon)
     except Exception as exc:  # pragma: no cover - ambiente sem user32
         logger.warning("Não foi possível exibir o diálogo: %s", exc)
+
+
+def _sync_imported_events(event_ids: list[str]) -> None:
+    """Leva ao banco local só os eventos que o pacote tocou. Nunca remove nada."""
+    ids = [value for value in event_ids if value]
+    if not ids:
+        return
+    try:
+        from core import database as db
+
+        db.init_db()
+        stats = db.sync_events_from_local_files(ids)
+        logger.info("Eventos sincronizados apos a importacao: %s", stats)
+    except Exception as exc:  # noqa: BLE001 - o pacote já foi gravado com sucesso
+        logger.error("Falha ao sincronizar os eventos importados no banco local: %s", exc)
 
 
 def _run_event_package_mode() -> int:
@@ -194,6 +222,15 @@ def _run_event_package_mode() -> int:
             exit_code = 3
         else:
             exit_code = 4 if result.conflicts else 0
+            # O app que já esteja aberto lê os eventos do banco, não do
+            # `server_data`. Sincronizamos SOMENTE os ids que o pacote tocou: o
+            # caminho autoritativo (`sync_events_from_server`) apagaria o evento
+            # local ausente na origem, e importação de pacote é incremental.
+            _sync_imported_events([
+                str(item.get("record_id") or "")
+                for item in payload.get("actions") or []
+                if item.get("kind") == "event" and item.get("action") != "skip"
+            ])
 
     report_arg = _get_arg("--report", None)
     if report_arg:
@@ -552,7 +589,11 @@ if __name__ == "__main__":
     elif "--self-test" in sys.argv:
         from core.self_test import run_self_test
         report_arg = _get_arg("--report", None)
-        exit_code, report_path, report = run_self_test(report_arg)
+        exit_code, report_path, report = run_self_test(
+            report_arg,
+            expect_events=_get_list_arg("--expect-events"),
+            expect_package_report=_get_arg("--expect-package-report", None),
+        )
         logger.info("Diagnostico %s: %s", "aprovado" if exit_code == 0 else "reprovado", report_path)
         if "--show-dialog" in sys.argv:
             import ctypes

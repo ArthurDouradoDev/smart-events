@@ -1204,6 +1204,52 @@ def sync_events_from_server() -> dict:
     return {"sincronizados": sincronizados, "erros": erros, "removidos": removidos}
 
 
+def sync_events_from_local_files(event_ids=None) -> dict:
+    """Sincronização INCREMENTAL do `server_data` local para o banco, sem HTTP.
+
+    Diferente de `sync_events_from_server()`, que trata a resposta do servidor como
+    fonte autoritativa e apaga o evento local ausente nela: importar um pacote é uma
+    operação incremental, então nada que já estava no banco pode sumir só porque não
+    veio no pacote. Nenhum `delete_event()` acontece aqui.
+
+    Usada em dois momentos: logo após `--import-event-package` (sincroniza somente os
+    IDs afetados, para o app que já esteja aberto enxergá-los) e no diagnóstico do
+    instalador, que precisa confirmar os eventos no banco sem subir servidor algum.
+    """
+    from core.paths import server_data_dir
+
+    wanted = {str(value).strip() for value in (event_ids or []) if str(value).strip()} or None
+    directory = server_data_dir() / "events"
+    if not directory.is_dir():
+        return {"sincronizados": 0, "erros": 0, "msg": "Nenhum server_data local."}
+
+    sincronizados = 0
+    erros = 0
+    for file_path in sorted(directory.glob("*.json")):
+        try:
+            config = json.loads(file_path.read_text(encoding="utf-8"))
+            if not isinstance(config, dict) or "id" not in config or "name" not in config:
+                continue
+            if wanted is not None and str(config["id"]) not in wanted:
+                continue
+
+            # Mesma preservação do caminho HTTP: um evento já ativo/encerrado
+            # localmente não regride para SCHEDULED por causa do JSON de origem.
+            local_event = get_event(config["id"])
+            if local_event:
+                local_status = local_event.get("status", "SCHEDULED")
+                if local_status in ("ACTIVE", "ENDED") and config.get("status", "SCHEDULED") == "SCHEDULED":
+                    config["status"] = local_status
+
+            save_event(config)
+            sincronizados += 1
+        except Exception as e:
+            _db_logger.warning(f"Falha ao sincronizar {file_path.name} do server_data local: {e}")
+            erros += 1
+
+    return {"sincronizados": sincronizados, "erros": erros, "removidos": 0}
+
+
 def export_event_to_server(config_dict: dict) -> bool:
     """
     Exporta a configuração de um evento local para o servidor de API central.

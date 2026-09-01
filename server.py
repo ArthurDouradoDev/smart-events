@@ -101,6 +101,33 @@ def _normalize_technology(value, frequency: Optional[str]) -> Optional[str]:
     return None
 
 
+def _normalize_event_site_flag(value) -> Optional[bool]:
+    """Lê a coluna opcional que diz se o site fica dentro do polígono do evento.
+
+    Devolve ``None`` quando a célula está vazia — quem chama trata ausência como
+    "dentro", preservando as planilhas legadas que não têm a coluna. Aceita as
+    formas que aparecem na prática nas EPs: 1/0, sim/não, dentro/fora e in/out.
+    """
+    if _is_missing_cell_value(value):
+        return None
+
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return bool(value)
+
+    token = re.sub(r"[^A-Z0-9]+", "", str(value).upper())
+    dentro = {"1", "S", "SIM", "Y", "YES", "TRUE", "V", "X", "DENTRO", "IN",
+              "EVENTO", "INTERNO"}
+    fora = {"0", "N", "NAO", "NO", "FALSE", "F", "FORA", "OUT", "VIZINHO",
+            "VIZINHA", "BORDA", "BUFFER", "EXTERNO"}
+    if token in dentro:
+        return True
+    if token in fora:
+        return False
+    return None
+
+
 app = FastAPI(title="SmartEvents Central Server")
 
 # Configure CORS so any client on the network can call it
@@ -212,6 +239,9 @@ async def parse_sites(file: UploadFile = File(...)):
             'tech': ['tech', 'technology', 'tecnologia', 'tecnologia móvel', 'rat'],
             'cluster': ['cluster', 'grupo', 'agrupamento', 'setor', 'area', 'área'],
             'earfcn': ['dlearfcn', 'dl_earfcn', 'earfcn', 'dl earfcn', 'dlearfcnid'],
+            'is_event_site': ['is_event_site', 'site_evento', 'no_evento', 'no evento',
+                              'dentro', 'dentro_poligono', 'dentro do poligono',
+                              'dentro do polígono', 'in_event', 'in_polygon'],
         }
 
         # Rename columns if candidates match
@@ -231,6 +261,7 @@ async def parse_sites(file: UploadFile = File(...)):
         # Group by site (enodebid)
         sites_dict = {}
         clusters_dict = {}  # nome do cluster -> set de site_ids (coluna opcional; §1 do plano)
+        event_site_flags = {}  # site_id -> bool, só para linhas com a coluna preenchida
         for _, row in df.iterrows():
             # Skip rows with missing required columns
             if pd.isna(row['enodebid']) or pd.isna(row['latitude']) or pd.isna(row['longitude']):
@@ -292,6 +323,14 @@ async def parse_sites(file: UploadFile = File(...)):
                     cell["earfcn"] = earfcn
                 sites_dict[site_id]["cells"].append(cell)
 
+            # Coluna opcional que marca o site como dentro ou fora do polígono.
+            # Semântica de OR igual à da fusão 4G/5G em Api._as_merged_site: basta uma
+            # linha explícita dizer "dentro" para o site valer como site do evento.
+            # Célula vazia não vota — sem nenhum voto o site fica dentro (legado).
+            event_site_val = _normalize_event_site_flag(row.get('is_event_site'))
+            if event_site_val is not None:
+                event_site_flags[site_id] = event_site_flags.get(site_id, False) or event_site_val
+
             # Coluna opcional de cluster: valores separados por ";" atribuem o site
             # a vários clusters de uma vez (N:N), preservado pela importação como semente.
             cluster_val = row.get('cluster')
@@ -301,6 +340,10 @@ async def parse_sites(file: UploadFile = File(...)):
                     if not cluster_name:
                         continue
                     clusters_dict.setdefault(cluster_name, set()).add(site_id)
+
+        for site_id, flag in event_site_flags.items():
+            if site_id in sites_dict:
+                sites_dict[site_id]["is_event_site"] = flag
 
         sites_list = list(sites_dict.values())
         clusters_list = [

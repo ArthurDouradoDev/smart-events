@@ -169,3 +169,101 @@ def test_dlearfcn_invalido_e_ignorado():
     cell = _parse(csv_text)["sites"][0]["cells"][0]
 
     assert "earfcn" not in cell
+
+
+# ── Coluna opcional que marca o site dentro/fora do polígono ──────────────
+
+
+@pytest.mark.parametrize("header", [
+    "is_event_site", "site_evento", "no_evento", "dentro",
+    "dentro_poligono", "in_event", "in_polygon",
+])
+def test_coluna_dentro_do_poligono_aceita_os_apelidos_da_ep(header):
+    csv_text = (
+        f"{_BASE_COLUMNS},{header}\n"
+        "SITE1,SITE1-A,SITE1-A,-23.5,-46.6,0,111,sim\n"
+        "SITE2,SITE2-A,SITE2-A,-23.6,-46.7,0,222,nao\n"
+    )
+
+    sites = {s["id"]: s for s in _parse(csv_text)["sites"]}
+
+    assert sites["111"]["is_event_site"] is True
+    assert sites["222"]["is_event_site"] is False
+
+
+@pytest.mark.parametrize("valor,esperado", [
+    ("sim", True), ("SIM", True), ("s", True), ("1", True), ("true", True),
+    ("dentro", True), ("in", True), ("x", True),
+    ("nao", False), ("não", False), ("n", False), ("0", False),
+    ("false", False), ("fora", False), ("out", False), ("vizinho", False),
+    ("borda", False), ("buffer", False),
+])
+def test_valores_dentro_e_fora_reconhecidos(valor, esperado):
+    csv_text = (
+        f"{_BASE_COLUMNS},dentro\n"
+        f"SITE1,SITE1-A,SITE1-A,-23.5,-46.6,0,111,{valor}\n"
+    )
+
+    assert _parse(csv_text)["sites"][0]["is_event_site"] is esperado
+
+
+def test_coluna_ausente_mantem_todo_site_dentro_do_evento():
+    """Planilha legada, sem a coluna, não pode mudar de comportamento."""
+    csv_text = (
+        f"{_BASE_COLUMNS}\n"
+        "SITE1,SITE1-A,SITE1-A,-23.5,-46.6,0,111\n"
+    )
+
+    assert _parse(csv_text)["sites"][0]["is_event_site"] is True
+
+
+def test_celula_vazia_nao_vota_e_o_site_fica_dentro():
+    csv_text = (
+        f"{_BASE_COLUMNS},dentro\n"
+        "SITE1,SITE1-A,SITE1-A,-23.5,-46.6,0,111,\n"
+        "SITE2,SITE2-A,SITE2-A,-23.6,-46.7,0,222,fora\n"
+    )
+
+    sites = {s["id"]: s for s in _parse(csv_text)["sites"]}
+
+    assert sites["111"]["is_event_site"] is True
+    assert sites["222"]["is_event_site"] is False
+
+
+def test_valor_irreconhecivel_nao_derruba_o_site_do_evento():
+    csv_text = (
+        f"{_BASE_COLUMNS},dentro\n"
+        "SITE1,SITE1-A,SITE1-A,-23.5,-46.6,0,111,talvez\n"
+    )
+
+    assert _parse(csv_text)["sites"][0]["is_event_site"] is True
+
+
+def test_linhas_divergentes_do_mesmo_site_resolvem_por_or():
+    """Mesma semântica da fusão 4G/5G em Api._as_merged_site: um "dentro" basta."""
+    csv_text = (
+        f"{_BASE_COLUMNS},dentro\n"
+        "SITE1,SITE1-A,SITE1-A,-23.5,-46.6,0,111,fora\n"
+        "SITE1,SITE1-B,SITE1-B,-23.5,-46.6,120,111,dentro\n"
+        "SITE2,SITE2-A,SITE2-A,-23.6,-46.7,0,222,fora\n"
+        "SITE2,SITE2-B,SITE2-B,-23.6,-46.7,120,222,fora\n"
+    )
+
+    sites = {s["id"]: s for s in _parse(csv_text)["sites"]}
+
+    assert sites["111"]["is_event_site"] is True
+    assert sites["222"]["is_event_site"] is False
+
+
+def test_coluna_dentro_convive_com_a_coluna_de_cluster():
+    csv_text = (
+        f"{_BASE_COLUMNS},cluster,dentro\n"
+        "SITE1,SITE1-A,SITE1-A,-23.5,-46.6,0,111,Sul,sim\n"
+        "SITE2,SITE2-A,SITE2-A,-23.6,-46.7,0,222,Sul,nao\n"
+    )
+    result = _parse(csv_text)
+
+    sites = {s["id"]: s for s in result["sites"]}
+    assert sites["111"]["is_event_site"] is True
+    assert sites["222"]["is_event_site"] is False
+    assert result["clusters"][0]["site_ids"] == ["111", "222"]

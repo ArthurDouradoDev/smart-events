@@ -14,7 +14,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from core.paths import data_dir, resource_dir
-from core.seed import seed_operator_data, validate_seed
+from core.seed import SEED_DIRS, seed_operator_data, validate_seed
 
 
 WEBVIEW2_GUID = "{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}"
@@ -359,22 +359,101 @@ def _database() -> str:
 
 
 def _seeds() -> str:
+    """Diagnostico GENERICO do programa: a semente embutida precisa ser valida.
+
+    O build-base da Fase 3 nao carrega evento nem cliente: uma semente generica
+    com zero cadastro e um resultado correto, nao uma falha. Conferir os eventos
+    de uma distribuicao e outro assunto — ver ``_expected_events``.
+    """
     bundled = validate_seed()
     if not bundled["ok"]:
         raise RuntimeError("; ".join(bundled["errors"]))
     operator_path = seed_operator_data()
     if not operator_path.is_dir():
         raise RuntimeError("A semente nao foi criada na pasta do operador.")
+    missing = [name for name in SEED_DIRS if not (operator_path / name).is_dir()]
+    if missing:
+        raise RuntimeError("Pastas ausentes na estrutura do operador: " + ", ".join(missing))
     profile = bundled.get("profile") or {}
-    client = str(profile.get("client") or "N/D")
     profile_name = str(profile.get("name") or profile.get("id") or "legado")
+    if bundled.get("generic"):
+        return f"build-base generico ({profile_name}); nenhum evento embutido; estrutura pronta"
+    client = str(profile.get("client") or "N/D")
     return (
         f"perfil {profile_name}; {bundled['events']} evento(s); "
         f"cliente {client}; {bundled['vips']} VIP(s)"
     )
 
 
-def run_self_test(report_path: str | Path | None = None) -> tuple[int, Path, dict]:
+def _package_report(report_path: Path) -> str:
+    """Confere o relatorio da importacao feita pelo instalador antes do self-test."""
+    if not report_path.is_file():
+        raise RuntimeError(f"Relatorio de importacao ausente: {report_path.name}")
+    try:
+        report = json.loads(report_path.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as exc:
+        raise RuntimeError(f"Relatorio de importacao ilegivel: {exc}") from exc
+    if not isinstance(report, dict) or not report.get("ok"):
+        errors = report.get("errors") if isinstance(report, dict) else None
+        detail = "; ".join(
+            str(item.get("message") or item) for item in (errors or [])[:3]
+        )
+        raise RuntimeError(f"A importacao do pacote falhou: {detail or 'sem detalhes'}")
+    return (
+        f"pacote {report.get('package_id') or 'N/D'}; "
+        f"adicionados={len(report.get('added') or [])}; "
+        f"conciliados={len(report.get('reconciled') or [])}; "
+        f"preservados={len(report.get('preserved') or [])}; "
+        f"conflitos={len(report.get('conflicts') or [])}"
+    )
+
+
+def _expected_events(expected: list[str]) -> str:
+    """Os eventos da distribuicao existem no ``server_data`` e no banco local.
+
+    A sincronizacao usada e a incremental, sem HTTP: o instalador nao sobe
+    servidor, e um caminho autoritativo aqui poderia apagar evento que o operador
+    ja tinha de outro pacote.
+    """
+    from core import database as db
+    from core.paths import server_data_dir
+
+    # A mesma pasta que o aplicativo le e que a importacao grava; `seed_operator_data`
+    # so garante a estrutura, e em desenvolvimento aponta para outro lugar.
+    server_data = server_data_dir()
+    on_disk = set()
+    for file_path in sorted((server_data / "events").glob("*.json")):
+        try:
+            value = json.loads(file_path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            continue
+        if isinstance(value, dict) and value.get("id"):
+            on_disk.add(str(value["id"]))
+    missing_files = sorted(set(expected) - on_disk)
+    if missing_files:
+        raise RuntimeError("Eventos ausentes no server_data: " + ", ".join(missing_files))
+
+    db.init_db()
+    stats = db.sync_events_from_local_files(expected)
+    missing_db = sorted(event_id for event_id in expected if not db.get_event(event_id))
+    if missing_db:
+        raise RuntimeError("Eventos ausentes no banco local: " + ", ".join(missing_db))
+    return f"{len(expected)} evento(s) no server_data e no banco; sincronizados={stats['sincronizados']}"
+
+
+def run_self_test(
+    report_path: str | Path | None = None,
+    *,
+    expect_events: list[str] | None = None,
+    expect_package_report: str | Path | None = None,
+) -> tuple[int, Path, dict]:
+    """Diagnostico do programa; as expectativas de distribuicao sao opcionais.
+
+    Sem ``expect_*`` o self-test e o generico do build-base — ele nao exige evento
+    algum. O instalador acrescenta as duas verificacoes de distribuicao depois de
+    importar o ``.sepack``.
+    """
+    expected_events = [str(value).strip() for value in (expect_events or []) if str(value).strip()]
     checks = [
         _check("Windows x64", lambda: platform.platform() if platform.machine().upper() in {"AMD64", "X86_64"} else (_ for _ in ()).throw(RuntimeError(platform.machine()))),
         _check(".NET Framework 4.8+", _dotnet),
@@ -389,6 +468,15 @@ def run_self_test(report_path: str | Path | None = None) -> tuple[int, Path, dic
         _check("banco SQLite local", _database),
         _check("semente do perfil de instalacao", _seeds),
     ]
+    if expect_package_report:
+        package_report = Path(expect_package_report)
+        checks.append(
+            _check("importacao do pacote de eventos", lambda: _package_report(package_report))
+        )
+    if expected_events:
+        checks.append(
+            _check("eventos da distribuicao", lambda: _expected_events(expected_events))
+        )
     ok = all(item["ok"] for item in checks)
     now = datetime.now(timezone.utc)
     report = {
@@ -399,6 +487,7 @@ def run_self_test(report_path: str | Path | None = None) -> tuple[int, Path, dic
         "executable": sys.executable,
         "python": sys.version,
         "data_dir": str(data_dir()),
+        "expected_events": expected_events,
         "checks": checks,
     }
     destination = Path(report_path) if report_path else data_dir() / "diagnostics" / f"self-test-{now.strftime('%Y%m%dT%H%M%SZ')}.json"

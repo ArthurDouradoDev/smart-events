@@ -1,4 +1,19 @@
-"""Build reproduzivel e isolado dos perfis instalaveis do SmartEvents."""
+"""Build reproduzivel do SmartEvents.
+
+    python build.py base
+    python build.py distribution --events evento-a evento-b --format package
+    python build.py distribution --events evento-a evento-b --format setup
+    python build.py legacy-profile --profile vivo-barretos-2026
+
+`base` roda o PyInstaller **uma vez por versao** e produz um build-base generico,
+sem evento e sem cliente. `distribution` combina esse cache com um `.sepack` e,
+no formato `setup`, compila um instalador novo **sem chamar o PyInstaller** — o
+ganho arquitetural da Fase 3. `legacy-profile` preserva o fluxo por perfil durante
+a migracao.
+
+Codigos de saida: 0 sucesso, 2 argumento invalido, 3 selecao/pacote invalido,
+4 build-base ausente ou adulterado, 5 falha de compilacao ou de smoke test.
+"""
 
 from __future__ import annotations
 
@@ -15,6 +30,8 @@ import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
+from core import base_build
+from core import event_package as ep
 from tools.prepare_installer_seed import load_profile
 
 
@@ -24,7 +41,13 @@ BUILD = ROOT / "build"
 SPEC = ROOT / "main.spec"
 LOCK = ROOT / "requirements-build.lock"
 VERSION_FILE = ROOT / "VERSION"
-ISCC = ROOT / ".build-tools" / "InnoSetup7" / "ISCC.exe"
+ISCC = base_build.iscc_path(ROOT)
+
+EXIT_OK = 0
+EXIT_ARGUMENTS = 2
+EXIT_SELECTION = 3
+EXIT_BASE = 4
+EXIT_BUILD = 5
 
 
 def run(command: list[str], *, env: dict[str, str] | None = None, log=None) -> None:
@@ -82,6 +105,42 @@ def sha256(path: Path) -> str:
     return digest.hexdigest()
 
 
+def _version() -> str:
+    version = VERSION_FILE.read_text(encoding="utf-8").strip()
+    if not version:
+        raise SystemExit("ERRO: VERSION esta vazio.")
+    return version
+
+
+def _source_state() -> tuple[str, bool]:
+    commit = subprocess.check_output(
+        ["git", "rev-parse", "HEAD"], cwd=ROOT, text=True, encoding="utf-8"
+    ).strip()
+    dirty = bool(
+        subprocess.check_output(
+            ["git", "status", "--porcelain"], cwd=ROOT, text=True, encoding="utf-8"
+        ).strip()
+    )
+    return commit, dirty
+
+
+def _browsers_path(env: dict[str, str]) -> Path:
+    browsers = Path(env.get("PLAYWRIGHT_BROWSERS_PATH", ""))
+    if not browsers.is_dir():
+        raise SystemExit("ERRO: defina PLAYWRIGHT_BROWSERS_PATH para o cache homologado.")
+    return browsers
+
+
+def _browser_revisions(browsers: Path) -> dict:
+    """Revisoes homologadas dos navegadores, para o manifesto do cache."""
+    revisions = {}
+    for item in sorted(browsers.iterdir()):
+        if item.is_dir() and "-" in item.name:
+            name, _, revision = item.name.rpartition("-")
+            revisions[name] = revision
+    return revisions
+
+
 def _profile_path(value: str) -> Path:
     candidate = Path(value)
     if candidate.suffix.casefold() != ".json":
@@ -94,10 +153,19 @@ def _profile_path(value: str) -> Path:
 
 
 def _replace_directory(path: Path, parent: Path) -> None:
+    """Limpa um diretorio de trabalho apos confirmar que ele esta dentro do esperado.
+
+    Nenhum comando desta ferramenta pode apagar `dist/base/<versao>`: o cache do
+    build-base e o que evita rodar o PyInstaller de novo.
+    """
     resolved = path.resolve()
-    resolved.relative_to(parent.resolve())
-    if resolved == parent.resolve():
+    parent_resolved = parent.resolve()
+    resolved.relative_to(parent_resolved)
+    if resolved == parent_resolved:
         raise RuntimeError(f"Recusa em apagar o diretorio raiz: {resolved}")
+    base = base_build.base_root(DIST).resolve()
+    if resolved == base or base in resolved.parents or resolved in base.parents:
+        raise RuntimeError(f"Recusa em apagar o cache do build-base: {resolved}")
     if path.exists():
         shutil.rmtree(path)
     path.mkdir(parents=True, exist_ok=True)
@@ -192,18 +260,294 @@ def _verify_bundle(app_dir: Path, profile: dict) -> None:
         raise SystemExit("ERRO: arquivo de credenciais foi embutido no pacote.")
 
 
-def main() -> int:
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--profile", default="roadshow-tim")
-    args = parser.parse_args()
+def _verify_base_bundle(app_dir: Path) -> None:
+    """O build-base nao pode carregar evento, VIP nem catalogo de cliente."""
+    internal = app_dir / "_internal"
+    seed = internal / "server_data"
+    intruders = sorted(
+        f"{name}/{item.name}"
+        for name in ("events", "clientes", "vips")
+        for item in (seed / name).glob("*.json")
+    )
+    if intruders:
+        raise SystemExit("ERRO: cadastro especifico no build-base: " + ", ".join(intruders))
+    if (internal / "data" / "clientes.json").exists():
+        raise SystemExit("ERRO: catalogo de clientes embutido no build-base.")
+    if list(internal.rglob("credentials.json")):
+        raise SystemExit("ERRO: arquivo de credenciais foi embutido no build-base.")
+    profile = json.loads((internal / "build-profile.json").read_text(encoding="utf-8"))
+    if not profile.get("generic"):
+        raise SystemExit("ERRO: o perfil embutido no build-base nao e generico.")
+    if profile.get("runtime_data_dir") != base_build.RUNTIME_DATA_DIR:
+        raise SystemExit(
+            f"ERRO: build-base com pasta de dados inesperada: {profile.get('runtime_data_dir')!r}."
+        )
 
+
+# ── build-base ───────────────────────────────────────────────────────
+
+def command_base(args) -> int:
+    """PyInstaller uma vez por versao; nenhuma selecao de eventos dispara isto."""
+    require_build_python()
+    require_locked_dependencies()
+    version = _version()
+
+    destination = base_build.base_dir(version, DIST)
+    if destination.exists() and not args.force:
+        try:
+            existing = base_build.load_base(version, DIST)
+        except base_build.BaseBuildError as exc:
+            raise SystemExit(
+                f"ERRO: cache do build-base {version} invalido ({exc}). "
+                "Use --force para reconstrui-lo."
+            )
+        print(f"Build-base {existing.version} ja existe e confere: {existing.root}")
+        return EXIT_OK
+
+    work = BUILD / "base" / version
+    _replace_directory(work, BUILD)
+    if destination.exists():
+        shutil.rmtree(destination)
+    destination.mkdir(parents=True)
+
+    seed = base_build.prepare_generic_seed(work / "server_data", version)
+    base_build.assert_generic_seed(seed)
+    runtime_profile = work / "build-profile.json"
+    runtime_profile.write_text(
+        json.dumps(base_build.generic_profile(version), indent=2, ensure_ascii=False) + "\n",
+        encoding="utf-8",
+    )
+
+    env = os.environ.copy()
+    browsers = _browsers_path(env)
+    env[base_build.BUILD_MODE_ENV] = base_build.BUILD_MODE_BASE
+    env["SMARTEVENTS_SERVER_DATA_SEED"] = str(seed)
+    env["SMARTEVENTS_BUILD_PROFILE_FILE"] = str(runtime_profile)
+    env.pop("SMARTEVENTS_CLIENT_CATALOG_SEED", None)
+
+    build_log = destination / "build.log"
+    with build_log.open("w", encoding="utf-8") as log:
+        run(
+            [
+                sys.executable, "-m", "PyInstaller", "--noconfirm", "--clean",
+                "--distpath", str(destination),
+                "--workpath", str(work / "pyinstaller"),
+                str(SPEC),
+            ],
+            env=env,
+            log=log,
+        )
+
+    app_dir = destination / base_build.APP_DIR_NAME
+    exe = app_dir / base_build.EXECUTABLE_NAME
+    if not exe.is_file():
+        raise SystemExit(f"ERRO: executavel ausente: {exe}")
+    _verify_base_bundle(app_dir)
+
+    # Diagnostico GENERICO: sem evento embutido, o self-test nao pode exigir
+    # RoadShow, TIM nem qualquer cadastro de cliente.
+    smoke_env = env.copy()
+    smoke_env["SMARTEVENTS_DATA_DIR"] = str(work / "self-test-data")
+    run([str(exe), "--self-test", "--report", str(destination / "self-test-base.json")],
+        env=smoke_env)
+
+    archive = base_build.make_base_archive(destination)
+    commit, dirty = _source_state()
+    manifest = base_build.write_manifest(
+        destination,
+        version,
+        python_version=platform.python_version(),
+        architecture=platform.architecture()[0],
+        source_commit=commit,
+        source_dirty=dirty,
+        browsers=_browser_revisions(browsers),
+        package_schema_version=ep.SCHEMA_VERSION,
+        archive=archive,
+    )
+    freeze = subprocess.check_output(
+        [sys.executable, "-m", "pip", "freeze", "--all"], text=True, encoding="utf-8"
+    )
+    (destination / "dependencies.txt").write_text(freeze, encoding="utf-8")
+
+    print(f"Build-base pronto: {destination}")
+    print(
+        f"  {manifest['file_count']} arquivo(s) | "
+        f"{manifest['uncompressed_bytes'] / (1024 * 1024):.1f} MiB descompactados | "
+        f"payload {manifest['archive_bytes'] / (1024 * 1024):.1f} MiB"
+    )
+    return EXIT_OK
+
+
+# ── distribuicao ─────────────────────────────────────────────────────
+
+def _distribution_dir(name: str) -> Path:
+    stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    slug = re.sub(r"[^A-Za-z0-9]+", "-", name).strip("-").lower() or "eventos"
+    directory = DIST / "distributions" / f"{slug}-{stamp}"
+    _replace_directory(directory, DIST / "distributions")
+    return directory
+
+
+def _build_sepack(args, destination_dir: Path) -> tuple[Path, ep.PackagePreview]:
+    source = args.source or None
+    preview = ep.preview_package(
+        source, args.events, name=args.name, vip_policy=args.vip_policy
+    )
+    if not preview.ok:
+        for item in preview.errors:
+            print(f"ERRO [{item.code}] {item.path}: {item.message}")
+        raise SystemExit(EXIT_SELECTION)
+    for message in preview.warnings:
+        print(f"AVISO {message}")
+    package = destination_dir / ep.suggested_filename(preview)
+    ep.build_package(preview, package, force=True)
+    return package, preview
+
+
+def command_distribution(args) -> int:
+    version = _version()
+    try:
+        base = base_build.load_base(args.base_version or version, DIST)
+    except base_build.BaseBuildError as exc:
+        if args.format == "setup":
+            print(f"ERRO: {exc}")
+            return EXIT_BASE
+        base = None
+
+    directory = _distribution_dir(args.name or "-".join(args.events))
+    package, preview = _build_sepack(args, directory)
+    metadata = {
+        "schema_version": 1,
+        "format": args.format,
+        "generated_at_utc": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "version": version,
+        "events": list(preview_event_ids(preview)),
+        "clients": list(preview.clients),
+        "package": package.name,
+        "package_sha256": sha256(package),
+        "package_bytes": package.stat().st_size,
+        "warnings": list(preview.warnings),
+    }
+
+    if args.format == "setup":
+        # O PyInstaller NAO roda aqui: o programa vem do cache do build-base.
+        installer_dir = directory / "installer"
+        work = directory / "work"
+        work.mkdir(parents=True, exist_ok=True)
+        basename = f"Setup_SmartEvents_{re.sub(r'[^A-Za-z0-9]+', '_', preview.name).strip('_') or 'Eventos'}"
+        try:
+            result = base_build.compile_setup(
+                base, package, installer_dir, work, setup_basename=basename, repo=ROOT,
+            )
+            inspection = base_build.inspect_setup(result, base, package)
+        except base_build.BaseBuildError as exc:
+            print(f"ERRO: {exc}")
+            return EXIT_BUILD
+        (directory / "iscc.log").write_text(result.log + "\n", encoding="utf-8")
+        metadata.update({
+            "base": base.summary(),
+            "setup": result.setup.name,
+            "setup_sha256": result.sha256,
+            "setup_bytes": result.bytes,
+            "executable_sha256": str(base.manifest.get("executable_sha256") or ""),
+            "inspection": inspection,
+        })
+        if args.smoke:
+            try:
+                metadata["smoke"] = smoke_test_setup(result.setup, inspection["event_ids"], work)
+            except SystemExit:
+                raise
+            except Exception as exc:  # noqa: BLE001 - o smoke reporta, nao derruba
+                print(f"ERRO no smoke test: {exc}")
+                return EXIT_BUILD
+
+    (directory / "build-manifest.json").write_text(
+        json.dumps(metadata, indent=2, ensure_ascii=False) + "\n", encoding="utf-8"
+    )
+    lines = [f"{metadata['package_sha256']}  {package.name}"]
+    if metadata.get("setup"):
+        lines.append(f"{metadata['setup_sha256']}  installer/{metadata['setup']}")
+        lines.append(f"{metadata['executable_sha256']}  base/SmartEvents.exe")
+    (directory / "SHA256SUMS.txt").write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+    print(f"Distribuicao pronta: {directory}")
+    for line in lines:
+        print("  " + line)
+    return EXIT_OK
+
+
+def preview_event_ids(preview: ep.PackagePreview) -> list[str]:
+    return [str(event.get("id") or "") for event in preview.events]
+
+
+def smoke_test_setup(setup: Path, expected_events: list[str], work: Path) -> dict:
+    """Instalacao silenciosa isolada, conferencia dos relatorios e desinstalacao.
+
+    Roda somente com `--smoke`, e apenas pela linha de comando: instalar de verdade
+    e operacao de quem distribui, nunca efeito de um clique na interface.
+    """
+    target = work / "smoke-install"
+    data = work / "smoke-data"
+    for directory in (target, data):
+        if directory.exists():
+            shutil.rmtree(directory)
+    log_path = work / "smoke-install.log"
+
+    env = os.environ.copy()
+    env["SMARTEVENTS_DATA_DIR"] = str(data)
+    print(f"+ smoke: instalando em {target}")
+    completed = subprocess.run(
+        [str(setup), "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART",
+         f"/DIR={target}", f"/LOG={log_path}"],
+        env=env, text=True, encoding="utf-8", errors="replace", timeout=3600,
+    )
+    if completed.returncode != 0:
+        raise RuntimeError(f"A instalacao silenciosa falhou com o codigo {completed.returncode}.")
+
+    executable = target / base_build.EXECUTABLE_NAME
+    if not executable.is_file():
+        raise RuntimeError(f"Executavel ausente apos a instalacao: {executable}")
+    report = data / "diagnostics" / "installer-self-test.json"
+    if not report.is_file():
+        raise RuntimeError(f"Relatorio do diagnostico ausente: {report}")
+    diagnostic = json.loads(report.read_text(encoding="utf-8"))
+    if not diagnostic.get("ok"):
+        failed = [item["name"] for item in diagnostic.get("checks", []) if not item.get("ok")]
+        raise RuntimeError("O diagnostico reprovou em: " + ", ".join(failed))
+    installed_events = {
+        json.loads(item.read_text(encoding="utf-8")).get("id")
+        for item in (data / "server_data" / "events").glob("*.json")
+    }
+    missing = sorted(set(expected_events) - installed_events)
+    if missing:
+        raise RuntimeError("Eventos ausentes apos a instalacao: " + ", ".join(missing))
+
+    uninstaller = next(target.glob("unins*.exe"), None)
+    if uninstaller is None:
+        raise RuntimeError("Desinstalador ausente na instalacao de smoke test.")
+    print("+ smoke: desinstalando")
+    subprocess.run(
+        [str(uninstaller), "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART"],
+        env=env, text=True, timeout=1800,
+    )
+    if not data.is_dir():
+        raise RuntimeError("A desinstalacao apagou os dados do operador.")
+    return {
+        "installed_events": sorted(installed_events),
+        "self_test_ok": True,
+        "data_preserved": True,
+        "log": log_path.name,
+    }
+
+
+# ── fluxo legado por perfil ──────────────────────────────────────────
+
+def command_legacy_profile(args) -> int:
     require_build_python()
     require_locked_dependencies()
     profile_file = _profile_path(args.profile)
     profile = load_profile(profile_file)
-    version = VERSION_FILE.read_text(encoding="utf-8").strip()
-    if not version:
-        raise SystemExit("ERRO: VERSION esta vazio.")
+    version = _version()
     if not ISCC.is_file():
         raise SystemExit(f"ERRO: compilador Inno Setup ausente: {ISCC}")
 
@@ -226,9 +570,7 @@ def main() -> int:
     )
 
     env = os.environ.copy()
-    browsers = Path(env.get("PLAYWRIGHT_BROWSERS_PATH", ""))
-    if not browsers.is_dir():
-        raise SystemExit("ERRO: defina PLAYWRIGHT_BROWSERS_PATH para o cache homologado.")
+    browsers = _browsers_path(env)
 
     build_log = artifacts / "build.log"
     with build_log.open("w", encoding="utf-8") as log:
@@ -248,6 +590,7 @@ def main() -> int:
             log=log,
         )
         _client_catalog(seed, catalog)
+        env[base_build.BUILD_MODE_ENV] = base_build.BUILD_MODE_LEGACY
         env["SMARTEVENTS_SERVER_DATA_SEED"] = str(seed)
         env["SMARTEVENTS_CLIENT_CATALOG_SEED"] = str(catalog)
         env["SMARTEVENTS_BUILD_PROFILE_FILE"] = str(runtime_profile)
@@ -315,14 +658,7 @@ def main() -> int:
     if not setup.is_file():
         raise SystemExit(f"ERRO: instalador ausente: {setup}")
 
-    commit = subprocess.check_output(
-        ["git", "rev-parse", "HEAD"], cwd=ROOT, text=True, encoding="utf-8"
-    ).strip()
-    dirty = bool(
-        subprocess.check_output(
-            ["git", "status", "--porcelain"], cwd=ROOT, text=True, encoding="utf-8"
-        ).strip()
-    )
+    commit, dirty = _source_state()
     metadata = {
         "application": profile["app_name"],
         "profile": profile_id,
@@ -354,7 +690,68 @@ def main() -> int:
         encoding="utf-8",
     )
     print(f"Build aprovado: {setup}")
-    return 0
+    return EXIT_OK
+
+
+# ── linha de comando ─────────────────────────────────────────────────
+
+def build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(
+        prog="build.py",
+        description=__doc__,
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    commands = parser.add_subparsers(dest="command", required=True)
+
+    base = commands.add_parser("base", help="Gera o build-base generico (roda o PyInstaller).")
+    base.add_argument(
+        "--force", action="store_true",
+        help="Reconstroi o cache mesmo que ja exista e confira.",
+    )
+    base.set_defaults(handler=command_base)
+
+    distribution = commands.add_parser(
+        "distribution", help="Gera .sepack e, opcionalmente, o Setup a partir do build-base."
+    )
+    distribution.add_argument("--events", nargs="+", required=True, metavar="ID")
+    distribution.add_argument("--name", default=None, help="Nome da distribuicao.")
+    distribution.add_argument(
+        "--format", choices=("package", "setup"), default="package",
+    )
+    distribution.add_argument(
+        "--source", type=Path, default=None,
+        help="Pasta server_data de origem (padrao: a do aplicativo).",
+    )
+    distribution.add_argument(
+        "--vip-policy", choices=ep.VIP_POLICIES, default="auto", dest="vip_policy",
+    )
+    distribution.add_argument(
+        "--base-version", default=None, dest="base_version",
+        help="Versao do build-base a reutilizar (padrao: a do VERSION).",
+    )
+    distribution.add_argument(
+        "--smoke", action="store_true",
+        help="Instala silenciosamente num diretorio isolado, valida e desinstala.",
+    )
+    distribution.set_defaults(handler=command_distribution)
+
+    legacy = commands.add_parser(
+        "legacy-profile", help="Fluxo historico por perfil (roda o PyInstaller)."
+    )
+    legacy.add_argument("--profile", default="roadshow-tim")
+    legacy.set_defaults(handler=command_legacy_profile)
+    return parser
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = build_parser()
+    # Compatibilidade: `build.py --profile <id>` continua funcionando durante a
+    # migracao, redirecionado para o subcomando legado.
+    arguments = list(sys.argv[1:] if argv is None else argv)
+    if arguments and arguments[0].startswith("-") and "--profile" in arguments:
+        arguments = ["legacy-profile"] + arguments
+    args = parser.parse_args(arguments)
+    return args.handler(args)
 
 
 if __name__ == "__main__":

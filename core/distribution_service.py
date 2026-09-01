@@ -14,9 +14,11 @@ Regras que este modulo garante:
 - tudo que sai para a interface passa por ``redact()``: nenhum caminho do operador,
   valor de variavel de ambiente ou segredo em log de erro.
 
-A Fase 2 oferece apenas o formato ``event_package``. As etapas ``compiling`` e
-``testing`` ja existem no vocabulario de estados porque o job de Setup completo da
-Fase 3 usara a mesma maquina, mas nenhum job desta fase passa por elas.
+A Fase 3 acrescenta o formato ``full_setup``: o job monta o ``.sepack``, combina-o
+com o **build-base** ja compilado e produz um ``Setup.exe`` novo passando pelas
+etapas ``compiling`` e ``testing``. O PyInstaller nunca e chamado aqui — se o
+cache do build-base estiver ausente ou adulterado, o formato simplesmente nao
+aparece nas ``capabilities``, com o motivo.
 
 Todo texto deste modulo e ASCII: as mesmas mensagens vao para o console do operador
 (cp1252 no Windows) e para a interface.
@@ -28,12 +30,14 @@ import json
 import logging
 import os
 import re
+import shutil
 import threading
 import time
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 
+from core import base_build
 from core import event_package as ep
 from core import paths
 
@@ -47,22 +51,30 @@ SCHEMA_VERSION = 1
 FORMAT_EVENT_PACKAGE = "event_package"
 FORMAT_FULL_SETUP = "full_setup"
 
-# Capacidade real desta fase. O Setup completo depende do build-base da Fase 3 e
-# por isso aparece apenas como opcao desabilitada, com o motivo.
+# O pacote esta sempre disponivel; o Setup completo depende do host (build-base
+# integro da mesma versao, ISCC instalado e espaco em disco) e por isso e
+# resolvido em tempo de execucao por ``capabilities()``.
 SUPPORTED_FORMATS = (FORMAT_EVENT_PACKAGE,)
+ALL_FORMATS = (FORMAT_EVENT_PACKAGE, FORMAT_FULL_SETUP)
 FULL_SETUP_REASON = "disponivel apos configurar um build-base"
+FULL_SETUP_ACTION = "Execute no repositorio: python build.py base"
 
 JOB_STATES = (
     "queued", "validating", "packaging", "compiling", "testing", "ready", "failed",
 )
 TERMINAL_STATES = frozenset({"ready", "failed"})
-# Etapas efetivamente percorridas por um job de pacote nesta fase.
+# Etapas efetivamente percorridas por cada formato.
 PACKAGE_STEPS = ("queued", "validating", "packaging", "ready")
+SETUP_STEPS = ("queued", "validating", "packaging", "compiling", "testing", "ready")
 
 MAX_EVENTS_PER_JOB = 50
 INCOMPLETE_JOB_MAX_AGE_HOURS = 24
 
-ARTIFACT_KINDS = ("package", "manifest")
+# Espaco livre exigido antes de oferecer o Setup: o bundle instalado passa de
+# 880 MiB e o Inno Setup ainda precisa do proprio espaco de trabalho.
+SETUP_FREE_SPACE_BYTES = 4 * 1024 * 1024 * 1024
+
+ARTIFACT_KINDS = ("package", "manifest", "setup")
 
 # uuid4().hex: um job_id que nao casar aqui nunca chega a compor um caminho.
 _JOB_ID = re.compile(r"^[0-9a-f]{32}$")
@@ -216,10 +228,23 @@ RECONCILIATION_NOTE = (
 class DistributionService:
     """Revisao e geracao de distribuicoes, com estado persistido em disco."""
 
-    def __init__(self, root: Path | str | None = None, source_dir: Path | str | None = None):
+    def __init__(
+        self,
+        root: Path | str | None = None,
+        source_dir: Path | str | None = None,
+        *,
+        dist_dir: Path | str | None = None,
+        repo_dir: Path | str | None = None,
+    ):
         self._root = Path(root) if root is not None else None
         self._source_dir = Path(source_dir) if source_dir is not None else None
-        # Um job de escrita por vez: dois artefatos nunca se misturam.
+        # Cache do build-base e compilador: pertencem ao repositorio de quem
+        # distribui, nunca ao navegador (decisao 6).
+        self._dist_dir = Path(dist_dir) if dist_dir is not None else base_build.repo_root() / "dist"
+        self._repo_dir = Path(repo_dir) if repo_dir is not None else base_build.repo_root()
+        # Um job de escrita por vez: dois artefatos nunca se misturam. O mesmo
+        # lock serializa pacote e Setup, entao dois Setup simultaneos tambem sao
+        # impossiveis.
         self._write_lock = threading.Lock()
         # Serializa leitura e gravacao do registro dentro do processo: a interface
         # consulta o job enquanto o worker o reescreve a cada transicao. Reentrante
@@ -253,10 +278,64 @@ class DistributionService:
 
     # ── Capacidades ──────────────────────────────────────────────────
 
+    def base_state(self) -> dict:
+        """Estado do host para o Setup completo. Nunca levanta: a tela mostra o motivo."""
+        state = base_build.describe(
+            ep.app_version(), self._dist_dir, repo=self._repo_dir
+        )
+        reasons = []
+        if not state["base_ready"]:
+            reasons.append(state.get("reason") or FULL_SETUP_REASON)
+        elif not state["iscc_ready"]:
+            reasons.append(state.get("reason") or "Compilador Inno Setup ausente.")
+        free = self._free_space()
+        enough_space = free is None or free >= SETUP_FREE_SPACE_BYTES
+        if not enough_space:
+            reasons.append(
+                f"Espaco em disco insuficiente: {free // (1024 * 1024)} MiB livres, "
+                f"minimo {SETUP_FREE_SPACE_BYTES // (1024 * 1024)} MiB."
+            )
+        state["free_space_bytes"] = free
+        state["setup_ready"] = not reasons
+        state["reason"] = " ".join(reasons)
+        return state
+
+    def _free_space(self) -> int | None:
+        target = self.root
+        while not target.exists() and target != target.parent:
+            target = target.parent
+        try:
+            return shutil.disk_usage(target).free
+        except OSError:
+            return None
+
+    def supported_formats(self) -> tuple[str, ...]:
+        if self.base_state()["setup_ready"]:
+            return ALL_FORMATS
+        return SUPPORTED_FORMATS
+
     def capabilities(self) -> dict:
+        state = self.base_state()
+        setup_ready = state["setup_ready"]
+        setup_format = {
+            "id": FORMAT_FULL_SETUP,
+            "label": "Instalador completo (.exe)",
+            "description": (
+                "Primeira instalacao ou atualizacao completa. O arquivo e grande "
+                "(centenas de MiB), mesmo sendo rapido de gerar: o programa ja esta "
+                "compilado no build-base."
+            ),
+            "enabled": setup_ready,
+        }
+        if not setup_ready:
+            setup_format["reason"] = state["reason"] or FULL_SETUP_REASON
+            setup_format["action"] = FULL_SETUP_ACTION
+        else:
+            setup_format["base_version"] = state["base_version"]
+            setup_format["base_built_at_utc"] = state["base_built_at_utc"]
         return {
             "schema_version": SCHEMA_VERSION,
-            "formats": list(SUPPORTED_FORMATS),
+            "formats": list(ALL_FORMATS if setup_ready else SUPPORTED_FORMATS),
             "available_formats": [
                 {
                     "id": FORMAT_EVENT_PACKAGE,
@@ -264,14 +343,15 @@ class DistributionService:
                     "description": "Para quem ja tem o SmartEvents instalado.",
                     "enabled": True,
                 },
-                {
-                    "id": FORMAT_FULL_SETUP,
-                    "label": "Instalador completo (.exe)",
-                    "description": "Primeira instalacao ou atualizacao completa.",
-                    "enabled": False,
-                    "reason": FULL_SETUP_REASON,
-                },
+                setup_format,
             ],
+            "base_version": state["base_version"],
+            "base_built_at_utc": state["base_built_at_utc"],
+            "base_ready": state["base_ready"],
+            "base": state["base"],
+            "iscc_ready": state["iscc_ready"],
+            "setup_reason": "" if setup_ready else (state["reason"] or FULL_SETUP_REASON),
+            "setup_action": "" if setup_ready else FULL_SETUP_ACTION,
             "max_events": MAX_EVENTS_PER_JOB,
             "vip_policies": list(ep.VIP_POLICIES),
             "app_version": ep.app_version(),
@@ -299,10 +379,21 @@ class DistributionService:
         self, event_ids, *, fmt: str = FORMAT_EVENT_PACKAGE, vip_policy: str = "auto"
     ) -> list[str]:
         """Recusa formato, politica, quantidade e id fora do que o servidor conhece."""
-        if fmt not in SUPPORTED_FORMATS:
-            reason = FULL_SETUP_REASON if fmt == FORMAT_FULL_SETUP else "formato desconhecido"
+        # O estado do build-base so e consultado quando ele importa: um job de
+        # pacote nao pode pagar a verificacao do cache do instalador.
+        if fmt == FORMAT_FULL_SETUP:
+            state = self.base_state()
+            if not state["setup_ready"]:
+                raise DistributionError(
+                    "format.unsupported",
+                    f"Formato nao disponivel: {fmt} ({state['reason'] or FULL_SETUP_REASON}).",
+                    400,
+                )
+        elif fmt not in SUPPORTED_FORMATS:
             raise DistributionError(
-                "format.unsupported", f"Formato nao disponivel: {fmt} ({reason}).", 400
+                "format.unsupported",
+                f"Formato nao disponivel: {fmt} (formato desconhecido).",
+                400,
             )
         if vip_policy not in ep.VIP_POLICIES:
             raise DistributionError(
@@ -391,10 +482,12 @@ class DistributionService:
             "updated_at_utc": _now(),
             "finished_at_utc": "",
             "steps": [{"state": "queued", "at": _now()}],
-            "progress": self._progress("queued"),
+            "progress": self._progress("queued", fmt),
             "counts": {},
             "artifacts": {},
             "manifest": None,
+            "base": None,
+            "inspection": None,
             "warnings": [],
             "errors": [],
             "failed_step": "",
@@ -540,6 +633,20 @@ class DistributionService:
                 manifest = ep.build_package(preview, destination, force=True)
                 manifest_path = directory / "manifest.json"
                 _write_atomic(manifest_path, _json_bytes(manifest.to_dict()))
+                artifacts = {
+                    "package": self._artifact_entry(destination, "application/octet-stream"),
+                    "manifest": self._artifact_entry(manifest_path, "application/json"),
+                }
+                extra: dict = {}
+
+                if record["format"] == FORMAT_FULL_SETUP:
+                    # O PyInstaller NAO e chamado: o programa vem inteiro do cache
+                    # do build-base, e so o Setup e recompilado.
+                    setup = self._compile_setup(job_id, preview, destination, directory)
+                    artifacts["setup"] = self._artifact_entry(
+                        setup["path"], "application/vnd.microsoft.portable-executable"
+                    )
+                    extra = {"base": setup["base"], "inspection": setup["inspection"]}
 
                 self._transition(
                     job_id, "ready",
@@ -547,28 +654,32 @@ class DistributionService:
                     counts=preview.counts(),
                     manifest=manifest.to_dict(),
                     warnings=[redact(item) for item in preview.warnings],
-                    artifacts={
-                        "package": self._artifact_entry(destination, "application/octet-stream"),
-                        "manifest": self._artifact_entry(manifest_path, "application/json"),
-                    },
+                    artifacts=artifacts,
                     finished_at_utc=_now(),
+                    **extra,
+                )
+            except base_build.BaseBuildError as exc:
+                self._fail(
+                    job_id, self._current_step(job_id, "compiling"),
+                    errors=[{"code": "base.invalid", "path": "", "message": redact(exc)}],
+                    diagnostic=redact(exc),
                 )
             except ep.PackageBuildError as exc:
                 self._fail(
-                    job_id, "packaging",
+                    job_id, self._current_step(job_id, "packaging"),
                     errors=[_redact_error(item.to_dict()) for item in exc.errors],
                     diagnostic="\n".join(redact(item.message) for item in exc.errors),
                 )
             except DistributionError as exc:
                 self._fail(
-                    job_id, "packaging",
+                    job_id, self._current_step(job_id, "packaging"),
                     errors=[{"code": exc.code, "path": "", "message": redact(exc.message)}],
                     diagnostic=redact(exc.message),
                 )
             except Exception as exc:  # noqa: BLE001 - o job nunca pode derrubar o servidor
                 logger.error("Job de distribuicao %s falhou: %s", job_id, exc)
                 self._fail(
-                    job_id, "packaging",
+                    job_id, self._current_step(job_id, "packaging"),
                     errors=[{
                         "code": "job.failed",
                         "path": "",
@@ -576,6 +687,46 @@ class DistributionService:
                     }],
                     diagnostic=redact(f"{type(exc).__name__}: {exc}"),
                 )
+
+    def _current_step(self, job_id: str, default: str) -> str:
+        """A etapa que realmente falhou; a barra nao pode acusar a errada."""
+        try:
+            state = str(self._load(job_id).get("state") or "")
+        except DistributionError:
+            return default
+        return state if state in JOB_STATES and state not in TERMINAL_STATES else default
+
+    def _compile_setup(
+        self, job_id: str, preview: ep.PackagePreview, package: Path, directory: Path
+    ) -> dict:
+        """Etapas ``compiling`` e ``testing`` do job de Setup completo.
+
+        O build-base e recarregado e reverificado aqui, e nao no momento da
+        selecao: um cache que mudou entre um passo e outro nunca vira instalador.
+        """
+        base = base_build.load_base(ep.app_version(), self._dist_dir)
+
+        self._transition(job_id, "compiling")
+        work = directory / "work"
+        work.mkdir(parents=True, exist_ok=True)
+        basename = "Setup_SmartEvents_" + (
+            re.sub(r"[^A-Za-z0-9]+", "_", preview.name).strip("_") or "Eventos"
+        )
+        result = base_build.compile_setup(
+            base, package, directory / "installer", work,
+            setup_basename=basename, repo=self._repo_dir,
+        )
+
+        self._transition(job_id, "testing")
+        inspection = base_build.inspect_setup(result, base, package)
+        # O artefato mora no diretorio do job, ao lado do pacote: o download so
+        # aceita um arquivo registrado ali.
+        setup = directory / result.setup.name
+        os.replace(result.setup, setup)
+        shutil.rmtree(work, ignore_errors=True)
+        shutil.rmtree(directory / "installer", ignore_errors=True)
+        inspection["setup_sha256"] = ep.sha256_of(setup)
+        return {"path": setup, "base": base.summary(), "inspection": inspection}
 
     @staticmethod
     def _artifact_entry(path: Path, media_type: str) -> dict:
@@ -587,10 +738,10 @@ class DistributionService:
         }
 
     @staticmethod
-    def _progress(state: str) -> dict:
+    def _progress(state: str, fmt: str = FORMAT_EVENT_PACKAGE) -> dict:
         # `failed` nao e uma etapa da barra: ele fica com indice -1 para que a
         # interface mostre a etapa que falhou, e nao a ultima como concluida.
-        steps = list(PACKAGE_STEPS)
+        steps = list(SETUP_STEPS if fmt == FORMAT_FULL_SETUP else PACKAGE_STEPS)
         return {
             "step": state,
             "index": steps.index(state) if state in steps else -1,
@@ -607,7 +758,7 @@ class DistributionService:
             record["state"] = state
             record["updated_at_utc"] = _now()
             record["steps"] = list(record.get("steps") or []) + [{"state": state, "at": _now()}]
-            record["progress"] = self._progress(state)
+            record["progress"] = self._progress(state, record.get("format") or FORMAT_EVENT_PACKAGE)
             self._save(record)
         logger.info("Job de distribuicao %s: %s", job_id, state)
         return record

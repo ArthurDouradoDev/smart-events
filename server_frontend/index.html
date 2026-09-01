@@ -1340,7 +1340,6 @@
     let map = null;
     let osmLayer = null;
     let satLayer = null;
-    let siteMarkers = [];
     let activePolygon = null;
     let parsedSites = [];
     let polygonCoordinates = [];
@@ -1681,7 +1680,10 @@
         }
       });
 
-      map.on('zoomend', () => plotSitesOnMap());
+      // Zoom e pan só reavaliam quais marcadores ficam no DOM. Reenquadrar aqui
+      // desfazia todo zoom do operador — o mapa voltava sozinho ao fitBounds.
+      map.on('zoomend', scheduleViewportRefresh);
+      map.on('moveend', scheduleViewportRefresh);
     }
 
     // ── Upload de planilha ───────────────────────────────────────
@@ -1714,9 +1716,11 @@
           parsedSites = result.sites;
           let cellCount = 0;
           parsedSites.forEach(s => cellCount += s.cells.length);
-          sitesInfoMsg.textContent = `Sucesso! Carregados ${parsedSites.length} sites com ${cellCount} células.`;
+          const foraCount = parsedSites.filter(s => s.is_event_site === false).length;
+          sitesInfoMsg.textContent = `Sucesso! Carregados ${parsedSites.length} sites com ${cellCount} células.`
+            + (foraCount ? ` ${foraCount} marcados como fora do polígono.` : '');
           sitesInfoMsg.style.color = 'var(--success)';
-          plotSitesOnMap();
+          plotSitesOnMap({ fit: true });
           if (polygonMode === 'auto') autoCalculatePolygon();
 
           // Semente da coluna opcional de cluster da EP — só num evento novo, e só se
@@ -1745,35 +1749,84 @@
     }
 
     // ── Marcadores no mapa ───────────────────────────────────────
-    function plotSitesOnMap() {
-      siteMarkers.forEach(m => map.removeLayer(m));
-      siteMarkers = [];
-      siteMarkersById = {};
-      if (parsedSites.length === 0) return;
-      const points = [];
-      parsedSites.forEach(site => {
-        points.push([site.lat, site.lng]);
-        const icon = buildSiteSectorIcon(site);
-        const marker = L.marker([site.lat, site.lng], { icon, title: site.name }).addTo(map);
-        marker.bindPopup(`
+    // Só os sites dentro da viewport (mais uma margem para o pan curto não
+    // piscar) ficam no DOM: uma EP grande passa de milhares de marcadores para
+    // as poucas dezenas visíveis. Fora isso, zoom reaproveita o marcador via
+    // setIcon em vez de destruir e recriar a camada.
+    const VIEWPORT_PAD = 0.25;
+    const VIEWPORT_DEBOUNCE_MS = 120;
+    let lastIconZoom = null;
+    let viewportTimer = null;
+
+    function createSiteMarker(site) {
+      const marker = L.marker([site.lat, site.lng], {
+        icon: buildSiteSectorIcon(site), title: site.name
+      }).addTo(map);
+      const foraDoEvento = site.is_event_site === false
+        ? `<div class="tooltip-desc" style="color:var(--warning); margin-top:4px;">Fora do polígono (vizinho)</div>`
+        : '';
+      marker.bindPopup(`
           <div style="font-family:'Outfit',sans-serif; min-width:140px; color:#E6EDF3;">
             <div class="tooltip-title">${escapeHTML(site.name)}</div>
             <div class="tooltip-desc">ID: ${site.id}</div>
             <div class="tooltip-desc">Lat: ${site.lat.toFixed(6)} / Lng: ${site.lng.toFixed(6)}</div>
             <div class="tooltip-desc" style="font-weight:600; margin-top:4px;">Células: ${site.cells.length}</div>
+            ${foraDoEvento}
           </div>`, { className: 'site-popup' });
-        marker.on('click', () => {
-          if (clusterMode && activeClusterId) toggleSiteInActiveCluster(site.id);
-        });
-        marker._siteRef = site;
-        siteMarkers.push(marker);
-        siteMarkersById[site.id] = marker;
+      marker.on('click', () => {
+        if (clusterMode && activeClusterId) toggleSiteInActiveCluster(site.id);
       });
-      map.fitBounds(L.latLngBounds(points), { padding: [50, 50] });
+      marker._siteRef = site;
+      return marker;
+    }
+
+    function clearSiteMarkers() {
+      Object.values(siteMarkersById).forEach(m => map.removeLayer(m));
+      siteMarkersById = {};
+      lastIconZoom = null;
+    }
+
+    function scheduleViewportRefresh() {
+      if (viewportTimer) clearTimeout(viewportTimer);
+      viewportTimer = setTimeout(() => { viewportTimer = null; refreshVisibleMarkers(); },
+                                 VIEWPORT_DEBOUNCE_MS);
+    }
+
+    function refreshVisibleMarkers() {
+      if (!map || parsedSites.length === 0) return;
+      const bounds = map.getBounds().pad(VIEWPORT_PAD);
+      const zoom = map.getZoom();
+      const zoomChanged = zoom !== lastIconZoom;
+      lastIconZoom = zoom;
+      parsedSites.forEach(site => {
+        const marker = siteMarkersById[site.id];
+        const visible = bounds.contains([site.lat, site.lng]);
+        if (visible && !marker) {
+          siteMarkersById[site.id] = createSiteMarker(site);
+        } else if (!visible && marker) {
+          map.removeLayer(marker);
+          delete siteMarkersById[site.id];
+        } else if (visible && zoomChanged) {
+          marker.setIcon(buildSiteSectorIcon(site));
+        }
+      });
+    }
+
+    function plotSitesOnMap(options) {
+      clearSiteMarkers();
+      if (parsedSites.length === 0) return;
+      if (options && options.fit) {
+        // animate:false para os limites já valerem na varredura logo abaixo.
+        map.fitBounds(L.latLngBounds(parsedSites.map(s => [s.lat, s.lng])),
+                      { padding: [50, 50], animate: false });
+      }
+      refreshVisibleMarkers();
     }
 
     function refreshClusterRings() {
-      siteMarkers.forEach(m => { if (m._siteRef) m.setIcon(buildSiteSectorIcon(m._siteRef)); });
+      Object.values(siteMarkersById).forEach(m => {
+        if (m._siteRef) m.setIcon(buildSiteSectorIcon(m._siteRef));
+      });
     }
 
     function getZoomScale(zoom) {
@@ -1799,11 +1852,15 @@
       const sortedCells = [...cells].sort((a, b) => b._radius - a._radius);
       const strokeWidth = scale < 0.3 ? 0.3 : 1;
       const centerStrokeWidth = scale < 0.3 ? 0.5 : 1.5;
+      // Site que a coluna da EP marcou como fora do polígono: setor esmaecido e
+      // miolo vazado, para o operador conferir a leitura da planilha no mapa.
+      const foraDoEvento = site.is_event_site === false;
+      const sectorOpacity = foraDoEvento ? 0.28 : 0.85;
       const paths = sortedCells.map(cell => {
         const color = getCellColor(cell);
         const az = cell.azimuth ?? 0;
         const r = cell._radius;
-        return `<path d="${sectorPathSVG(cx, cy, r, az, sweep)}" fill="${color}" opacity="0.85" stroke="#0D1117" stroke-width="${strokeWidth}"/>`;
+        return `<path d="${sectorPathSVG(cx, cy, r, az, sweep)}" fill="${color}" opacity="${sectorOpacity}" stroke="#0D1117" stroke-width="${strokeWidth}"/>`;
       });
       const circleRadius = Math.max(1.2, 4 * scale);
 
@@ -1814,7 +1871,7 @@
         ring = `<circle cx="${cx}" cy="${cy}" r="${ringRadius}" fill="none" stroke="${activeCluster.color}" stroke-width="${ringStroke}" stroke-dasharray="${4 * scale} ${3 * scale}" opacity="0.95"/>`;
       }
 
-      const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}" viewBox="0 0 ${size} ${size}">${ring}${paths.join("")}<circle cx="${cx}" cy="${cy}" r="${circleRadius}" fill="#8B949E" stroke="#0D1117" stroke-width="${centerStrokeWidth}"/></svg>`;
+      const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}" viewBox="0 0 ${size} ${size}">${ring}${paths.join("")}<circle cx="${cx}" cy="${cy}" r="${circleRadius}" fill="${foraDoEvento ? '#0D1117' : '#8B949E'}" stroke="${foraDoEvento ? '#8B949E' : '#0D1117'}" stroke-width="${centerStrokeWidth}"/></svg>`;
       return L.divIcon({ html: svg, className: "", iconSize: [size, size], iconAnchor: [cx, cy], popupAnchor: [0, -(cy + 4)] });
     }
 
@@ -1907,22 +1964,71 @@
       if (polygonMode === 'auto') autoCalculatePolygon();
     });
 
+    // Sites que definem a área do evento. A coluna opcional da EP tira os
+    // vizinhos do cálculo; planilha sem a coluna mantém todos, como antes.
+    function polygonSourceSites() {
+      const inside = parsedSites.filter(s => s.is_event_site !== false);
+      return inside.length ? inside : parsedSites;
+    }
+
+    // Plano local em metros centrado no evento — evita a anisotropia de
+    // trabalhar o afastamento direto em graus de latitude e longitude.
+    function metersPlane(lat0, lng0) {
+      const mPerLat = 111320;
+      const mPerLng = 111320 * Math.cos(lat0 * Math.PI / 180);
+      return {
+        to:   (lat, lng) => ({ x: (lng - lng0) * mPerLng, y: (lat - lat0) * mPerLat }),
+        back: (pt) => [lat0 + pt.y / mPerLat, lng0 + pt.x / mPerLng],
+      };
+    }
+
+    // Envoltória convexa (monotone chain de Andrew).
+    function convexHull(points) {
+      if (points.length < 3) return [];
+      const pts = [...points].sort((a, b) => (a.x - b.x) || (a.y - b.y));
+      const cross = (o, a, b) => (a.x - o.x) * (b.y - o.y) - (a.y - o.y) * (b.x - o.x);
+      const halfHull = (seq) => {
+        const out = [];
+        for (const pt of seq) {
+          while (out.length >= 2 && cross(out[out.length - 2], out[out.length - 1], pt) <= 0) out.pop();
+          out.push(pt);
+        }
+        out.pop();
+        return out;
+      };
+      const hull = [...halfHull(pts), ...halfHull([...pts].reverse())];
+      return hull.length >= 3 ? hull : [];
+    }
+
+    // Envoltória convexa afastada em `padding` metros: cada site do contorno vira
+    // um círculo de raio `padding` e a envoltória desses pontos já é o buffer,
+    // com os cantos arredondados. Sem normal externa, orientação nem junta em
+    // miter — o mesmo caminho serve para uma nuvem, para sites alinhados numa
+    // avenida (onde a envoltória degenera) e até para um site só.
+    const HULL_ARC_SEGMENTS = 24;
+
+    function bufferedHull(points, padding) {
+      const base = convexHull(points);
+      const contour = base.length ? base : points;
+      const ring = [];
+      for (const pt of contour) {
+        for (let k = 0; k < HULL_ARC_SEGMENTS; k++) {
+          const angle = (2 * Math.PI * k) / HULL_ARC_SEGMENTS;
+          ring.push({ x: pt.x + padding * Math.cos(angle), y: pt.y + padding * Math.sin(angle) });
+        }
+      }
+      return convexHull(ring);
+    }
+
     function autoCalculatePolygon() {
-      if (parsedSites.length === 0) return;
-      const lats = parsedSites.map(s => s.lat);
-      const lngs = parsedSites.map(s => s.lng);
-      const minLat = Math.min(...lats), maxLat = Math.max(...lats);
-      const minLng = Math.min(...lngs), maxLng = Math.max(...lngs);
-      const centerLat = (minLat + maxLat) / 2;
+      const sites = polygonSourceSites();
+      if (sites.length === 0) return;
       const paddingMeters = parseInt(paddingSlider.value);
-      const latPad = paddingMeters / 111320;
-      const lngPad = paddingMeters / (111320 * Math.cos(centerLat * Math.PI / 180));
-      polygonCoordinates = [
-        [minLat - latPad, minLng - lngPad],
-        [maxLat + latPad, minLng - lngPad],
-        [maxLat + latPad, maxLng + lngPad],
-        [minLat - latPad, maxLng + lngPad]
-      ];
+      const lat0 = sites.reduce((acc, s) => acc + s.lat, 0) / sites.length;
+      const lng0 = sites.reduce((acc, s) => acc + s.lng, 0) / sites.length;
+      const plane = metersPlane(lat0, lng0);
+      polygonCoordinates = bufferedHull(sites.map(s => plane.to(s.lat, s.lng)), paddingMeters)
+        .map(plane.back);
       updatePolygonOnMap();
     }
 
@@ -2615,7 +2721,7 @@
       sitesInfoMsg.style.display = 'block';
       sitesInfoMsg.textContent = `Sites carregados: ${parsedSites.length} sites, ${cellCount} células.`;
       sitesInfoMsg.style.color = 'var(--info)';
-      plotSitesOnMap();
+      plotSitesOnMap({ fit: true });
 
       let coords = event.polygon || [];
       if (coords.length > 1 && coords[0][0] === coords[coords.length - 1][0] && coords[0][1] === coords[coords.length - 1][1]) {
@@ -2675,9 +2781,7 @@
       sitesInfoMsg.style.display = 'none';
       parsedSites = [];
       polygonCoordinates = [];
-      siteMarkers.forEach(m => map.removeLayer(m));
-      siteMarkers = [];
-      siteMarkersById = {};
+      clearSiteMarkers();
       if (activePolygon) { map.removeLayer(activePolygon); activePolygon = null; }
       polygonVerticesLbl.textContent = '0';
       polygonMode = 'auto';
