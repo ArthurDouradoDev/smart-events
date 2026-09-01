@@ -101,10 +101,10 @@ def _webview_initialization() -> str:
 
 
 def _window_chrome() -> dict:
-    """Valida disponibilidade das APIs sem instalar um hook na janela do self-test.
+    """Valida disponibilidade das APIs sem instalar um hook em janela alguma.
 
-    A prova destrutiva com uma janela real permanece separada do diagnostico
-    WebView2 nesta fase; assim uma falha do chrome nunca mascara o renderer.
+    A prova com janela real fica no processo separado abaixo; assim uma falha do
+    chrome nunca mascara o renderer, e vice-versa.
     """
     from core.window_chrome import window_chrome_diagnostic
 
@@ -112,6 +112,161 @@ def _window_chrome() -> dict:
     if not result.get("ok"):
         raise RuntimeError(result.get("error") or "diagnostico Win32 sem detalhes")
     return result
+
+
+def _titlebar_assets() -> str:
+    """Confere no artefato os arquivos que a barra de titulo carrega em runtime."""
+    frontend = resource_dir() / "frontend"
+    required = [
+        frontend / "assets" / "logoSmartEvents-32.png",
+        frontend / "js" / "window_chrome.js",
+    ]
+    missing = [str(path) for path in required if not path.is_file()]
+    if missing:
+        raise RuntimeError("Arquivos ausentes no pacote: " + ", ".join(missing))
+    icon = required[0]
+    if icon.stat().st_size <= 0:
+        raise RuntimeError(f"Icone da barra de titulo vazio: {icon}")
+    return f"{len(required)} arquivo(s); icone={icon.stat().st_size} bytes"
+
+
+def _window_chrome_window() -> str:
+    """Prova o ciclo attach/consulta/detach numa janela WebView2 de verdade."""
+    diagnostics = data_dir() / "diagnostics"
+    diagnostics.mkdir(parents=True, exist_ok=True)
+    report_path = diagnostics / "window-chrome-probe.json"
+    report_path.unlink(missing_ok=True)
+    completed = subprocess.run(
+        _child_command("--self-test-window-chrome") + ["--report", str(report_path)],
+        capture_output=True,
+        text=True,
+        timeout=60,
+        encoding="utf-8",
+        errors="replace",
+    )
+    # No executavel windowed (``console=False``) o stdout do filho pode nao
+    # existir; o arquivo e a fonte confiavel e o stdout so complementa.
+    payload = {}
+    if report_path.is_file():
+        try:
+            payload = json.loads(report_path.read_text(encoding="utf-8"))
+        except ValueError:
+            payload = {}
+    if not payload:
+        payload = _last_json_line(completed.stdout)
+    if completed.returncode != 0 or not payload.get("ok"):
+        detail = payload.get("error") or (completed.stderr or completed.stdout or "sem detalhes").strip()
+        raise RuntimeError(f"Falha no chrome sobre janela WebView2 real: {detail}")
+    return (
+        f"attach/detach OK; modo={payload.get('mode')}; dpi={payload.get('dpi')}; "
+        f"estado={payload.get('state')}; regiao nao-cliente={payload.get('nonclient')}"
+    )
+
+
+def _last_json_line(output: str | None) -> dict:
+    for line in reversed((output or "").splitlines()):
+        line = line.strip()
+        if line.startswith("{") and line.endswith("}"):
+            try:
+                return json.loads(line)
+            except ValueError:
+                continue
+    return {}
+
+
+def run_window_chrome_probe(report_path: str | Path | None = None) -> int:
+    """Instala o chrome Win32 numa janela WebView2 real e o desmonta em seguida.
+
+    Espelha o caminho de producao: attach em ``before_show``, consulta e troca de
+    regioes com o documento carregado, detach antes de destruir a janela. O
+    relatorio sai como uma linha JSON no stdout, lida por ``_window_chrome_window``.
+    """
+    import threading
+    import webview
+
+    from core.window_chrome import WindowChromeController, host_diagnostic
+
+    controller = WindowChromeController()
+    report: dict = {"ok": False, "error": "a janela nao chegou a carregar", **host_diagnostic()}
+    finished = threading.Event()
+
+    try:
+        window = webview.create_window(
+            "SmartEvents - diagnostico da barra",
+            html="<html><body>SmartEvents window chrome</body></html>",
+            hidden=True,
+            frameless=True,
+            width=600,
+            height=400,
+        )
+
+        def on_before_show():
+            report["attached"] = controller.attach(window)
+            if not report["attached"]:
+                report["error"] = controller.last_error or "attach recusado"
+                return
+            # Mesma ordem da producao: a regiao nao-cliente precisa ser armada
+            # antes de o CoreWebView2 existir, e e dela que dependem arraste,
+            # duplo clique e Aero Snap na barra HTML.
+            report["nonclient_armed"] = controller.arm_nonclient_regions(window)
+
+        def on_loaded():
+            try:
+                if report.get("attached"):
+                    state = controller.get_state()
+                    # Regioes pequenas o suficiente para caber em qualquer DPI
+                    # desta janela de 600x400 pixels logicos.
+                    accepted = controller.set_regions({
+                        "titlebar": {"x": 0, "y": 0, "width": 200, "height": 36},
+                        "draggable": [{"x": 0, "y": 0, "width": 100, "height": 36}],
+                        "buttons": {
+                            "minimize": {"x": 108, "y": 0, "width": 30, "height": 36},
+                            "maximize": {"x": 138, "y": 0, "width": 30, "height": 36},
+                            "close": {"x": 168, "y": 0, "width": 30, "height": 36},
+                        },
+                    })
+                    detached = controller.detach()
+                    report.update({
+                        "ok": bool(state.get("ok")) and accepted and detached,
+                        "mode": state.get("mode"),
+                        "dpi": state.get("dpi"),
+                        "state": state.get("state"),
+                        "nonclient": state.get("nonclient"),
+                        "regions_accepted": accepted,
+                        "detached": detached,
+                    })
+                    if report["ok"]:
+                        report.pop("error", None)
+                    else:
+                        report["error"] = controller.last_error or "ciclo incompleto"
+            except Exception as exc:
+                report["error"] = f"{type(exc).__name__}: {exc}"
+            finally:
+                finished.set()
+                threading.Timer(0.25, window.destroy).start()
+
+        window.events.before_show += on_before_show
+        window.events.loaded += on_loaded
+        # Sem watchdog uma janela que nunca dispara ``loaded`` prenderia o
+        # diagnostico ate o timeout do processo pai.
+        threading.Timer(30.0, lambda: finished.is_set() or window.destroy()).start()
+        webview.start(gui="edgechromium", private_mode=True)
+    except Exception as exc:
+        report["error"] = f"{type(exc).__name__}: {exc}"
+        traceback.print_exc()
+    finally:
+        controller.detach()
+
+    serialized = json.dumps(report, ensure_ascii=False)
+    if report_path:
+        try:
+            destination = Path(report_path)
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            destination.write_text(serialized, encoding="utf-8")
+        except OSError as exc:
+            print(f"Falha ao gravar o relatorio da prova: {exc}")
+    print(serialized)
+    return 0 if report.get("ok") else 1
 
 
 def run_webview_probe() -> int:
@@ -227,6 +382,8 @@ def run_self_test(report_path: str | Path | None = None) -> tuple[int, Path, dic
         _check("Microsoft Edge WebView2 Runtime", webview2_version),
         _check("inicializacao pywebview", _webview_initialization),
         _check("controlador de moldura Win32", _window_chrome),
+        _check("moldura Win32 em janela WebView2", _window_chrome_window),
+        _check("assets da barra de titulo", _titlebar_assets),
         _check("Chromium headless e Chromium visual", _playwright),
         _check("gravacao nos dados do operador", _write_access),
         _check("banco SQLite local", _database),

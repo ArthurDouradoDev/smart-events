@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import ctypes
 import math
+import os
+import sys
 
 import pytest
 
@@ -32,10 +34,12 @@ from core.window_chrome import (
     default_restored_rect,
     enable_nonclient_region_support,
     hit_test,
+    host_diagnostic,
     point_from_lparam,
     resolve_window_chrome_mode,
     scale_for_dpi,
     validate_regions,
+    webview2_supports_nonclient_regions,
 )
 
 
@@ -180,10 +184,14 @@ def test_dpi_conversion_rejects_invalid_values(value):
         scale_for_dpi(value, 96)
 
 
-def test_mode_defaults_to_native_and_native_wins_conflict():
-    assert resolve_window_chrome_mode([], is_windows=True).mode == "native"
+def test_mode_defaults_to_custom_on_windows_and_native_wins_conflict():
+    default = resolve_window_chrome_mode([], is_windows=True)
+    assert default.mode == "custom"
+    assert default.custom_requested is False
     custom = resolve_window_chrome_mode(["--custom-titlebar"], is_windows=True)
     assert custom.mode == "custom"
+    rollback = resolve_window_chrome_mode(["--native-titlebar"], is_windows=True)
+    assert rollback.mode == "native"
     conflict = resolve_window_chrome_mode(
         ["--custom-titlebar", "--native-titlebar"], is_windows=True
     )
@@ -195,6 +203,66 @@ def test_custom_mode_is_rejected_outside_windows():
     decision = resolve_window_chrome_mode(["--custom-titlebar"], is_windows=False)
     assert decision.mode == "native"
     assert "fora do Windows" in decision.reason
+    assert resolve_window_chrome_mode([], is_windows=False).mode == "native"
+
+
+@pytest.mark.parametrize(
+    "version, supported",
+    [
+        ("120.0.2210.91", True),
+        ("1.0.2210.55", True),
+        ("119.0.2151.97", False),
+        ("120.0.2210.54", False),
+        (None, True),          # Registro ilegivel nao rebaixa o padrao
+        ("indefinida", True),
+    ],
+)
+def test_webview2_runtime_gate(version, supported):
+    assert webview2_supports_nonclient_regions(version) is supported
+
+
+def test_old_webview2_runtime_keeps_the_native_frame_by_default():
+    decision = resolve_window_chrome_mode(
+        [], is_windows=True, webview2_version="119.0.2151.97"
+    )
+    assert decision.mode == "native"
+    assert "regiao nao-cliente" in decision.reason
+    # A flag tecnica continua forcando o modo personalizado para diagnostico.
+    forced = resolve_window_chrome_mode(
+        ["--custom-titlebar"], is_windows=True, webview2_version="119.0.2151.97"
+    )
+    assert forced.mode == "custom"
+
+
+def test_titlebar_assets_are_present_and_reported_when_missing(tmp_path, monkeypatch):
+    from core import self_test
+
+    detail = self_test._titlebar_assets()
+    assert "icone=" in detail
+
+    monkeypatch.setattr(self_test, "resource_dir", lambda: tmp_path)
+    with pytest.raises(RuntimeError, match="logoSmartEvents-32.png"):
+        self_test._titlebar_assets()
+
+
+def test_probe_report_is_read_from_the_last_json_line():
+    from core import self_test
+
+    output = 'ruido\n{"ok": false}\n{"ok": true, "mode": "custom"}\n'
+    assert self_test._last_json_line(output) == {"ok": True, "mode": "custom"}
+    assert self_test._last_json_line("sem json") == {}
+    assert self_test._last_json_line(None) == {}
+
+
+def test_host_diagnostic_reports_only_environment_data():
+    info = host_diagnostic()
+    assert set(info) <= {"platform", "dpi", "windows"}
+    assert info["platform"] == sys.platform
+    if os.name == "nt":
+        assert info["windows"].startswith("Windows ")
+        assert isinstance(info["dpi"], int) and info["dpi"] > 0
+    else:
+        assert info["dpi"] is None
 
 
 class FakeHandle:

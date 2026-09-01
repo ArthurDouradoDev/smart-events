@@ -1,5 +1,9 @@
 # Aplicação desktop e coleta HTTP
-pywebview>=5.3.0
+# A barra de título personalizada depende de internals do backend WinForms/WebView2
+# (``window.native.Handle`` e ``window.native.browser.webview``). Faixa travada na
+# 6.x, validada na 6.2.1 do requirements-build.lock; um major novo exige revalidar
+# ``python main.py --self-test-window-chrome`` antes de subir o teto.
+pywebview>=6.2.1,<7.0
 requests>=2.32.3
 urllib3>=2.2.2
 # O driver e o Chromium usam revisões acopladas. Manter a versão exata evita

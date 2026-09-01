@@ -77,6 +77,10 @@ DEFAULT_TITLEBAR_HEIGHT = 36.0
 DEFAULT_RESIZE_BORDER = 8.0
 MAX_DRAG_REGIONS = 16
 
+# Menor runtime WebView2 com ``IsNonClientRegionSupportEnabled`` (build.patch).
+# Sem ele o WebView2 nao entrega arraste, duplo clique e Aero Snap ao Windows.
+MIN_WEBVIEW2_NONCLIENT = (2210, 55)
+
 # Tamanho restaurado padrao: fracao da area de trabalho do monitor atual. O
 # dashboard nao e responsivo abaixo de 1024 px logicos, entao a janela nunca
 # abre pequena; o minimo real continua sendo ``min_size`` do pywebview.
@@ -249,31 +253,71 @@ def default_restored_rect(
     )
 
 
+def webview2_supports_nonclient_regions(version: str | None) -> bool:
+    """Diz se o runtime do WebView2 conhece ``IsNonClientRegionSupportEnabled``.
+
+    A opcao existe a partir do runtime ``1.0.2210.55``. O Registro publica a
+    versao no formato do Edge (``120.0.2210.91``) e o SDK usa ``1.0.2210.55``;
+    os dois compartilham os dois ultimos componentes (build e patch), que sao os
+    unicos comparaveis entre os formatos.
+
+    Uma versao ausente ou ilegivel devolve ``True``: o app so chega aqui com o
+    runtime funcionando, e degradar o padrao por causa de uma leitura de
+    Registro falha seria pior que perder o arraste com aviso no log.
+    """
+    if not version:
+        return True
+    parts = str(version).strip().split(".")
+    if len(parts) < 4:
+        return True
+    try:
+        build, patch = int(parts[-2]), int(parts[-1])
+    except ValueError:
+        return True
+    return (build, patch) >= MIN_WEBVIEW2_NONCLIENT
+
+
 def resolve_window_chrome_mode(
     argv: Sequence[str] | None = None,
     *,
     is_windows: bool | None = None,
+    webview2_version: str | None = None,
     log: logging.Logger | None = None,
 ) -> ChromeModeDecision:
-    """Resolve as flags de startup; o modo nativo sempre tem precedencia."""
+    """Resolve as flags de startup; ``--native-titlebar`` sempre tem precedencia.
+
+    A partir da fase 5 a barra personalizada e o padrao no Windows com um
+    runtime WebView2 capaz de entregar regioes nao-cliente. Fora do Windows, com
+    runtime antigo ou com a flag de recuperacao, a moldura nativa continua
+    valendo. ``--custom-titlebar`` permanece como forcador tecnico e ignora a
+    checagem de runtime.
+    """
     args = tuple(sys.argv[1:] if argv is None else argv)
     custom = "--custom-titlebar" in args
     native = "--native-titlebar" in args
     conflict = custom and native
     windows = os.name == "nt" if is_windows is None else bool(is_windows)
+    runtime_ok = webview2_supports_nonclient_regions(webview2_version)
 
     if native:
         reason = "--native-titlebar tem precedencia" if conflict else "modo nativo solicitado"
         mode = "native"
-    elif custom and windows:
+    elif not windows:
+        reason = (
+            "modo personalizado indisponivel fora do Windows"
+            if custom
+            else "moldura nativa e o padrao fora do Windows"
+        )
+        mode = "native"
+    elif custom:
         reason = "modo personalizado solicitado"
         mode = "custom"
-    elif custom:
-        reason = "modo personalizado indisponivel fora do Windows"
+    elif not runtime_ok:
+        reason = f"WebView2 {webview2_version} anterior ao suporte a regiao nao-cliente"
         mode = "native"
     else:
-        reason = "modo nativo e o padrao nas fases 1 e 2"
-        mode = "native"
+        reason = "modo personalizado e o padrao no Windows"
+        mode = "custom"
 
     decision = ChromeModeDecision(mode, custom, native, conflict, reason)
     target_log = log or logger
@@ -283,6 +327,8 @@ def resolve_window_chrome_mode(
         )
     elif custom and not windows:
         target_log.warning("--custom-titlebar ignorado: controlador disponivel somente no Windows.")
+    elif mode == "native" and windows and not native:
+        target_log.warning("Barra personalizada desativada: %s", reason)
     return decision
 
 
@@ -1265,6 +1311,39 @@ def enable_nonclient_region_support(control: Any) -> bool:
     return bool(settings.IsNonClientRegionSupportEnabled)
 
 
+def system_dpi() -> int | None:
+    """DPI do sistema antes de existir uma janela; ``None`` quando indisponivel."""
+    if os.name != "nt":
+        return None
+    try:
+        user32 = ctypes.windll.user32
+        if hasattr(user32, "GetDpiForSystem"):
+            return int(user32.GetDpiForSystem())
+        device = user32.GetDC(None)
+        try:
+            # 88 = LOGPIXELSX
+            return int(ctypes.windll.gdi32.GetDeviceCaps(device, 88))
+        finally:
+            user32.ReleaseDC(None, device)
+    except (AttributeError, OSError):
+        return None
+
+
+def host_diagnostic() -> dict[str, Any]:
+    """Contexto de ambiente para o log de startup. Nada aqui e sensivel."""
+    info: dict[str, Any] = {"platform": sys.platform, "dpi": system_dpi()}
+    if os.name == "nt":
+        try:
+            version = sys.getwindowsversion()
+            # A partir do build 22000 o Windows 10 passa a se chamar Windows 11;
+            # a API continua reportando major 10 nos dois casos.
+            product = 11 if version.build >= 22000 else version.major
+            info["windows"] = f"Windows {product} (build {version.build})"
+        except Exception:  # pragma: no cover - API sempre presente no Windows
+            info["windows"] = "desconhecido"
+    return info
+
+
 def window_chrome_diagnostic() -> dict[str, Any]:
     return WindowChromeController().diagnostic()
 
@@ -1278,11 +1357,14 @@ __all__ = [
     "default_restored_rect",
     "enable_nonclient_region_support",
     "hit_test",
+    "host_diagnostic",
     "point_from_lparam",
     "resolve_titlebar_mode",
     "resolve_window_chrome_mode",
     "scale_for_dpi",
     "signed_word",
+    "system_dpi",
     "validate_regions",
+    "webview2_supports_nonclient_regions",
     "window_chrome_diagnostic",
 ]

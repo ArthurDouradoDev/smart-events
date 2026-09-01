@@ -1720,3 +1720,67 @@ real e conferir a largura estreita (passo 9) e a leitura de tela do modal.
 **Bug pré-existente encontrado, NÃO corrigido (fora do escopo da fase):** `server.py` usa
 `shutil.copyfileobj` em `upload_cliente_logo()` sem `import shutil` no módulo — o upload de
 logo por cliente levanta `NameError`. Corrigir em tarefa própria.
+
+---
+
+## 2026-08-31 — Fase 5 da barra HTML: barra personalizada vira o padrão no Windows
+
+**Decisão principal:** sem nenhuma flag, o SmartEvents passa a abrir com a barra de título
+HTML no Windows. `--native-titlebar` continua sendo o rollback operacional (e vence
+`--custom-titlebar` em caso de conflito); `--custom-titlebar` vira apenas forçador técnico.
+Fora do Windows nada muda: moldura nativa.
+
+**O padrão é condicionado ao runtime, não só ao sistema.** `resolve_window_chrome_mode()`
+recebe a versão do WebView2 lida do Registro e cai para a moldura nativa quando ela é
+anterior a `1.0.2210.55` — sem `IsNonClientRegionSupportEnabled` o WebView2 não entrega
+arraste, duplo clique e Aero Snap ao Windows, e a barra ficaria decorativa. Comparação por
+**build.patch** (os dois últimos componentes), únicos comuns entre o formato do Edge
+(`120.0.2210.91`) e o do SDK (`1.0.2210.55`). Versão ausente/ilegível **não** rebaixa o
+padrão: o app só chega lá com o runtime funcionando, e um erro de leitura do Registro não
+justifica perder a barra.
+
+**Diagnóstico com janela real:** `main.py --self-test-window-chrome` cria uma janela
+WebView2 de verdade e repete o caminho de produção (attach em `before_show` → arma a região
+não-cliente → consulta estado → troca regiões → detach). Entra no `--self-test` como o check
+"moldura Win32 em janela WebView2", separado do check de APIs, para que uma falha do chrome
+nunca mascare o renderer. **O relatório vai para arquivo (`--report`), não só para o
+stdout:** no executável windowed (`console=False`) o stdout do filho pode não existir, e
+parsear só a saída daria falha falsa no build empacotado.
+
+**`main.spec` não precisou mudar:** a regra `('frontend', 'frontend')` já leva
+`frontend/assets/logoSmartEvents-32.png` e `frontend/js/window_chrome.js`. Quem prova isso no
+artefato é o novo check "assets da barra de título", que valida os arquivos via
+`resource_dir()` — vale igual no fonte e no `.exe`.
+
+**Salto de layout no startup resolvido pela URL.** O shell agora abre
+`index.html?chrome=custom#desktop`; `window_chrome.js` lê `location.search` e reserva os
+36 px na primeira pintura, em vez de esperar o primeiro `window_get_state`. Verificado que o
+pywebview 6.2.1 serve o arquivo local pelo bottle server mesmo com `http_server=False`, então
+query e fragmento chegam intactos ao documento — e o fragmento continua sendo exatamente
+`#desktop`, que é o que `bridge.js` compara para não cair em modo mock. Se o attach falhar,
+o `window_get_state` responde `native` e a faixa some, em vez de ficar vazia sobre o app.
+
+**Janela inativa é responsabilidade do documento:** sem moldura nativa o Windows não tem o
+que esmaecer, então `data-window-active` (focus/blur) controla o contraste do título e dos
+ícones; hover e foco continuam com contraste cheio.
+
+**pywebview travado em `>=6.2.1,<7.0`** no requirements.txt: o hook depende de internals
+(`window.native.Handle`, `window.native.browser.webview`). Subir o teto exige revalidar
+`--self-test-window-chrome`.
+
+**Validação executada:** suíte completa (716 passed, 10 deselected de VPN); `--self-test`
+com os três checks de chrome aprovados (os dois reprovados — Chromium visual e semente do
+perfil — já falhavam antes desta fase); `--self-test-window-chrome` aprovado em Windows 11
+build 26200 a 144 DPI com região não-cliente ativa; app real aberto no padrão (log:
+solicitada=padrao, efetiva=custom, motivo, sistema, DPI, versão do WebView2, attach=ok) e com
+`--native-titlebar`; fechamento por `WM_CLOSE` sem deixar processo python ou msedgewebview2
+órfão.
+
+**Pendente (não automatizável aqui):** build `onedir` oficial + `--self-test` no `.exe`, e a
+matriz manual em Windows 10, dois monitores e escalas de 100/125/150/200%.
+
+**Observação (pré-existente, não corrigida):** o log registra esporadicamente "Regioes de
+window chrome rejeitadas ... cliente_logico=143.33x11.33" quando a janela é consultada num
+instante em que o Win32 devolve um cliente minúsculo (janela minimizada/em transição). A
+entrada mais antiga é de 2026-08-31 09:12, antes desta fase; é um aviso benigno (as regiões
+são reenviadas no resize seguinte), mas vale investigar em tarefa própria.

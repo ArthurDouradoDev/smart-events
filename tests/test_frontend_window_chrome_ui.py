@@ -323,6 +323,82 @@ def test_modo_nativo_preserva_layout_anterior():
         _skip_if_no_browser(exc)
 
 
+def test_modo_declarado_pelo_shell_reserva_a_barra_antes_da_primeira_resposta():
+    """``?chrome=custom`` evita o salto de 36 px enquanto o WebView2 carrega."""
+    sync_api = pytest.importorskip("playwright.sync_api")
+    try:
+        with _frontend_server() as url, sync_api.sync_playwright() as playwright:
+            with _page(playwright) as page:
+                page.goto(f"{url}/index.html?chrome=custom", wait_until="domcontentloaded")
+                # Visivel sem depender de nenhuma resposta do shell.
+                page.locator("#window-titlebar").wait_for(state="visible", timeout=2000)
+                assert page.evaluate(
+                    """() => getComputedStyle(document.documentElement)
+                         .getPropertyValue('--titlebar-h').trim()"""
+                ) == "36px"
+
+                # Aqui nao ha pywebview: o estado responde "native", como um attach
+                # que falhou. A faixa some em vez de ficar vazia sobre o app.
+                page.wait_for_function(
+                    "() => document.getElementById('window-titlebar').hidden === true",
+                    timeout=5000,
+                )
+                assert page.evaluate(
+                    """() => getComputedStyle(document.documentElement)
+                         .getPropertyValue('--titlebar-h').trim()"""
+                ) == "0px"
+    except Exception as exc:  # pragma: no cover
+        _skip_if_no_browser(exc)
+
+
+def test_barra_marca_a_janela_inativa_sem_perder_contraste_no_hover():
+    sync_api = pytest.importorskip("playwright.sync_api")
+    try:
+        with _frontend_server() as url, sync_api.sync_playwright() as playwright:
+            with _page(playwright) as page:
+                _open_preview(page, url)
+                assert page.evaluate("document.documentElement.dataset.windowActive") == "true"
+                active_color = page.locator("#window-minimize").evaluate(
+                    "el => getComputedStyle(el).color"
+                )
+
+                page.evaluate("() => window.dispatchEvent(new Event('blur'))")
+                page.wait_for_function(
+                    "() => document.documentElement.dataset.windowActive === 'false'"
+                )
+                # A cor dos controles tem transicao: esperar o valor final evita
+                # ler o quadro intermediario da animacao.
+                page.wait_for_function(
+                    """ativo => getComputedStyle(document.getElementById('window-minimize'))
+                         .color !== ativo""",
+                    arg=active_color,
+                    timeout=5000,
+                )
+                inactive = page.evaluate(
+                    """() => ({
+                      titulo: getComputedStyle(document.querySelector('.window-titlebar-title')).opacity,
+                      controle: getComputedStyle(document.getElementById('window-minimize')).color,
+                    })"""
+                )
+                assert float(inactive["titulo"]) < 1
+
+                # Hover continua com contraste cheio mesmo na janela inativa.
+                page.locator("#window-minimize").hover()
+                page.wait_for_function(
+                    """inativo => getComputedStyle(document.getElementById('window-minimize'))
+                         .color !== inativo""",
+                    arg=inactive["controle"],
+                    timeout=5000,
+                )
+
+                page.evaluate("() => window.dispatchEvent(new Event('focus'))")
+                page.wait_for_function(
+                    "() => document.documentElement.dataset.windowActive === 'true'"
+                )
+    except Exception as exc:  # pragma: no cover
+        _skip_if_no_browser(exc)
+
+
 def test_prefers_reduced_motion_remove_transicoes_visiveis():
     sync_api = pytest.importorskip("playwright.sync_api")
     try:

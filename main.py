@@ -331,8 +331,21 @@ def main():
     mock_mode = "--mock" in sys.argv
     dev_mode = "--dev" in sys.argv
 
-    from core.window_chrome import resolve_window_chrome_mode
-    chrome_decision = resolve_window_chrome_mode(sys.argv[1:], log=logger)
+    from core.window_chrome import host_diagnostic, resolve_window_chrome_mode
+
+    # A barra personalizada depende de o runtime WebView2 assumir a região não-cliente.
+    # A leitura do Registro é best-effort: sem ela o padrão continua sendo o modo
+    # personalizado, apenas sem essa garantia adicional.
+    webview2_version = None
+    try:
+        from core.self_test import webview2_version as _read_webview2_version
+        webview2_version = _read_webview2_version()
+    except Exception as exc:
+        logger.debug("Versão do WebView2 indisponível no Registro: %s", exc)
+
+    chrome_decision = resolve_window_chrome_mode(
+        sys.argv[1:], webview2_version=webview2_version, log=logger
+    )
     custom_titlebar = chrome_decision.mode == "custom"
 
     # Precisa acontecer antes de qualquer import/janela do pywebview: a consciência de DPI
@@ -344,12 +357,23 @@ def main():
     from api.api import Api
     from core.window_chrome import WindowChromeController
 
+    host = host_diagnostic()
+    requested_mode = (
+        "native" if chrome_decision.native_requested
+        else "custom" if chrome_decision.custom_requested
+        else "padrao"
+    )
     logger.info(
-        "Iniciando Smart Events | mock=%s | dev=%s | titlebar=%s | motivo=%s",
+        "Iniciando Smart Events | mock=%s | dev=%s | titlebar solicitada=%s | "
+        "titlebar efetiva=%s | motivo=%s | sistema=%s | dpi=%s | webview2=%s",
         mock_mode,
         dev_mode,
+        requested_mode,
         chrome_decision.mode,
         chrome_decision.reason,
+        host.get("windows") or host.get("platform"),
+        host.get("dpi"),
+        webview2_version or "desconhecido",
     )
 
     # Garante que subprocessos (renovação de sessão Playwright) morram junto com o app.
@@ -403,9 +427,14 @@ def main():
     os.environ.setdefault("WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS", "--disk-cache-size=1")
 
     chrome_controller = WindowChromeController(log=logger)
+    # A query informa o modo já na primeira pintura. Sem ela a barra só apareceria
+    # depois do primeiro ``window_get_state``, empurrando todo o layout 36 px para
+    # baixo com o WebView2 ainda carregando. O fragmento continua sendo exatamente
+    # ``#desktop`` — é o que a bridge compara para não cair em modo mock.
+    frontend_url = str(FRONTEND) + ("?chrome=custom" if custom_titlebar else "") + "#desktop"
     window = webview.create_window(
         title="Smart Events",
-        url=str(FRONTEND) + "#desktop",
+        url=frontend_url,
         js_api=api,
         width=1440,
         height=900,
@@ -464,11 +493,15 @@ def main():
             # depois do ``loaded`` não teria efeito algum sobre o documento já
             # carregado. O controlador agenda a ativação para o instante certo.
             chrome_controller.arm_nonclient_regions(window)
-            logger.info("Window chrome instalado: %s", chrome_controller.get_state())
+            logger.info("Window chrome instalado (attach=ok): %s", chrome_controller.get_state())
         else:
             # ``attach`` restaura WS_CAPTION e os estilos nativos antes de
             # retornar. A falha nunca deve impedir que a janela seja exibida.
-            logger.error("Window chrome em fallback nativo: %s", chrome_controller.get_state())
+            logger.error(
+                "Window chrome em fallback nativo (attach=falhou) | motivo=%s | estado=%s",
+                chrome_controller.last_error or "sem detalhes",
+                chrome_controller.get_state(),
+            )
 
     def _on_loaded():
         logger.info("Interface carregada")
@@ -513,6 +546,9 @@ if __name__ == "__main__":
     elif "--self-test-webview" in sys.argv:
         from core.self_test import run_webview_probe
         sys.exit(run_webview_probe())
+    elif "--self-test-window-chrome" in sys.argv:
+        from core.self_test import run_window_chrome_probe
+        sys.exit(run_window_chrome_probe(_get_arg("--report", None)))
     elif "--self-test" in sys.argv:
         from core.self_test import run_self_test
         report_arg = _get_arg("--report", None)

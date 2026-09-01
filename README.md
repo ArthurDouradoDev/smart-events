@@ -191,6 +191,43 @@ O cliente desktop pode ser executado em três modos diferentes, dependendo da ne
 
 ---
 
+### 2.1. Barra de Título Integrada (Windows)
+
+No Windows, o SmartEvents abre com a **barra de título desenhada em HTML** ([window_chrome.js](frontend/js/window_chrome.js)) no lugar da moldura padrão do sistema. A moldura nativa é removida com um hook Win32 isolado em [core/window_chrome.py](core/window_chrome.py), que devolve ao Windows todos os comportamentos esperados de uma janela: arraste, redimensionamento pelas oito direções, Aero Snap, Snap Layouts (`Win+Z`), duplo clique para maximizar, `Alt+Space` e minimizar/restaurar pela barra de tarefas.
+
+**Flags de execução e recuperação:**
+
+| Flag | Efeito |
+|---|---|
+| *(nenhuma)* | Barra personalizada no Windows; moldura nativa nos demais sistemas. |
+| `--native-titlebar` | **Rollback operacional:** força a moldura nativa do Windows. Tem precedência sobre qualquer outra flag. |
+| `--custom-titlebar` | Força a barra personalizada mesmo quando o padrão a desativaria (uso técnico/diagnóstico). |
+
+```bash
+python main.py --native-titlebar   # abre a versão de recuperação, sem reinstalar nada
+```
+
+**Quando o modo nativo entra sozinho:**
+
+*   fora do Windows;
+*   runtime WebView2 anterior a `1.0.2210.55` (sem `IsNonClientRegionSupportEnabled`, a barra não conseguiria entregar arraste e Snap ao Windows);
+*   falha ao instalar o hook — nesse caso a janela abre com a moldura nativa e **sem** a faixa HTML vazia.
+
+**Limitações conhecidas:**
+
+*   a largura mínima permanece em **1024 × 600**, então o Windows 11 aplica apenas os layouts de Snap compatíveis com essa largura;
+*   a implementação é específica para Windows 10 e Windows 11; macOS e Linux continuam com a moldura nativa;
+*   o perfil persistente do WebView2 exige que alterações em CSS/JS da barra venham acompanhadas de novo cache-buster em [index.html](frontend/index.html).
+
+**Diagnóstico:** cada inicialização registra em `data/logs/smart_events.log` o modo solicitado, o modo efetivo, o motivo da decisão, a versão do Windows, o DPI inicial, a versão do WebView2 e o resultado do `attach` (com o motivo de eventual fallback). Para provar o ciclo completo numa janela WebView2 real:
+
+```powershell
+python main.py --self-test-window-chrome   # attach → consulta → detach, saída JSON
+python main.py --self-test                 # diagnóstico completo, inclui a prova acima
+```
+
+---
+
 ### 3. Rodando o Servidor Central de Sincronização (`server.py`)
 O servidor central serve para que múltiplos computadores rodando o SmartEvents Desktop sincronizem as configurações do evento ativo na mesma rede.
 

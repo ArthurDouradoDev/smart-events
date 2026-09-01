@@ -5,7 +5,7 @@
 
 import API     from "./bridge.js";
 import State   from "./state.js";
-import { initWindowChrome } from "./window_chrome.js?v=20260830-window-chrome-r1";
+import { initWindowChrome } from "./window_chrome.js?v=20260831-window-chrome-r5";
 import { initMap, renderSites, renderEventPolygon, fitToEvent, resizeMap } from "./map.js?v=20260830-window-chrome-r1";
 import { initVip, resizeVipChart }    from "./vip.js?v=20260830-window-chrome-r1";
 import { initKpi, refreshChart, resizeKpiCharts }    from "./kpi.js?v=20260830-window-chrome-r1";

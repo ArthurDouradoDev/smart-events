@@ -36,6 +36,17 @@ function _previewRequested() {
   return new URLSearchParams(window.location.search).get("chromePreview") === "1";
 }
 
+// O shell declara o modo na propria URL. Sem isso a barra so apareceria depois
+// do primeiro ``window_get_state``, empurrando o layout 36 px para baixo com o
+// WebView2 ainda carregando; o attach que falha desliga a barra logo em seguida.
+function _shellDeclaredCustom() {
+  return new URLSearchParams(window.location.search).get("chrome") === "custom";
+}
+
+function _setWindowActive(active) {
+  document.documentElement.dataset.windowActive = String(!!active);
+}
+
 function _rect(element) {
   const box = element.getBoundingClientRect();
   const clean = value => Math.round(Math.max(0, value) * 1000) / 1000;
@@ -95,7 +106,9 @@ async function _syncState() {
     return result;
   } catch (error) {
     console.error("Falha ao consultar estado da janela:", error);
-    _setCustomMode(_previewRequested());
+    // Numa janela frameless esconder a barra deixaria o app sem controle algum;
+    // o que o shell declarou na URL vale mais que uma consulta que falhou.
+    _setCustomMode(_previewRequested() || _shellDeclaredCustom());
     return null;
   }
 }
@@ -201,7 +214,13 @@ function _bindResizeTracking() {
     _scheduleStateSync();
     _announceLayoutChange();
   }, { passive: true });
-  window.addEventListener("focus", _scheduleStateSync);
+  window.addEventListener("focus", () => {
+    _setWindowActive(true);
+    _scheduleStateSync();
+  });
+  // A janela sem moldura nativa nao ganha o esmaecimento que o Windows aplica
+  // sozinho; o proprio documento marca o estado inativo para o CSS.
+  window.addEventListener("blur", () => _setWindowActive(false));
   document.addEventListener("visibilitychange", () => {
     if (!document.hidden) _scheduleStateSync();
   });
@@ -212,9 +231,11 @@ export async function initWindowChrome() {
   _initialized = true;
   _bindControls();
   _bindResizeTracking();
+  _setWindowActive(document.hasFocus());
 
-  // Preview deve aparecer sem depender do atraso de deteccao do pywebview.
-  if (_previewRequested()) _setCustomMode(true);
+  // A barra precisa ocupar seu espaco na primeira pintura: o preview e o modo
+  // declarado pelo shell nao esperam a deteccao do pywebview.
+  if (_previewRequested() || _shellDeclaredCustom()) _setCustomMode(true);
   const state = await _syncState();
   if (state?.mode === "custom") {
     _stateTimer = window.setInterval(_syncState, STATE_POLL_MS);

@@ -229,6 +229,17 @@ html[data-window-state="fullscreen"] .window-glyph-restore { display: block; }
   background: #C42B1C;
 }
 
+/* Janela inativa: sem moldura nativa, o Windows não tem o que esmaecer. O
+   próprio documento marca o estado; hover e foco continuam com contraste cheio. */
+html[data-window-active="false"] .window-titlebar-logo,
+html[data-window-active="false"] .window-titlebar-title {
+  opacity: 0.55;
+}
+
+html[data-window-active="false"] .window-control:not(:hover):not(:focus-visible) {
+  color: var(--text-muted);
+}
+
 /* ── Header ──────────────────────────────────────────────────────── */
 #app-header {
   height: var(--hdr-h);
