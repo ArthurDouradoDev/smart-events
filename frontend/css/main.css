@@ -350,6 +350,17 @@ html[data-window-active="false"] .window-control:not(:hover):not(:focus-visible)
   background: var(--bg-hover);
   border-color: var(--border);
 }
+.event-dropdown-add {
+  border-top: 1px solid var(--border);
+  border-radius: 0 0 var(--radius-md) var(--radius-md);
+  margin-top: 2px;
+}
+.event-dropdown-add .event-item-name {
+  color: var(--text-secondary);
+}
+.event-dropdown-add:hover .event-item-name {
+  color: var(--text-primary);
+}
 .event-dropdown-item.selected {
   background: var(--bg-active);
   font-weight: 600;

@@ -529,7 +529,11 @@ def test_central_server_exposes_no_distribution_endpoint():
 
     source = Path(server.__file__).read_text(encoding="utf-8")
     assert "distribution" not in source.lower()
-    assert "sepack" not in source.lower()
+    # A Central *importa* o resultado — é o que o usuário final recebe e a razão
+    # de `core.event_package` ser embarcado. O que ela não pode ter é o gerador:
+    # é ele que arrastaria a operação de quem distribui para dentro do bundle.
+    for builder in ("distribution_service", "build_package", "preview_package", "suggested_filename"):
+        assert builder not in source, f"server.py ainda alcança o gerador ({builder})"
 
 
 def test_central_frontend_has_no_selection_or_generation_ui():
@@ -538,10 +542,24 @@ def test_central_frontend_has_no_selection_or_generation_ui():
     )
 
     for marker in (
-        "distribution", "sepack", "event-select", "Gerar distribuição",
+        "distribution", "event-select", "Gerar distribuição",
         "Selecionar todos visíveis",
     ):
         assert marker.lower() not in html.lower(), f"a Central ainda tem {marker!r}"
+
+
+def test_central_frontend_imports_packages_without_generating_them():
+    """A Central recebe o `.sepack`; quem o monta é o estúdio."""
+    html = (Path(__file__).parents[1] / "server_frontend" / "index.html").read_text(
+        encoding="utf-8"
+    )
+
+    assert 'id="btn-importar-pacote"' in html
+    assert 'accept=".sepack"' in html
+    assert "/api/events/import/preview" in html
+    # Revisão antes de gravar e política fixa: substituir só pela linha de comando.
+    assert "confirmPackageImport" in html
+    assert "conflict" not in html.lower()
 
 
 def test_studio_never_enters_the_distributed_executable():

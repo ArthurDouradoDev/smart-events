@@ -1,15 +1,19 @@
+import contextlib
 import json
 import logging
 import math
 import re
+import shutil
 import sys
+import tempfile
 from pathlib import Path
-from typing import Optional
-from fastapi import FastAPI, HTTPException, Request, UploadFile, File
+from typing import Iterator, Optional
+from fastapi import FastAPI, Form, HTTPException, Request, UploadFile, File
 from fastapi.responses import FileResponse, HTMLResponse
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 import uvicorn
+from core import event_package
 from core.paths import data_dir, resource_dir
 from core.seed import seed_operator_data
 
@@ -362,6 +366,78 @@ def delete_event(event_id: str):
             raise HTTPException(status_code=500, detail=str(e))
     else:
         raise HTTPException(status_code=404, detail="Event not found")
+
+
+# ── Importação de pacotes de eventos (.sepack) ──────────────────────
+# A Central importa o resultado pronto; montar o pacote é operação de quem
+# distribui e vive fora do produto. O fluxo é de duas etapas: `preview` diz o
+# que mudaria sem tocar no disco e `import` grava sempre com a política
+# `preserve` — evento local divergente é mantido e vira conflito no relatório.
+# Substituir continua exclusivo da linha de comando (`--conflict replace`).
+
+@contextlib.contextmanager
+def _staged_package(file: UploadFile) -> Iterator[Path]:
+    """Copia o upload para um arquivo temporário e o apaga ao final.
+
+    O validador trabalha sobre um caminho em disco; gravar fora de `server_data`
+    garante que um pacote recusado não deixe resíduo na pasta de dados.
+    """
+    name = Path(file.filename or "").name
+    if not name.lower().endswith(event_package.PACKAGE_SUFFIX):
+        raise HTTPException(status_code=400, detail="Envie um arquivo .sepack.")
+
+    with tempfile.TemporaryDirectory(prefix="smartevents-pacote-") as tmp_dir:
+        staged = Path(tmp_dir) / f"upload{event_package.PACKAGE_SUFFIX}"
+        size = 0
+        with open(staged, "wb") as out:
+            while True:
+                chunk = file.file.read(1024 * 1024)
+                if not chunk:
+                    break
+                size += len(chunk)
+                if size > event_package.MAX_PACKAGE_BYTES:
+                    raise HTTPException(status_code=413, detail="Pacote acima do tamanho aceito.")
+                out.write(chunk)
+        yield staged
+
+
+@app.post("/api/events/import/preview")
+async def preview_event_package(file: UploadFile = File(...)):
+    """Revisão: o que o pacote adicionaria, conciliaria e preservaria. Não grava."""
+    with _staged_package(file) as staged:
+        plan = event_package.plan_import(staged, conflict_policy="preserve")
+        payload = plan.to_dict()
+        payload["sha256"] = event_package.sha256_of(staged)
+    payload["filename"] = Path(file.filename or "").name
+    logger.info(
+        "Revisao de pacote %s: %s acoes, %s conflitos",
+        payload["filename"], len(payload["actions"]), len(payload["conflicts"]),
+    )
+    return payload
+
+
+@app.post("/api/events/import")
+async def import_event_package(
+    file: UploadFile = File(...), expected_sha256: str = Form("")
+):
+    """Aplica o pacote já revisado.
+
+    `expected_sha256` amarra a gravação ao arquivo que o operador revisou: se o
+    conteúdo mudou entre a revisão e a confirmação, nada é gravado.
+    """
+    with _staged_package(file) as staged:
+        digest = event_package.sha256_of(staged)
+        if expected_sha256 and expected_sha256.strip().lower() != digest:
+            raise HTTPException(
+                status_code=409,
+                detail="O arquivo mudou depois da revisão. Revise novamente antes de importar.",
+            )
+        result = event_package.import_package(staged, conflict_policy="preserve")
+
+    payload = result.to_dict()
+    payload["summary"] = event_package.summary_lines(result)
+    logger.info("Importacao de pacote: %s", " | ".join(payload["summary"]))
+    return payload
 
 
 # ── VIPs (cadastro global) ──────────────────────────────────────────

@@ -737,6 +737,7 @@ function _renderDropdownItems(events) {
 
   if (!events || !events.length) {
     menu.innerHTML = `<div style="padding: 8px; text-align: center; color: var(--text-secondary); font-size: 11px;">Nenhum evento encontrado</div>`;
+    _appendDropdownAddItem(menu);
     return;
   }
 
@@ -798,6 +799,36 @@ function _renderDropdownItems(events) {
 
     menu.appendChild(item);
   });
+
+  _appendDropdownAddItem(menu);
+}
+
+/**
+ * Cadastrar evento continua sendo função da Central; o app só a abre.
+ * O item vive no rodapé do dropdown para não competir com a seleção e é
+ * recriado a cada render, junto com os eventos.
+ */
+function _appendDropdownAddItem(menu) {
+  const item = document.createElement("div");
+  item.className = "event-dropdown-item event-dropdown-add";
+  item.innerHTML = `
+    <div class="event-item-info">
+      <span class="event-item-name">+ Adicionar evento</span>
+      <span class="event-item-date">Abre o Smart Events Central</span>
+    </div>
+  `;
+
+  item.addEventListener("click", async () => {
+    document.querySelector(".event-dropdown-container").classList.remove("open");
+    menu.classList.add("hidden");
+    try {
+      await API.openServerUi();
+    } catch (err) {
+      console.error("Falha ao abrir o painel do servidor:", err);
+    }
+  });
+
+  menu.appendChild(item);
 }
 
 async function _populateEventDropdown() {

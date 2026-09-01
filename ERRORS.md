@@ -895,3 +895,73 @@ sem rota em `/`, com bind em `127.0.0.1` e sem CORS. Registrado como decisão 8 
 4. Teste de ausência vale tanto quanto teste de presença: `test_central_server_exposes_no_...`
    e `test_studio_never_enters_the_distributed_executable` existem para que a geração não volte
    sozinha ao produto num refactor futuro.
+
+---
+
+## 2026-09-01 — Teste de ausência por palavra-chave bloqueou uma funcionalidade legítima
+
+**O que aconteceu:** ao consertar o erro anterior (geração de distribuição dentro da Central), os
+testes de ausência foram escritos como busca de substring no código-fonte:
+
+```python
+assert "distribution" not in source.lower()
+assert "sepack" not in source.lower()   # <- errado
+```
+
+Quando surgiu a necessidade — prevista pelo próprio plano — de **importar** um `.sepack` pela
+Central, o segundo `assert` reprovou. Ele não travava a decisão que devia travar.
+
+**Causa raiz:** a asserção mirou o **vocabulário** em vez do **comportamento**. A decisão 8 separa
+gerar (fora do produto) de importar (dentro do produto), e as duas operações compartilham a palavra
+`sepack`. Um teste que proíbe o termo proíbe os dois lados da separação e transforma uma regra de
+arquitetura correta numa trava arbitrária.
+
+**Sintoma característico:** o teste falha quando alguém implementa exatamente o que o plano manda.
+Isso é sinal de asserção mal formulada, não de código errado — a tentação de contornar renomeando
+variáveis (`.se-pack`, `pkg`) teria preservado o teste verde e destruído o valor dele.
+
+**Correção:** as asserções passaram a nomear o que não pode existir — o gerador
+(`distribution_service`, `build_package`, `preview_package`, `suggested_filename`) e os controles de
+geração na tela — e um teste novo afirma o lado positivo: a Central importa
+(`test_central_frontend_imports_packages_without_generating_them`).
+
+**Regras:**
+
+1. Teste de ausência deve nomear o **símbolo ou a capacidade** proibida (uma função, um import, uma
+   rota, um controle), nunca uma palavra que os dois lados da fronteira usam.
+2. Toda proibição merece o par positivo: o que **deve** existir do outro lado. Sozinha, a proibição
+   não distingue "a regra está sendo respeitada" de "a feature não foi implementada".
+3. Se um teste de ausência reprova alguém implementando o que o plano pede, o suspeito é o teste.
+   Reescrever a asserção — não renomear a implementação para escapar dela.
+
+---
+
+## 2026-09-01 — `shutil` usado sem import derrubava a troca de logo de cliente
+
+**O que aconteceu:** `POST /api/clientes/{id}/logo` chamava `shutil.copyfileobj(...)` em
+`server.py`, mas `shutil` nunca constou dos imports do módulo. Toda tentativa de trocar a logo de um
+cliente terminava em `NameError: name 'shutil' is not defined`, convertido pelo `except Exception`
+do próprio endpoint num HTTP 500 genérico.
+
+**Causa raiz:** o `except Exception as e` que envolve a gravação transformou um erro de importação
+— que normalmente estoura alto e cedo — numa mensagem de erro de I/O comum. O import ausente ficou
+indistinguível de "falha ao salvar o arquivo", que é o que a mensagem sugeria.
+
+**Por que sobreviveu:** nenhum teste exercitava o endpoint. `import server` passa (o `NameError` de
+um nome global só acontece na execução da função), então nem o `import` do módulo nem a checagem de
+sintaxe pegavam. O bug só aparecia para o operador, em produção, no momento de trocar a logo.
+
+**Correção:** `import shutil` adicionado; `tests/test_server_cliente_logo.py` cobre gravação,
+substituição de logo com extensão diferente, cliente inexistente (404) e formato não suportado
+(400). Verificado que os testes reproduzem a falha: removendo o import, 2 deles falham com o
+`NameError` original.
+
+**Regras:**
+
+1. `except Exception` em volta de I/O mascara erro de programação. Quando o bloco pode conter um
+   nome global, ou o `except` é específico (`OSError`), ou a mensagem de log precisa carregar o tipo
+   da exceção — não só o texto.
+2. Endpoint sem teste é endpoint sem garantia de que sequer executa. Importar o módulo não prova
+   nada sobre nomes resolvidos dentro das funções.
+3. Uma varredura AST de nomes carregados mas nunca ligados custa segundos e pega essa classe inteira
+   de erro; vale rodar sobre `server.py`, `main.py` e `api/api.py` ao mexer nos imports deles.

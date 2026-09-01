@@ -443,6 +443,52 @@
 
     .hidden { display: none !important; }
 
+    /* Importação de pacote de eventos */
+    .pkg-overlay {
+      position: fixed; inset: 0; z-index: 2000;
+      background: rgba(1, 4, 9, 0.75);
+      display: flex; align-items: center; justify-content: center; padding: 20px;
+    }
+    .pkg-dialog {
+      background: var(--bg-surface); border: 1px solid var(--border);
+      border-radius: var(--radius-lg); width: min(620px, 100%);
+      max-height: 85vh; display: flex; flex-direction: column;
+    }
+    .pkg-dialog header {
+      height: auto; padding: 18px 22px; border-bottom: 1px solid var(--border);
+      display: block;
+    }
+    .pkg-dialog h3 { font-size: 16px; font-weight: 600; }
+    .pkg-subtitle { color: var(--text-secondary); font-size: 12px; margin-top: 4px; }
+    .pkg-body { padding: 18px 22px; overflow-y: auto; }
+    .pkg-footer {
+      padding: 14px 22px; border-top: 1px solid var(--border);
+      display: flex; justify-content: flex-end; gap: 10px;
+    }
+    .pkg-footer .btn { width: auto; padding: 9px 18px; }
+    .pkg-row {
+      display: flex; align-items: center; gap: 10px;
+      padding: 8px 0; border-bottom: 1px solid var(--border-soft); font-size: 13px;
+    }
+    .pkg-row:last-child { border-bottom: none; }
+    .pkg-mark {
+      flex: none; width: 20px; text-align: center;
+      font-family: 'JetBrains Mono', monospace; font-weight: 500;
+    }
+    .pkg-name { flex: 1; word-break: break-all; }
+    .pkg-tag { font-size: 11px; color: var(--text-secondary); flex: none; }
+    .pkg-note {
+      border-radius: var(--radius-md); padding: 10px 12px;
+      font-size: 12px; margin-bottom: 12px; line-height: 1.5;
+    }
+    .pkg-note-warning { background: rgba(210, 153, 34, 0.10); color: var(--warning); }
+    .pkg-note-error   { background: var(--danger-bg);  color: var(--danger); }
+    .pkg-note-info    { background: var(--info-bg);    color: var(--info); }
+    .pkg-section-title {
+      font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px;
+      color: var(--text-muted); margin: 14px 0 4px;
+    }
+
     #cluster-panel {
       background: var(--bg-base);
       border: 1px solid var(--border);
@@ -745,12 +791,23 @@
             </svg>
             Eventos Cadastrados
           </h2>
-          <button class="btn btn-secondary" id="btn-novo-evento" style="width:auto;">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <path d="M12 5v14M5 12h14"/>
-            </svg>
-            Novo Evento
-          </button>
+          <div style="display:flex; gap:10px;">
+            <button class="btn btn-secondary" id="btn-importar-pacote" style="width:auto;">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+                <polyline points="7 10 12 15 17 10"/>
+                <line x1="12" y1="15" x2="12" y2="3"/>
+              </svg>
+              Importar Pacote
+            </button>
+            <input type="file" id="input-pacote" accept=".sepack" class="hidden">
+            <button class="btn btn-secondary" id="btn-novo-evento" style="width:auto;">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M12 5v14M5 12h14"/>
+              </svg>
+              Novo Evento
+            </button>
+          </div>
         </div>
         <div class="card" style="padding:20px;">
           <div class="events-container" id="events-list">
@@ -1263,6 +1320,21 @@
 
   </main>
 
+  <!-- Revisão da importação de pacote de eventos -->
+  <div id="pkg-modal" class="pkg-overlay hidden">
+    <div class="pkg-dialog" role="dialog" aria-modal="true" aria-labelledby="pkg-title">
+      <header>
+        <h3 id="pkg-title">Importar pacote de eventos</h3>
+        <div class="pkg-subtitle" id="pkg-subtitle">Lendo o pacote…</div>
+      </header>
+      <div class="pkg-body" id="pkg-body"></div>
+      <div class="pkg-footer">
+        <button class="btn btn-secondary" id="pkg-cancel" style="width:auto;">Cancelar</button>
+        <button class="btn btn-primary" id="pkg-confirm" disabled>Importar</button>
+      </div>
+    </div>
+  </div>
+
   <script>
     // ── Estado ──────────────────────────────────────────────────
     let map = null;
@@ -1389,6 +1461,24 @@
       clienteLogoInput.addEventListener('change', _previewLogo);
 
       btnNovoEvento.addEventListener('click', showEventForm);
+
+      const inputPacote = document.getElementById('input-pacote');
+      document.getElementById('btn-importar-pacote')
+        .addEventListener('click', () => inputPacote.click());
+      inputPacote.addEventListener('change', () => {
+        const file = inputPacote.files && inputPacote.files[0];
+        if (file) startPackageImport(file);
+      });
+      document.getElementById('pkg-cancel').addEventListener('click', closePkgModal);
+      document.getElementById('pkg-confirm').addEventListener('click', confirmPackageImport);
+      document.getElementById('pkg-modal').addEventListener('click', (e) => {
+        if (e.target.id === 'pkg-modal') closePkgModal();
+      });
+      document.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape' && !document.getElementById('pkg-modal').classList.contains('hidden')) {
+          closePkgModal();
+        }
+      });
       btnBackToList.addEventListener('click', () => { cancelEdit(); hideEventForm(); });
       document.getElementById('btn-cancel-edit').addEventListener('click', () => { cancelEdit(); hideEventForm(); });
 
@@ -2619,6 +2709,171 @@
         }
       } catch (err) {
         alert(`Erro de comunicação: ${err.message}`);
+      }
+    }
+
+    // ── Importação de pacote de eventos (.sepack) ────────────────
+    // A Central importa; montar o pacote é operação de quem distribui e não
+    // vive aqui. O arquivo escolhido fica em memória entre a revisão e a
+    // confirmação, e o SHA-256 devolvido pela revisão viaja junto na gravação
+    // para o servidor recusar um arquivo trocado no meio do caminho.
+    let pkgFile = null;
+    let pkgSha = '';
+
+    const PKG_MARKS = {
+      add:       { mark: '+', color: 'var(--success)',    tag: 'novo' },
+      reconcile: { mark: '~', color: 'var(--info)',       tag: 'conciliado' },
+      unchanged: { mark: '=', color: 'var(--text-muted)', tag: 'sem alteração' },
+      preserve:  { mark: '!', color: 'var(--warning)',    tag: 'local preservado' },
+      replace:   { mark: '>', color: 'var(--warning)',    tag: 'substituído' },
+      skip:      { mark: '·', color: 'var(--text-muted)', tag: 'ignorado' },
+    };
+
+    const PKG_KIND_LABEL = { event: 'Evento', cliente: 'Cliente', vip: 'VIP', logo: 'Logo' };
+
+    function closePkgModal() {
+      document.getElementById('pkg-modal').classList.add('hidden');
+      pkgFile = null;
+      pkgSha = '';
+      document.getElementById('input-pacote').value = '';
+    }
+
+    function renderPkgNotes(errors, warnings) {
+      let html = '';
+      (errors || []).forEach(e => {
+        const where = e.path ? escapeHTML(e.path) + ': ' : '';
+        html += '<div class="pkg-note pkg-note-error">' + where + escapeHTML(e.message) + '</div>';
+      });
+      (warnings || []).forEach(w => {
+        html += '<div class="pkg-note pkg-note-warning">' + escapeHTML(w) + '</div>';
+      });
+      return html;
+    }
+
+    function renderPkgActions(actions) {
+      const groups = { event: [], cliente: [], vip: [], logo: [] };
+      (actions || []).forEach(a => { if (groups[a.kind]) groups[a.kind].push(a); });
+
+      let html = '';
+      Object.keys(groups).forEach(kind => {
+        const rows = groups[kind];
+        if (!rows.length) return;
+        html += '<div class="pkg-section-title">' + PKG_KIND_LABEL[kind] + '</div>';
+        rows.forEach(a => {
+          const style = PKG_MARKS[a.action] || PKG_MARKS.skip;
+          let tag = style.tag;
+          const rec = a.reconciliation;
+          if (a.action === 'reconcile' && rec) {
+            const bits = [];
+            const added = (rec.added_fields || []).length;
+            const kept = (rec.preserved_fields || []).length;
+            if (added) bits.push(added + ' campo(s) acrescentado(s)');
+            if (kept) bits.push(kept + ' local(is) mantido(s)');
+            if (bits.length) tag = bits.join(' · ');
+          }
+          html += '<div class="pkg-row">' +
+            '<span class="pkg-mark" style="color:' + style.color + '">' + style.mark + '</span>' +
+            '<span class="pkg-name">' + escapeHTML(a.record_id) + '</span>' +
+            '<span class="pkg-tag" style="color:' + style.color + '">' + escapeHTML(tag) + '</span>' +
+            '</div>';
+        });
+      });
+      return html || '<div class="pkg-note pkg-note-info">O pacote não traz nenhum registro.</div>';
+    }
+
+    function renderPkgPreview(plan) {
+      const body = document.getElementById('pkg-body');
+      const subtitle = document.getElementById('pkg-subtitle');
+      const confirmBtn = document.getElementById('pkg-confirm');
+
+      const actions = plan.actions || [];
+      const added = actions.filter(a => a.action === 'add').length;
+
+      subtitle.textContent = plan.ok
+        ? (plan.name || 'Pacote') + ' — ' + added + ' registro(s) novo(s) de ' + actions.length
+        : 'Pacote inválido: nada será gravado.';
+
+      let html = renderPkgNotes(plan.errors, plan.warnings);
+      if (plan.ok) {
+        html += '<div class="pkg-note pkg-note-info">' +
+          'Cliente, regional, VIP e logo já cadastrados são conciliados por ID — nenhum cadastro ' +
+          'é duplicado. Evento local divergente é preservado e registra conflito; substituir só ' +
+          'pela linha de comando. Eventos ausentes do pacote nunca são apagados.' +
+          '</div>';
+        html += renderPkgActions(actions);
+      }
+      body.innerHTML = html;
+      confirmBtn.disabled = !plan.ok;
+      confirmBtn.textContent = 'Importar';
+    }
+
+    function renderPkgResult(result) {
+      const body = document.getElementById('pkg-body');
+      const subtitle = document.getElementById('pkg-subtitle');
+      const confirmBtn = document.getElementById('pkg-confirm');
+
+      subtitle.textContent = result.ok ? 'Importação concluída.' : 'A importação falhou.';
+      const cls = result.ok ? 'pkg-note-info' : 'pkg-note-error';
+      let html = '';
+      (result.summary || []).forEach(line => {
+        html += '<div class="pkg-note ' + cls + '">' + escapeHTML(line) + '</div>';
+      });
+      if (result.report_path) {
+        html += '<div class="pkg-section-title">Relatório</div>' +
+          '<div class="pkg-row"><span class="pkg-name mono" style="font-size:11px">' +
+          escapeHTML(result.report_path) + '</span></div>';
+      }
+      body.innerHTML = html;
+      confirmBtn.disabled = true;
+      document.getElementById('pkg-cancel').textContent = 'Fechar';
+    }
+
+    async function startPackageImport(file) {
+      pkgFile = file;
+      pkgSha = '';
+      document.getElementById('pkg-modal').classList.remove('hidden');
+      document.getElementById('pkg-cancel').textContent = 'Cancelar';
+      document.getElementById('pkg-confirm').disabled = true;
+      document.getElementById('pkg-subtitle').textContent = 'Lendo o pacote…';
+      document.getElementById('pkg-body').innerHTML =
+        '<div class="empty-state">Validando o pacote…</div>';
+
+      try {
+        const form = new FormData();
+        form.append('file', file);
+        const response = await fetch('/api/events/import/preview', { method: 'POST', body: form });
+        const plan = await response.json();
+        if (!response.ok) {
+          renderPkgPreview({ ok: false, errors: [{ path: '', message: plan.detail || 'HTTP ' + response.status }] });
+          return;
+        }
+        pkgSha = plan.sha256 || '';
+        renderPkgPreview(plan);
+      } catch (err) {
+        renderPkgPreview({ ok: false, errors: [{ path: '', message: 'Erro de comunicação: ' + err.message }] });
+      }
+    }
+
+    async function confirmPackageImport() {
+      if (!pkgFile) return;
+      const confirmBtn = document.getElementById('pkg-confirm');
+      confirmBtn.disabled = true;
+      confirmBtn.textContent = 'Importando…';
+
+      try {
+        const form = new FormData();
+        form.append('file', pkgFile);
+        form.append('expected_sha256', pkgSha);
+        const response = await fetch('/api/events/import', { method: 'POST', body: form });
+        const result = await response.json();
+        if (!response.ok) {
+          renderPkgResult({ ok: false, summary: [result.detail || 'HTTP ' + response.status] });
+          return;
+        }
+        renderPkgResult(result);
+        if (result.ok) loadEvents();
+      } catch (err) {
+        renderPkgResult({ ok: false, summary: ['Erro de comunicação: ' + err.message] });
       }
     }
 

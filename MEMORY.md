@@ -1846,3 +1846,49 @@ job real percorreu `queued → validating → packaging → ready` e produziu um
 validado por `python -m tools.event_package inspect` ("Situacao: valido"); Central subida em
 `127.0.0.1:8018` respondeu 200 em `/` e em `/api/events`, e 404 tanto em
 `/api/distributions/capabilities` quanto em `/distribution-studio`.
+
+---
+
+## 2026-09-01 — Importar `.sepack` é função da Central; gerar continua fora do produto
+
+**Emenda à decisão 8 do plano de distribuição.** A decisão 8 proíbe **geração** na Central, não
+importação — o próprio plano diz que "o aplicativo entregue ao usuário final apenas **importa** o
+resultado". A primeira redação dos testes da Fase 2 extrapolou isso e baniu a palavra `sepack` de
+`server.py` e de `server_frontend/index.html`, o que impedia também a importação. As asserções
+foram estreitadas para banir o **gerador** (`distribution_service`, `build_package`,
+`preview_package`, `suggested_filename`) e os controles de geração, não a palavra.
+
+**O que existe agora na Central:**
+
+- `POST /api/events/import/preview` — devolve o `ImportPlan` (o que seria adicionado, conciliado,
+  preservado) mais o SHA-256 do arquivo. **Não grava nada.**
+- `POST /api/events/import` — aplica o pacote já revisado. Recebe `expected_sha256` e recusa com
+  409 se o arquivo mudou entre a revisão e a confirmação.
+- Botão "Importar Pacote" ao lado de "Novo Evento", `input[type=file]` com `accept=".sepack"` e um
+  modal de revisão com confirmação explícita.
+
+**Decisões travadas por teste (`tests/test_server_event_import.py`):**
+
+- **Revisão antes de gravar.** O upload é feito duas vezes (revisão e confirmação) de propósito: sem
+  staging no servidor não há token, diretório temporário persistente, limpeza nem superfície de path
+  traversal. O `expected_sha256` fecha a janela TOCTOU que esse desenho abriria.
+- **`preserve` é constante no `server.py`.** Substituir evento em conflito continua exclusivo da CLI
+  (`--conflict replace`), onde a intenção é declarada. A interface do produto não expõe caminho
+  destrutivo; `test_the_central_accepts_no_path_or_conflict_policy_from_the_browser` reprova se
+  a política ou um caminho passar a vir do navegador (decisão 6).
+- **Limite de tamanho reusa `ep.MAX_PACKAGE_BYTES`** (32 MiB), sem constante nova; upload maior é
+  413 e extensão diferente de `.sepack` é 400, ambos antes de qualquer leitura de conteúdo.
+- O arquivo é copiado para um diretório temporário fora de `server_data`, para que pacote recusado
+  não deixe resíduo na pasta de dados.
+
+**Aplicativo:** o dropdown de eventos ganhou o item de rodapé "+ Adicionar evento", que chama o
+`API.openServerUi()` já existente. Cadastrar evento continua sendo função exclusiva da Central; o
+app apenas a abre. A aba Eventos já é a inicial da Central, então nenhum roteamento por hash foi
+adicionado.
+
+**Validação executada:** `tests/test_server_event_import.py` (10 passed) e suíte completa;
+Central real subida em `127.0.0.1:8021` — `GET /` 200, preview do `.sepack` de dois clientes
+(Vivo + TIM) devolvendo as 5 ações e apontando para o mesmo `server_data` que a Central lista,
+importação idempotente ("Pacote ja aplicado; nenhum arquivo foi alterado."), SHA divergente 409 e
+extensão errada 400; Playwright confirmou o modal de revisão renderizando as 5 linhas com o botão
+Importar habilitado e o item "+ Adicionar evento" no dropdown do app sem erro de página.

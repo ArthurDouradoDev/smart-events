@@ -45,7 +45,9 @@ def test_central_has_no_link_to_the_studio():
 
     assert "distribution-studio" not in central
     assert "distribution" not in central.lower()
-    assert "sepack" not in central.lower()
+    # `.sepack` aparece na Central apenas como entrada (importar), nunca como
+    # saída: nenhum controle de geração e nenhum link para o estúdio.
+    assert "Gerar distribuição" not in central
 
 
 def test_studio_page_says_it_is_internal_and_is_not_indexed():
