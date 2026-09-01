@@ -8,3 +8,10 @@ SmartEvents RoadShow - instrucao rapida
 
 Dados do operador ficam em %LOCALAPPDATA%\SmartEvents e sao preservados em atualizacoes e desinstalacoes.
 Em caso de falha, envie os arquivos de %LOCALAPPDATA%\SmartEvents\diagnostics e \logs ao suporte.
+
+Este e o fluxo por PERFIL (um instalador por evento/cliente), mantido como alternativa historica.
+O caminho recomendado para distribuicoes novas e "build-base + selecao de eventos" (ver README.md,
+secao 6-7). Para conferir se este instalador foi assinado digitalmente: clique com o botao direito
+no Setup.exe, Propriedades, aba "Assinaturas Digitais". Sem assinatura, o SmartScreen do Windows
+pode exibir um aviso de editor desconhecido; isso nao indica adulteracao, apenas ausencia de
+certificado nesta build.

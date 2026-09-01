@@ -24,8 +24,19 @@ SmartEvents/
 ├─ .claude/        # CLAUDE.md, MEMORY.md, ERRORS.md — memória viva do projeto
 ├─ data/           # runtime, gitignored: *.db, session*.json, settings.json, credentials.json, browser_profile/
 ├─ server_data/    # semente de eventos/VIPs (events/ + vips/), gitignored
-└─ dist/           # .exe final (gitignored)
+├─ keys/sepack_signing/  # chaves PÚBLICAS aceitas para verificar `.sepack` assinado (Fase 4);
+│                        # a chave privada nunca fica no repositório (ver core/package_signing.py)
+└─ dist/           # .exe/build-base final (gitignored)
 ```
+
+**Distribuição automatizada (Fases 1-4, fora deste mapa por módulo próprio):**
+`core/event_package.py` (formato `.sepack`), `core/package_signing.py` (assinatura ECDSA
+via ISSigTool), `core/authenticode.py` (assinatura Authenticode de executáveis),
+`core/base_build.py` (build-base reutilizável), `core/distribution_service.py` (jobs e
+auditoria) e `tools/distribution_studio.py`/`.html` (ferramenta interna de geração — nunca
+entra no `.exe`). Ver o plano completo em
+`docs/plans/2026-08-31-001-feat-distribuicao-automatizada-eventos-plan.md` e as decisões
+travadas em `.claude/MEMORY.md`.
 
 ⚠️ **Nunca excluir** `data/*.db`, `data/session*.json`, `data/credentials.json` — dados de campo / credenciais.
 

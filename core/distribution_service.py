@@ -31,14 +31,18 @@ import logging
 import os
 import re
 import shutil
+import socket
+import subprocess
 import threading
 import time
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 
+from core import authenticode
 from core import base_build
 from core import event_package as ep
+from core import package_signing as psig
 from core import paths
 
 logger = logging.getLogger(__name__)
@@ -163,6 +167,45 @@ def _write_atomic(path: Path, data: bytes) -> None:
 
 def _json_bytes(value: dict) -> bytes:
     return (json.dumps(value, ensure_ascii=False, indent=2) + "\n").encode("utf-8")
+
+
+# ── Auditoria (Fase 4) ───────────────────────────────────────────────
+# Cada job pronto guarda quem/onde gerou e o estado da origem, para o
+# historico de distribuicoes do estudio. Nada disto e sensivel o bastante para
+# precisar de redacao: nome de usuario do SO e host, sem dominio nem e-mail.
+
+_GENERATOR_USER_ENV = ("SMARTEVENTS_GENERATOR_USER", "USERNAME", "USER")
+
+
+def _generator_identity() -> dict:
+    user = ""
+    for name in _GENERATOR_USER_ENV:
+        user = os.environ.get(name, "").strip()
+        if user:
+            break
+    try:
+        host = socket.gethostname()
+    except OSError:
+        host = ""
+    return {"user": user, "host": host}
+
+
+def _source_state(repo: Path) -> dict:
+    """Versao, commit e limpeza do worktree. Nunca levanta: e so metadado."""
+    commit = ""
+    dirty = False
+    try:
+        commit = subprocess.check_output(
+            ["git", "rev-parse", "HEAD"], cwd=str(repo), text=True, encoding="utf-8",
+            stderr=subprocess.DEVNULL, timeout=10,
+        ).strip()
+        dirty = bool(subprocess.check_output(
+            ["git", "status", "--porcelain"], cwd=str(repo), text=True, encoding="utf-8",
+            stderr=subprocess.DEVNULL, timeout=10,
+        ).strip())
+    except (OSError, subprocess.SubprocessError):
+        pass
+    return {"app_version": ep.app_version(), "commit": commit, "dirty": dirty}
 
 
 def _event_rows(preview: ep.PackagePreview) -> list[dict]:
@@ -481,6 +524,8 @@ class DistributionService:
             "created_at_utc": _now(),
             "updated_at_utc": _now(),
             "finished_at_utc": "",
+            "generator": _generator_identity(),
+            "source": _source_state(self._repo_dir),
             "steps": [{"state": "queued", "at": _now()}],
             "progress": self._progress("queued", fmt),
             "counts": {},
@@ -589,6 +634,124 @@ class DistributionService:
             removed.append(job_id)
         return removed
 
+    # ── Auditoria (Fase 4) ──────────────────────────────────────────
+    # O historico e o proprio ``list_jobs()``: cada job ja carrega geracao,
+    # eventos, clientes (via manifesto), politica de conflito, hashes e status
+    # de assinatura, e ``cleanup_incomplete`` nunca remove um job ``ready``.
+    # O que falta e resumir isso para a tela e permitir apagar so o binario,
+    # preservando o registro para auditoria.
+
+    def _audit_row(self, record: dict) -> dict:
+        steps = record.get("steps") or []
+        durations = []
+        for previous, current in zip(steps, steps[1:]):
+            try:
+                started = datetime.strptime(str(previous["at"]), "%Y-%m-%dT%H:%M:%SZ")
+                ended = datetime.strptime(str(current["at"]), "%Y-%m-%dT%H:%M:%SZ")
+            except (KeyError, ValueError):
+                continue
+            durations.append({
+                "from": previous.get("state"),
+                "to": current.get("state"),
+                "seconds": (ended - started).total_seconds(),
+            })
+        artifacts = record.get("artifacts") or {}
+        package = artifacts.get("package") if isinstance(artifacts.get("package"), dict) else {}
+        job_id = str(record.get("job_id") or "")
+        job_dir = self.root / job_id if _JOB_ID.fullmatch(job_id) else None
+        artifacts_available = {}
+        for kind, entry in artifacts.items():
+            if not isinstance(entry, dict) or not entry.get("name") or job_dir is None:
+                continue
+            artifacts_available[kind] = (
+                not entry.get("deleted") and (job_dir / str(entry["name"])).is_file()
+            )
+        manifest = record.get("manifest") or {}
+        return {
+            "job_id": job_id,
+            "format": record.get("format"),
+            "state": record.get("state"),
+            "name": record.get("name"),
+            "event_ids": list(record.get("event_ids") or []),
+            "clients": list(manifest.get("clients") or []),
+            "vip_policy": record.get("vip_policy"),
+            "conflict_policy": "preserve",
+            "created_at_utc": record.get("created_at_utc"),
+            "finished_at_utc": record.get("finished_at_utc"),
+            "generator": record.get("generator") or {"user": "", "host": ""},
+            "source": record.get("source") or {},
+            "signature_status": package.get("signature_status", ""),
+            "signature_key_id": package.get("signature_key_id", ""),
+            "package_sha256": package.get("sha256", ""),
+            "package_bytes": package.get("bytes"),
+            "artifacts_available": artifacts_available,
+            "durations_seconds": durations,
+            "errors": [_redact_error(item) for item in record.get("errors") or []],
+            "warnings": [redact(item) for item in record.get("warnings") or []],
+        }
+
+    def audit_rows(
+        self,
+        *,
+        event_id: str | None = None,
+        client: str | None = None,
+        fmt: str | None = None,
+        state: str | None = None,
+        since: str | None = None,
+        until: str | None = None,
+    ) -> list[dict]:
+        """Historico filtravel para a secao "Distribuicoes geradas" do estudio."""
+        rows = []
+        for record in self.list_jobs():
+            if fmt and record.get("format") != fmt:
+                continue
+            if state and record.get("state") != state:
+                continue
+            if event_id and event_id not in (record.get("event_ids") or []):
+                continue
+            manifest = record.get("manifest") or {}
+            if client and client not in (manifest.get("clients") or []):
+                continue
+            created = str(record.get("created_at_utc") or "")
+            if since and created < since:
+                continue
+            if until and created > until:
+                continue
+            rows.append(self._audit_row(record))
+        return rows
+
+    def delete_artifact(self, job_id: str, kind: str, *, confirm_name: str) -> dict:
+        """Apaga SOMENTE o binario do artefato; o registro do job (auditoria) fica.
+
+        Exige o nome exato do arquivo como confirmacao -- a mesma regra que a
+        interface usa para o botao Excluir.
+        """
+        if kind not in ARTIFACT_KINDS:
+            raise DistributionError("artifact.unknown", f"Artefato desconhecido: {kind}.", 404)
+        with self._record_lock:
+            record = self._load(job_id)
+            entry = (record.get("artifacts") or {}).get(kind)
+            if not isinstance(entry, dict) or not entry.get("name"):
+                raise DistributionError(
+                    "artifact.unknown", f"O job nao registrou o artefato {kind}.", 404
+                )
+            name = str(entry["name"])
+            if not paths.is_safe_component(name):
+                raise DistributionError("artifact.unknown", "Nome de artefato invalido.", 404)
+            if str(confirm_name or "") != name:
+                raise DistributionError(
+                    "artifact.confirmation_mismatch",
+                    "O nome de confirmacao nao corresponde ao arquivo.",
+                    400,
+                )
+            path = self.job_dir(record["job_id"]) / name
+            path.unlink(missing_ok=True)
+            artifacts = dict(record.get("artifacts") or {})
+            artifacts[kind] = {**entry, "deleted": True, "deleted_at_utc": _now()}
+            record["artifacts"] = artifacts
+            self._save(record)
+            return self._audit_row(record)
+
     # ── Execucao ─────────────────────────────────────────────────────
 
     def _run_job(self, job_id: str) -> None:
@@ -630,11 +793,29 @@ class DistributionService:
                 directory = self.job_dir(job_id)
                 directory.mkdir(parents=True, exist_ok=True)
                 destination = directory / ep.suggested_filename(preview)
-                manifest = ep.build_package(preview, destination, force=True)
+                # Assina automaticamente quando a maquina que roda o estudio tem
+                # a chave de release configurada (SMARTEVENTS_SEPACK_SIGNING_KEY);
+                # sem ela, o pacote sai sem assinatura, como nas Fases 1-3.
+                manifest = ep.build_package(
+                    preview, destination, force=True,
+                    signing_key_path=psig.signing_key_configured(),
+                )
                 manifest_path = directory / "manifest.json"
                 _write_atomic(manifest_path, _json_bytes(manifest.to_dict()))
+                # Postura "development": um pacote nao assinado nao pode falhar o
+                # proprio job que o gerou; o status vira badge na interface.
+                package_inspection = ep.validate_package(
+                    destination, signature_policy=ep.SIGNATURE_POLICY_DEVELOPMENT,
+                )
+                signature_info = {
+                    "signature_status": (package_inspection.envelope or {}).get("signature_status", ""),
+                    "signature_key_id": (package_inspection.envelope or {}).get("signature_key_id", ""),
+                }
                 artifacts = {
-                    "package": self._artifact_entry(destination, "application/octet-stream"),
+                    "package": {
+                        **self._artifact_entry(destination, "application/octet-stream"),
+                        **signature_info,
+                    },
                     "manifest": self._artifact_entry(manifest_path, "application/json"),
                 }
                 extra: dict = {}
@@ -712,13 +893,15 @@ class DistributionService:
         basename = "Setup_SmartEvents_" + (
             re.sub(r"[^A-Za-z0-9]+", "_", preview.name).strip("_") or "Eventos"
         )
+        auth_config = authenticode.load_config()
         result = base_build.compile_setup(
             base, package, directory / "installer", work,
             setup_basename=basename, repo=self._repo_dir,
+            authenticode_config=auth_config,
         )
 
         self._transition(job_id, "testing")
-        inspection = base_build.inspect_setup(result, base, package)
+        inspection = base_build.inspect_setup(result, base, package, authenticode_config=auth_config)
         # O artefato mora no diretorio do job, ao lado do pacote: o download so
         # aceita um arquivo registrado ali.
         setup = directory / result.setup.name
@@ -796,6 +979,8 @@ class DistributionService:
                 "created_at_utc": _now(),
                 "updated_at_utc": _now(),
                 "finished_at_utc": _now(),
+                "generator": _generator_identity(),
+                "source": _source_state(self._repo_dir),
                 "steps": [{"state": "failed", "at": _now()}],
                 "progress": self._progress("failed"),
                 "counts": {},

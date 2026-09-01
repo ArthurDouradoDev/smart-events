@@ -100,6 +100,17 @@ _browser_datas = [
 # pasta padrão do projeto.
 _server_data_seed = Path(os.environ.get("SMARTEVENTS_SERVER_DATA_SEED", "server_data"))
 
+# Fase 4 — verificação de assinatura do `.sepack` dentro do executável distribuído:
+# a chave PÚBLICA (registro em keys/sepack_signing/) e o ISSigTool.exe (verificador)
+# entram no bundle; a chave PRIVADA de release nunca é lida por este spec nem
+# empacotada. O ISSigTool.exe é opcional: sem o cache local do Inno Setup (não é
+# pré-requisito de quem só roda o PyInstaller), o build continua — só não poderá
+# verificar um `.sepack` assinado até o binário ser adicionado depois.
+_signing_datas = [('keys/sepack_signing', 'keys/sepack_signing')]
+_issigtool_source = Path('.build-tools') / 'InnoSetup7' / 'ISSigTool.exe'
+if _issigtool_source.is_file():
+    _signing_datas.append((str(_issigtool_source), 'issigtool'))
+
 # O build-base é o ganho arquitetural da Fase 3: ele só pode ser reusado por
 # qualquer seleção de eventos porque não carrega nenhuma. A checagem vive aqui, e
 # não só no build.py, para que nenhum caminho consiga produzir um "base" com
@@ -123,14 +134,15 @@ a = Analysis(
         (str(_server_data_seed), 'server_data'),
         ('core/session_renew.py', 'core'),  # garante o módulo de renovação no bundle
         ('alarms/catalogo-alarmes.csv', 'alarms'),  # catálogo nome→pares (coleta de alarmes)
-    ] + _cred_seed + _profile_datas + collect_data_files('certifi') + _pw_datas + _browser_datas,
+    ] + _cred_seed + _profile_datas + _signing_datas + collect_data_files('certifi') + _pw_datas + _browser_datas,
     hiddenimports=[
         'server',  # importado por main.py no modo --serve
         'core.session_renew',  # importado por main.py no modo --get-session
-        # importado por main.py nos modos --inspect/--import-event-package. Na Fase 4
-        # entram aqui tambem a chave publica e o verificador de assinatura do .sepack;
-        # a chave PRIVADA nunca e empacotada.
+        # importado por main.py nos modos --inspect/--import-event-package. A
+        # chave publica e o verificador de assinatura do .sepack (Fase 4) entram
+        # via `_signing_datas`, acima; a chave PRIVADA nunca e empacotada.
         'core.event_package',
+        'core.package_signing',
         'uvicorn',
         'uvicorn.logging',
         'uvicorn.loops',

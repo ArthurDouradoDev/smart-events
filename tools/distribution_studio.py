@@ -211,6 +211,33 @@ def download_distribution_setup(job_id: str):
     return _distribution_artifact(job_id, "setup")
 
 
+# ── Historico de distribuicoes (Fase 4) ─────────────────────────────
+# O historico e o proprio inventario de jobs, resumido para a tela: nome,
+# assinatura, gerador e duracao por etapa. Excluir remove so o binario; o
+# registro (auditoria) permanece, conforme a decisao de retencao do plano.
+
+@app.get(STUDIO_PATH + "/api/distributions")
+def get_distribution_history(
+    event_id: str | None = None,
+    client: str | None = None,
+    format: str | None = None,
+    state: str | None = None,
+    since: str | None = None,
+    until: str | None = None,
+):
+    return DISTRIBUTION_SERVICE.audit_rows(
+        event_id=event_id, client=client, fmt=format, state=state, since=since, until=until,
+    )
+
+
+@app.delete(STUDIO_PATH + "/api/distributions/{job_id}/artifacts/{kind}")
+def delete_distribution_artifact(job_id: str, kind: str, confirm_name: str):
+    try:
+        return DISTRIBUTION_SERVICE.delete_artifact(job_id, kind, confirm_name=confirm_name)
+    except DistributionError as exc:
+        raise _distribution_failure(exc) from exc
+
+
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(
         prog="python -m tools.distribution_studio",

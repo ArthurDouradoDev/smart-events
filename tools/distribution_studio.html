@@ -301,6 +301,36 @@
       .distribution-modal-foot { flex-direction: column; align-items: stretch; }
       .distribution-bar-actions { justify-content: space-between; }
     }
+
+    /* ── Histórico de distribuições (Fase 4) ── */
+    .history-card { margin-top: 24px; }
+    .history-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 14px; flex-wrap: wrap; gap: 8px; }
+    .history-head h2 { font-size: 15px; font-weight: 600; }
+
+    .history-filters { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 14px; }
+    .history-filters select, .history-filters input[type="text"] {
+      background: var(--bg-base); border: 1px solid var(--border); border-radius: var(--radius-md);
+      color: var(--text-primary); padding: 7px 10px; font-size: 12px; font-family: inherit;
+    }
+
+    .history-row {
+      display: flex; align-items: flex-start; justify-content: space-between; gap: 12px;
+      padding: 12px 14px; border: 1px solid var(--border-soft); border-radius: var(--radius-md);
+      margin-bottom: 8px; background: var(--bg-hover); flex-wrap: wrap;
+    }
+    .history-row:last-child { margin-bottom: 0; }
+    .history-main { font-size: 13px; }
+    .history-title { font-weight: 600; }
+    .history-meta { font-size: 11px; color: var(--text-secondary); margin-top: 4px; }
+    .history-actions { display: flex; gap: 8px; align-items: center; flex: none; }
+
+    .badge-pill {
+      font-size: 11px; font-weight: 600; padding: 3px 9px; border-radius: 10px; display: inline-block;
+    }
+    .badge-pill.ok      { background: var(--success-bg); color: var(--success); }
+    .badge-pill.warn    { background: rgba(210, 153, 34, 0.12); color: var(--warning); }
+    .badge-pill.err     { background: var(--danger-bg); color: var(--danger); }
+    .badge-pill.neutral { background: var(--border); color: var(--text-secondary); }
   </style>
 </head>
 
@@ -347,6 +377,32 @@
     <div class="card">
       <div id="studio-events-list">
         <div class="empty-state">Buscando eventos cadastrados...</div>
+      </div>
+    </div>
+
+    <!-- Histórico de distribuições geradas (Fase 4). Registro de auditoria: -->
+    <!-- excluir remove só o binário, o registro permanece. -->
+    <div class="card history-card">
+      <div class="history-head">
+        <h2>Distribuições geradas</h2>
+        <button class="btn btn-secondary" id="btn-history-refresh">Atualizar</button>
+      </div>
+      <div class="history-filters">
+        <input type="text" id="history-filter-event" placeholder="Filtrar por id do evento">
+        <input type="text" id="history-filter-client" placeholder="Filtrar por cliente">
+        <select id="history-filter-format">
+          <option value="">Todos os formatos</option>
+          <option value="event_package">Pacote (.sepack)</option>
+          <option value="full_setup">Instalador completo</option>
+        </select>
+        <select id="history-filter-state">
+          <option value="">Todos os estados</option>
+          <option value="ready">Pronto</option>
+          <option value="failed">Falhou</option>
+        </select>
+      </div>
+      <div id="history-list">
+        <div class="empty-state">Carregando histórico...</div>
       </div>
     </div>
   </div>
@@ -442,7 +498,26 @@
           document.getElementById('studio-app-version').textContent = 'SmartEvents ' + caps.app_version;
         }
       });
+      bindHistoryUi();
+      loadDistributionHistory();
     });
+
+    // ── Badge de assinatura (Fase 4) ─────────────────────────────
+
+    const SIGNATURE_BADGES = {
+      ok:              { cls: 'ok',   label: 'Assinado e validado' },
+      unsigned:        { cls: 'warn', label: 'Não assinado — desenvolvimento' },
+      unknown_key:     { cls: 'err',  label: 'Assinatura de chave desconhecida' },
+      retired_key:     { cls: 'err',  label: 'Assinatura de chave revogada' },
+      invalid:         { cls: 'err',  label: 'Assinatura inválida' },
+      missing:         { cls: 'err',  label: 'Assinatura ausente' },
+      tool_unavailable:{ cls: 'warn', label: 'Verificador de assinatura indisponível' },
+    };
+
+    function signatureBadgeHtml(status) {
+      const entry = SIGNATURE_BADGES[status] || { cls: 'neutral', label: status || 'desconhecido' };
+      return `<span class="badge-pill ${entry.cls}">${escapeHTML(entry.label)}</span>`;
+    }
 
     // ── Lista de eventos ────────────────────────────────────────
 
@@ -868,6 +943,7 @@
           <div class="distribution-issue info">Distribuição pronta para download.</div>
           <div class="distribution-section">
             <div class="distribution-row"><span>Arquivo</span><span class="mono">${escapeHTML(pkg.name || '')}</span></div>
+            <div class="distribution-row"><span>Assinatura</span><span>${signatureBadgeHtml(pkg.signature_status)}</span></div>
             <div class="distribution-row"><span>Tamanho</span><span>${formatDistributionBytes(pkg.bytes)}</span></div>
             <div class="distribution-row"><span>SHA-256</span><span class="mono" style="word-break:break-all;">${escapeHTML(pkg.sha256 || '')}</span></div>
             <div class="distribution-row"><span>Gerado em</span><span>${escapeHTML(job.finished_at_utc || '')}</span></div>
@@ -953,6 +1029,121 @@
       distributionJobId = null;
       showDistributionPane('review');
       openDistributionModal();
+    }
+
+    // ── Histórico de distribuições (Fase 4) ──────────────────────
+    // O registro de cada job já é o histórico; esta seção só o lista e
+    // filtra. Excluir remove o binário e mantém o registro (auditoria).
+
+    function bindHistoryUi() {
+      document.getElementById('btn-history-refresh').addEventListener('click', loadDistributionHistory);
+      ['history-filter-event', 'history-filter-client'].forEach(id => {
+        document.getElementById(id).addEventListener('change', loadDistributionHistory);
+      });
+      ['history-filter-format', 'history-filter-state'].forEach(id => {
+        document.getElementById(id).addEventListener('change', loadDistributionHistory);
+      });
+    }
+
+    async function loadDistributionHistory() {
+      const list = document.getElementById('history-list');
+      const params = new URLSearchParams();
+      const eventId = document.getElementById('history-filter-event').value.trim();
+      const client = document.getElementById('history-filter-client').value.trim();
+      const format = document.getElementById('history-filter-format').value;
+      const state = document.getElementById('history-filter-state').value;
+      if (eventId) params.set('event_id', eventId);
+      if (client) params.set('client', client);
+      if (format) params.set('format', format);
+      if (state) params.set('state', state);
+      try {
+        const res = await fetch(`${STUDIO_API}/distributions?${params.toString()}`);
+        if (!res.ok) throw new Error('HTTP ' + res.status);
+        renderDistributionHistory(await res.json());
+      } catch (err) {
+        list.innerHTML = `<div class="empty-state">Não foi possível ler o histórico: ${escapeHTML(err.message)}</div>`;
+      }
+    }
+
+    function renderDistributionHistory(rows) {
+      const list = document.getElementById('history-list');
+      if (!rows || rows.length === 0) {
+        list.innerHTML = '<div class="empty-state">Nenhuma distribuição gerada ainda.</div>';
+        return;
+      }
+      list.innerHTML = rows.map(row => {
+        const available = row.artifacts_available || {};
+        const generator = row.generator || {};
+        const source = row.source || {};
+        const stateBadge = row.state === 'ready'
+          ? '<span class="badge-pill ok">Pronto</span>'
+          : row.state === 'failed'
+            ? '<span class="badge-pill err">Falhou</span>'
+            : `<span class="badge-pill neutral">${escapeHTML(row.state || '')}</span>`;
+        const meta = [
+          (row.event_ids || []).join(', ') || '—',
+          (row.clients || []).join(', ') || '—',
+          row.format === 'full_setup' ? 'instalador completo' : 'pacote',
+          row.created_at_utc || '',
+          generator.user ? `gerado por ${generator.user}${generator.host ? '@' + generator.host : ''}` : '',
+          source.commit ? `commit ${source.commit.slice(0, 8)}${source.dirty ? ' (sujo)' : ''}` : '',
+        ].filter(Boolean).join(' · ');
+        const actions = [];
+        if (available.package) {
+          actions.push(`<button class="btn btn-secondary" onclick="downloadHistoryArtifact('${escapeHTML(row.job_id)}','download')">Baixar</button>`);
+          actions.push(`<button class="btn btn-secondary" onclick="deleteHistoryArtifact('${escapeHTML(row.job_id)}','package')">Excluir</button>`);
+        }
+        return `
+          <div class="history-row">
+            <div class="history-main">
+              <div class="history-title">${escapeHTML(row.name || row.job_id)} ${stateBadge} ${signatureBadgeHtml(row.signature_status)}</div>
+              <div class="history-meta">${escapeHTML(meta)}</div>
+            </div>
+            <div class="history-actions">${actions.join('')}</div>
+          </div>`;
+      }).join('');
+    }
+
+    function downloadHistoryArtifact(jobId, kind) {
+      const link = document.createElement('a');
+      link.href = `${STUDIO_API}/jobs/${encodeURIComponent(jobId)}/${kind}`;
+      link.download = '';
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+    }
+
+    async function deleteHistoryArtifact(jobId, kind) {
+      // Confirmação exige digitar o nome do arquivo: o botão nunca apaga por engano.
+      let job;
+      try {
+        const res = await fetch(`${STUDIO_API}/jobs/${encodeURIComponent(jobId)}`);
+        if (!res.ok) throw new Error('HTTP ' + res.status);
+        job = await res.json();
+      } catch (err) {
+        alert('Não foi possível ler o job: ' + err.message);
+        return;
+      }
+      const entry = (job.artifacts && job.artifacts[kind]) || {};
+      const name = entry.name || '';
+      const typed = prompt(
+        `Digite o nome do arquivo para confirmar a exclusão (o registro de auditoria é mantido):\n\n${name}`
+      );
+      if (typed !== name) {
+        if (typed !== null) alert('Nome não confere; nada foi excluído.');
+        return;
+      }
+      try {
+        const res = await fetch(
+          `${STUDIO_API}/distributions/${encodeURIComponent(jobId)}/artifacts/${encodeURIComponent(kind)}`
+          + `?confirm_name=${encodeURIComponent(name)}`,
+          { method: 'DELETE' },
+        );
+        if (!res.ok) throw new Error('HTTP ' + res.status);
+        loadDistributionHistory();
+      } catch (err) {
+        alert('Falha ao excluir: ' + err.message);
+      }
     }
   </script>
 </body>

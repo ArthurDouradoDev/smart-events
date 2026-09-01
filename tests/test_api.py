@@ -543,6 +543,33 @@ class TestSiteMerge:
         assert ids == {"A1", "B1"}
         assert "não fundidos" in caplog.text
 
+    @pytest.mark.parametrize("inside_a,inside_b", [
+        (False, False),
+        (True, False),
+        (False, True),
+    ])
+    def test_homonimos_distantes_fora_do_poligono_nao_geram_validacao(
+            self, api, sample_event, caplog, inside_a, inside_b):
+        event = {
+            **sample_event,
+            "id": f"homonym-outside-{inside_a}-{inside_b}",
+            "sites": [
+                {"id": "A1", "name": "SPSMG7", "lat": -23.640913,
+                 "lng": -46.710655, "is_event_site": inside_a,
+                 "cells": _cells("4G-SPSMG7", 2)},
+                {"id": "B1", "name": "SPSMG7", "lat": -23.650913,
+                 "lng": -46.710655, "is_event_site": inside_b,
+                 "cells": _cells("5G-SPSMG7", 2)},
+            ],
+        }
+        database.save_event(event)
+
+        with caplog.at_level("WARNING"):
+            sites = api.get_sites(event["id"])
+
+        assert {site["id"] for site in sites} == {"A1", "B1"}
+        assert "não fundidos" not in caplog.text
+
     def test_valor_da_lista_nao_depende_da_ordem_das_linhas_site(
             self, api, sample_event):
         event = _twin_sites_event(sample_event, "twin-order")

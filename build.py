@@ -30,6 +30,7 @@ import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
+from core import authenticode
 from core import base_build
 from core import event_package as ep
 from tools.prepare_installer_seed import load_profile
@@ -344,6 +345,19 @@ def command_base(args) -> int:
         raise SystemExit(f"ERRO: executavel ausente: {exe}")
     _verify_base_bundle(app_dir)
 
+    # Assinatura Authenticode do executavel (Fase 4): so acontece quando
+    # signtool + certificado estao configurados nesta maquina. Sem isso, o
+    # manifesto declara `signed: false` -- a build continua valida para
+    # desenvolvimento, so nao pode ser chamada de "producao".
+    signed = False
+    auth_config = authenticode.load_config()
+    if auth_config is not None:
+        result = authenticode.sign_file(exe, auth_config)
+        if not result.ok:
+            raise SystemExit(f"ERRO: falha ao assinar {exe.name}: {result.message}")
+        signed = True
+        print(f"+ {exe.name} assinado (Authenticode)")
+
     # Diagnostico GENERICO: sem evento embutido, o self-test nao pode exigir
     # RoadShow, TIM nem qualquer cadastro de cliente.
     smoke_env = env.copy()
@@ -363,6 +377,7 @@ def command_base(args) -> int:
         browsers=_browser_revisions(browsers),
         package_schema_version=ep.SCHEMA_VERSION,
         archive=archive,
+        signed=signed,
     )
     freeze = subprocess.check_output(
         [sys.executable, "-m", "pip", "freeze", "--all"], text=True, encoding="utf-8"
@@ -435,11 +450,13 @@ def command_distribution(args) -> int:
         work = directory / "work"
         work.mkdir(parents=True, exist_ok=True)
         basename = f"Setup_SmartEvents_{re.sub(r'[^A-Za-z0-9]+', '_', preview.name).strip('_') or 'Eventos'}"
+        auth_config = authenticode.load_config()
         try:
             result = base_build.compile_setup(
                 base, package, installer_dir, work, setup_basename=basename, repo=ROOT,
+                authenticode_config=auth_config,
             )
-            inspection = base_build.inspect_setup(result, base, package)
+            inspection = base_build.inspect_setup(result, base, package, authenticode_config=auth_config)
         except base_build.BaseBuildError as exc:
             print(f"ERRO: {exc}")
             return EXIT_BUILD

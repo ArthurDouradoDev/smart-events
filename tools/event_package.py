@@ -84,7 +84,9 @@ def _command_build(args) -> int:
     output = Path(args.output) if args.output else paths.distributions_dir()
     destination = output if output.suffix == ep.PACKAGE_SUFFIX else output / ep.suggested_filename(preview)
     try:
-        manifest = ep.build_package(preview, destination, force=args.force)
+        manifest = ep.build_package(
+            preview, destination, force=args.force, signing_key_path=args.sign_with_key,
+        )
     except ep.PackageBuildError as exc:
         payload = {"ok": False, "errors": [item.to_dict() for item in exc.errors]}
         _emit(payload, args.json, _issue_lines(payload["errors"], []))
@@ -109,8 +111,19 @@ def _command_build(args) -> int:
     return EXIT_OK
 
 
+_SIGNATURE_LABELS = {
+    "ok": "sim, verificada",
+    "unsigned": "nao (modo desenvolvimento)",
+    "unknown_key": "sim, mas de chave desconhecida",
+    "retired_key": "sim, mas de chave revogada",
+    "invalid": "sim, mas invalida",
+    "missing": "nao (producao exige assinatura)",
+    "tool_unavailable": "presente, mas o verificador esta indisponivel",
+}
+
+
 def _command_inspect(args) -> int:
-    report = ep.inspect_package(args.package)
+    report = ep.inspect_package(args.package, signature_policy=args.signature_policy)
     manifest = report.get("manifest") or {}
     counts = report["counts"]
     lines = [
@@ -120,7 +133,7 @@ def _command_inspect(args) -> int:
         f"{manifest.get('created_by_app_version', 'N/D')}",
         f"Eventos: {counts['events']} | clientes: {counts['clientes']} | "
         f"VIPs: {counts['vips']} | logos: {counts['logos']}",
-        "Assinado: sim (nao verificada nesta versao)" if report["signed"] else "Assinado: nao",
+        "Assinado: " + _SIGNATURE_LABELS.get(report["signature_status"], "desconhecido"),
         "Situacao: valido" if report["ok"] else "Situacao: invalido",
     ]
     lines.extend(_issue_lines(report["errors"], report["warnings"]))
@@ -129,7 +142,10 @@ def _command_inspect(args) -> int:
 
 
 def _command_import(args) -> int:
-    result = ep.import_package(args.package, args.data_dir, conflict_policy=args.conflict)
+    result = ep.import_package(
+        args.package, args.data_dir, conflict_policy=args.conflict,
+        signature_policy=args.signature_policy,
+    )
     payload = result.to_dict()
     if args.report:
         report_path = Path(args.report)
@@ -178,10 +194,25 @@ def build_parser() -> argparse.ArgumentParser:
         help="Arquivo .sepack ou pasta de saida (padrao: a pasta de distribuicoes).",
     )
     build.add_argument("--force", action="store_true", help="Sobrescreve um arquivo existente.")
+    build.add_argument(
+        "--sign-with-key", type=Path, default=None, dest="sign_with_key",
+        help="Chave privada (.iskey) para assinar o payload. Sem ela, o pacote sai sem assinatura.",
+    )
     build.set_defaults(handler=_command_build)
+
+    def add_signature_policy(subparser):
+        subparser.add_argument(
+            "--signature-policy", choices=ep.SIGNATURE_POLICIES,
+            default=ep.SIGNATURE_POLICY_DEVELOPMENT, dest="signature_policy",
+            help=(
+                "'development' (padrao) aceita pacote nao assinado com aviso; "
+                "'production' exige assinatura valida de uma chave ativa."
+            ),
+        )
 
     inspect = commands.add_parser("inspect", help="Valida um pacote sem importar.")
     inspect.add_argument("package", type=Path)
+    add_signature_policy(inspect)
     inspect.set_defaults(handler=_command_inspect)
 
     importer = commands.add_parser("import", help="Importa um pacote na pasta de dados.")
@@ -192,6 +223,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     importer.add_argument("--conflict", choices=ep.CONFLICT_POLICIES, default="preserve")
     importer.add_argument("--report", type=Path, default=None, help="Grava o resultado em JSON.")
+    add_signature_policy(importer)
     importer.set_defaults(handler=_command_import)
     return parser
 

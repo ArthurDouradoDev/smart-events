@@ -1043,3 +1043,37 @@ e todos medem a folga correta. Menos código que a versão com miter.
    robusta — foi o que aconteceu aqui.
 4. Verifique geometria por **medição**, não por inspeção visual: distância mínima de cada ponto de
    entrada às arestas do resultado tem de bater com o padding pedido.
+
+---
+
+## 2026-09-01 — Redação de senha do certificado buscava no ambiente, não na config em uso
+
+**Como apareceu:** não apareceu em produção — nenhuma máquina aqui tem certificado configurado.
+Encontrado pelo próprio teste novo (`tests/test_authenticode.py::
+test_sign_file_failure_redacts_password_in_message`) durante a Fase 4 da distribuição
+automatizada.
+
+**Sintoma:** `core/authenticode.sign_file()` deveria ocultar a senha do certificado de qualquer
+mensagem de erro que o `signtool` devolvesse (ele às vezes ecoa os próprios argumentos no
+stderr). A primeira versão de `_redact()` lia a senha de `os.environ.get(ENV_PFX_PASSWORD)` para
+saber o que substituir por `<oculta>`.
+
+**Causa raiz:** `AuthenticodeConfig` pode ser construído diretamente (é exatamente o que os
+testes fazem, e é uma forma legítima de uso — um caller pode montar a config sem passar pelas
+variáveis de ambiente correntes). Nesse caso a senha em uso **não está** em
+`os.environ[ENV_PFX_PASSWORD]`, e `_redact()` não tinha nada para substituir: a senha real
+vazava inteira na mensagem de erro devolvida ao chamador (que por sua vez poderia acabar num
+log ou numa tela de diagnóstico).
+
+**Correção:** `_redact(text, password=None)` passou a aceitar a senha explicitamente; `sign_file`
+sempre passa `config.pfx_password` (a senha do objeto realmente em uso), nunca deixa a função
+adivinhar a partir do ambiente. O fallback para `os.environ` continua existindo só para chamadas
+sem config à mão.
+
+**Regra:** **redação de segredo tem de operar sobre o valor realmente em uso na operação, nunca
+sobre "onde ele normalmente mora".** Ler de uma variável global (ambiente, singleton, cache) para
+decidir o que ocultar é uma suposição sobre *como o código será chamado*; um teste (ou um caller
+futuro) que construa o objeto de outra forma legítima escapa da redação em silêncio — o pior tipo
+de falha de segurança, porque não quebra teste nenhum a não ser que alguém pense exatamente nesse
+caso. Prova disso: o bug só apareceu porque o teste construía `AuthenticodeConfig` manualmente em
+vez de passar por `load_config()`.

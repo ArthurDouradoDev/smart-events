@@ -59,13 +59,20 @@ def test_studio_page_says_it_is_internal_and_is_not_indexed():
 
 
 def test_studio_is_read_only_over_the_event_data():
-    """O estúdio seleciona e gera; editar e excluir continuam só na Central."""
+    """O estúdio seleciona e gera; editar cadastro de evento continua só na Central.
+
+    A Fase 4 introduz DELETE para apagar o BINÁRIO de uma distribuição já gerada
+    (histórico de auditoria), não para editar ou excluir evento/cliente/VIP.
+    """
     html = _html()
 
-    for forbidden in ("editEvent", "deleteEvent", "method: 'DELETE'", "method: 'PUT'"):
+    for forbidden in ("editEvent", "deleteEvent", "method: 'PUT'"):
         assert forbidden not in html
     # O único POST é a geração (revisão e job); nada grava em server_data.
     assert html.count("method: 'POST'") == 2
+    # O único DELETE é o de artefato de distribuição, sob o próprio prefixo.
+    assert html.count("method: 'DELETE'") == 1
+    assert "/distributions/${encodeURIComponent(jobId)}/artifacts/" in html
 
 
 def test_every_studio_request_stays_under_the_studio_prefix():
@@ -239,6 +246,42 @@ def test_frontend_never_sends_a_path_to_the_distribution_endpoints():
         assert f"{forbidden}:" not in body
 
 
+# ── Histórico de distribuições (Fase 4) ───────────────────────────────
+
+def test_history_section_has_filters_and_lists_under_the_studio_prefix():
+    html = _html()
+
+    assert "Distribuições geradas" in html
+    assert 'id="history-filter-event"' in html
+    assert 'id="history-filter-client"' in html
+    assert 'id="history-filter-format"' in html
+    assert 'id="history-filter-state"' in html
+    assert 'id="history-list"' in html
+    assert "function loadDistributionHistory" in html
+    assert "${STUDIO_API}/distributions?" in html
+
+
+def test_signature_badge_covers_every_verification_status():
+    html = _html()
+
+    for status in ("ok", "unsigned", "unknown_key", "retired_key", "invalid", "missing", "tool_unavailable"):
+        assert f"{status}:" in html
+    assert "Assinado e validado" in html
+    assert "Não assinado — desenvolvimento" in html
+
+
+def test_history_delete_requires_typed_filename_confirmation():
+    """Excluir grava confirmação no próprio texto do prompt, nunca apaga direto."""
+    html = _html()
+
+    body = html.split("async function deleteHistoryArtifact")[1].split("\n    }\n")[0]
+    assert "prompt(" in body
+    assert "typed !== name" in body
+    assert "method: 'DELETE'" in body
+    # O registro do job (auditoria) não é apagado por esta ação: só o binário.
+    assert "auditoria é mantido" in body
+
+
 # ── Servidor de mentira para os testes de Playwright ─────────────────
 
 _EVENTS = [
@@ -273,6 +316,21 @@ _CAPABILITIES = {
     "vip_policies": ["auto", "explicit", "none"],
     "app_version": "1.0.0",
 }
+
+_HISTORY_ROWS = [
+    {
+        "job_id": "a" * 32, "format": "event_package", "state": "ready",
+        "name": "Barretos 2026", "event_ids": ["evento-a"], "clients": ["Vivo"],
+        "vip_policy": "auto", "created_at_utc": "2026-08-31T12:00:00Z",
+        "finished_at_utc": "2026-08-31T12:00:05Z",
+        "generator": {"user": "operador", "host": "estudio-01"},
+        "source": {"app_version": "1.0.0", "commit": "abcdef1234567890", "dirty": False},
+        "signature_status": "unsigned", "signature_key_id": "",
+        "package_sha256": "b" * 64, "package_bytes": 4096,
+        "artifacts_available": {"package": True, "manifest": True},
+        "durations_seconds": [], "errors": [], "warnings": [],
+    },
+]
 
 
 def _preview_for(event_ids):
@@ -326,6 +384,7 @@ class _StudioHandler(SimpleHTTPRequestHandler):
     """Imita os endpoints do estúdio. O job vira `ready` (ou `failed`) na 2ª consulta."""
 
     polls: dict = {}
+    deleted: list = []
 
     def log_message(self, *_args):
         pass
@@ -373,6 +432,9 @@ class _StudioHandler(SimpleHTTPRequestHandler):
         if clean == STUDIO_API + "/capabilities":
             self._json(_CAPABILITIES)
             return
+        if clean == STUDIO_API + "/distributions":
+            self._json(_HISTORY_ROWS)
+            return
         if clean.startswith(STUDIO_API + "/jobs/") and clean.endswith("/download"):
             self.send_response(200)
             self.send_header("Content-Type", "application/octet-stream")
@@ -383,6 +445,15 @@ class _StudioHandler(SimpleHTTPRequestHandler):
             return
         if clean.startswith(STUDIO_API + "/jobs/"):
             job_id = clean.rsplit("/", 1)[-1]
+            if job_id == _HISTORY_ROWS[0]["job_id"]:
+                self._json(self._job(
+                    job_id, "ready",
+                    artifacts={"package": {
+                        "name": "pacote.sepack", "bytes": 4096, "sha256": "b" * 64,
+                        "media_type": "application/octet-stream",
+                    }},
+                ))
+                return
             seen = _StudioHandler.polls.get(job_id, 0) + 1
             _StudioHandler.polls[job_id] = seen
             if seen < 2:
@@ -420,10 +491,19 @@ class _StudioHandler(SimpleHTTPRequestHandler):
             return
         self._json({"detail": "not found"}, 404)
 
+    def do_DELETE(self):
+        clean = self.path.split("?", 1)[0]
+        if clean.startswith(STUDIO_API + "/distributions/") and "/artifacts/" in clean:
+            _StudioHandler.deleted.append(clean)
+            self._json({**_HISTORY_ROWS[0], "artifacts_available": {"package": False, "manifest": True}})
+            return
+        self._json({"detail": "not found"}, 404)
+
 
 @contextmanager
 def _studio_server():
     _StudioHandler.polls = {}
+    _StudioHandler.deleted = []
     httpd = ThreadingHTTPServer(("127.0.0.1", 0), _StudioHandler)
     thread = Thread(target=httpd.serve_forever, daemon=True)
     thread.start()
@@ -592,6 +672,27 @@ def test_selection_survives_the_list_being_rerendered():
 
         assert page.locator("#event-select-evento-b").is_checked() is True
         assert page.locator("#distribution-selection-count").inner_text() == "1 evento selecionado"
+
+
+def test_history_lists_rows_and_deletes_artifact_after_typed_confirmation():
+    with _studio_page() as page:
+        page.locator("#history-list .history-row").first.wait_for(timeout=5000)
+        row = page.locator("#history-list .history-row").first
+        assert "Barretos 2026" in row.inner_text()
+        assert "Não assinado — desenvolvimento" in row.inner_text()
+        assert "operador" in row.inner_text()
+
+        page.on("dialog", lambda dialog: dialog.accept("pacote.sepack"))
+        page.locator("#history-list button", has_text="Excluir").click()
+        # A exclusão faz dois round-trips assíncronos (ler o job, depois apagar);
+        # espera o servidor de mentira realmente registrar a chamada DELETE.
+        for _ in range(50):
+            if _StudioHandler.deleted:
+                break
+            page.wait_for_timeout(50)
+
+        assert len(_StudioHandler.deleted) == 1
+        assert "/artifacts/package" in _StudioHandler.deleted[0]
 
 
 def test_keyboard_navigation_selects_an_event_by_its_label():

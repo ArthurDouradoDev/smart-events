@@ -14,3 +14,8 @@ Tasks PM: LTE/4G 2279, 5G NRCELL 2280 e 5G NRDUCELL 2281.
 Dados deste perfil ficam em %LOCALAPPDATA%\SmartEvents-RoadShow-Salvador e sao
 preservados em atualizacoes e desinstalacoes. Em caso de falha, envie os arquivos
 das pastas diagnostics e logs ao suporte.
+
+Este e o fluxo por PERFIL, mantido como alternativa historica; o caminho recomendado para
+distribuicoes novas e "build-base + selecao de eventos" (ver README.md). Para conferir a
+assinatura digital do instalador: botao direito no Setup.exe, Propriedades, aba "Assinaturas
+Digitais".

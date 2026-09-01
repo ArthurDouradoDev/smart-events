@@ -2014,3 +2014,130 @@ vieram marcados como fora — o operador confere a leitura da planilha sem abrir
 `tests/test_server_frontend_polygon_map.py` (9 passed, Chromium real). A regressão do zoom foi
 verificada por reintrodução deliberada do bug: com `zoomend` reenquadrando de novo, 4 dos 9 testes
 falham, incluindo o clique real no botão `+` do Leaflet.
+
+---
+
+## 2026-09-01 — Fase 4 da distribuição automatizada: assinatura, auditoria e migração
+
+Implementada a Fase 4 do plano
+`docs/plans/2026-08-31-001-feat-distribuicao-automatizada-eventos-plan.md`. Fecha o ciclo aberto
+na Fase 1: `.sepack` passa a ter assinatura verificável de verdade, o Distribution Studio ganha
+histórico de auditoria, e a documentação foi atualizada para o fluxo `base + distribution`.
+
+**Limite real deste ambiente, declarado antes de qualquer decisão de design:** não há certificado
+Authenticode nem VM de homologação disponíveis nesta máquina/sessão. O `ISSigTool.exe` do Inno
+Setup **está** disponível (`.build-tools/InnoSetup7/`), então a assinatura do `.sepack` foi
+implementada e testada de ponta a ponta com chaves reais geradas em cada teste. A assinatura
+Authenticode (SmartEvents.exe/Setup.exe/desinstalador) foi implementada e testada com um `signtool`
+dublê via `monkeypatch` — o contrato está pronto e é usado automaticamente assim que alguém
+configurar um certificado real, mas isso não foi (e não podia ser) validado aqui. Ver
+"Pendências que exigem infraestrutura fora deste ambiente" ao final desta entrada.
+
+**Entregue:**
+
+- `core/package_signing.py` — assinatura/verificação ECDSA P-256 do `payload.zip` via
+  `ISSigTool.exe`: `sign_payload_bytes`, `verify_payload_signature`, `parse_signature`,
+  `load_registry` (chaves ativas/revogadas por `key_id`, nunca por nome).
+- `core/authenticode.py` — assinatura Authenticode de executáveis via `signtool`:
+  `load_config` (variáveis de ambiente; `None` = modo desenvolvimento), `sign_file`,
+  `verify_file`, `iss_sign_tool_definition` (para o Inno Setup assinar `Setup.exe` +
+  desinstalador durante a própria compilação).
+- `core/event_package.py` — `build_package(..., signing_key_path=...)` assina quando
+  configurado; `validate_package(..., signature_policy=...)` verifica de verdade qualquer
+  assinatura presente e decide a postura (`development`/`production`) via parâmetro do
+  chamador, nunca do próprio envelope.
+- `core/base_build.py` / `build.py` — `SmartEvents.exe` é assinado logo após o PyInstaller
+  (antes do hash entrar no manifesto do build-base); `compile_setup` passa a diretiva
+  `SignTool` ao ISCC quando configurado; `base-manifest.json` ganha `"signed": bool`.
+- `installer/SmartEvents.iss` — `SignTool={#MySignTool}` + `SignedUninstaller=yes`,
+  condicionais a `#ifdef MySignTool` (ausente = Setup sai exatamente como antes).
+- `core/distribution_service.py` — todo job novo grava `generator` (usuário/host) e `source`
+  (versão/commit/dirty); `audit_rows()` resume o histórico com filtros (evento, cliente,
+  formato, estado) e `delete_artifact()` apaga só o binário, mantendo o registro.
+- `tools/distribution_studio.py`/`.html` — `GET .../api/distributions` (histórico) e
+  `DELETE .../api/distributions/{job_id}/artifacts/{kind}` (exige `confirm_name` exato);
+  seção "Distribuições geradas" na tela com badge de assinatura e exclusão com confirmação
+  digitada.
+- `main.spec` — `keys/sepack_signing/` (chave pública) e `ISSigTool.exe` (verificador,
+  condicional à presença do cache local) entram no bundle; a chave PRIVADA nunca é lida
+  pelo spec.
+- Testes: `tests/test_event_package_signing.py` (9, com chaves reais via ISSigTool),
+  `tests/test_authenticode.py` (13, com `signtool` dublê), `tests/test_distribution_audit.py`
+  (9), mais 4 novos/ajustados em `tests/test_distribution_studio_ui.py`. Suíte completa:
+  **844 passed, 10 skipped, 0 failed** (era 769/10 ao fechar a Fase 3).
+
+**Decisões travadas nesta implementação:**
+
+- **A postura de assinatura nunca vem do próprio `.sepack`.** `envelope.json` é texto plano
+  fora do que a assinatura cobre (só `payload.zip` é assinado) — um atacante que zere
+  `signature_required` não pode se beneficiar disso. Por isso `signature_policy` é sempre
+  parâmetro explícito de quem valida/importa, nunca lido do envelope. Fecha o "fingir
+  confiança" que a Fase 1 tinha deliberadamente evitado ao recusar `signature_required: true`
+  de bandeja.
+- **Default é `"development"` em todo caller existente; `"production"` é sempre opt-in.**
+  Isso é uma leitura deliberada do texto do plano ("desenvolvimento aceita não assinado
+  somente com flag explícita"): a alternativa — inverter o default global — quebraria a
+  centena de fluxos de teste/dev que já constroem `.sepack` sem chave (nenhum ambiente aqui
+  tem uma chave de release), sem nenhum ganho de segurança real, já que uma assinatura
+  **presente** e inválida é **sempre** recusada nas duas posturas. `--require-signature`
+  (CLI e `main.py`) e `SMARTEVENTS_SEPACK_SIGNATURE_POLICY=production` (Central) são os
+  botões explícitos de quem quer o modo rígido.
+- **Rotação de chave é decisão do registro local (`keys/sepack_signing/registry.json`),
+  nunca do pacote.** Cada chave pública mora em `<key_id>.iskeypub`; o registro só guarda
+  metadado (label, `active_from`, `retired_at`). Uma assinatura matematicamente válida de
+  uma chave revogada ou desconhecida é recusada do mesmo jeito que uma adulterada —
+  `test_key_rotation_accepts_active_and_rejects_retired_key` prova isso com chaves reais.
+- **Verificação sempre sobre bytes já em memória, nunca reabrindo o caminho original.**
+  `verify_payload_signature` recebe `payload_bytes`/`signature_bytes` (já lidos e validados
+  por `validate_package`) e os grava num diretório temporário próprio antes de invocar o
+  `ISSigTool.exe`. Fecha o TOCTOU que a Fase 1 já tinha citado como pendência da Fase 4.
+- **A senha do certificado nunca é lida do ambiente por engano dentro de `_redact()`.**
+  Bug real encontrado pelo próprio teste (`test_sign_file_failure_redacts_password_in_message`):
+  a primeira versão de `_redact()` buscava a senha em `os.environ`, mas `AuthenticodeConfig`
+  pode ser construído diretamente (não só via `load_config()`); a senha do objeto em uso
+  precisa ser passada explicitamente. Ver entrada correspondente no `ERRORS.md`.
+- **O comando do `signtool` nunca é escrito em texto no `.iss`.** Só o *nome* do SignTool
+  (`MySignTool`) vira `#define`; o comando com a senha vira argumento `/S<nome>=...` do
+  próprio ISCC, exatamente como a documentação do Inno Setup recomenda — a mesma exposição
+  que qualquer pipeline de assinatura de código aceita (argv do processo), nunca um arquivo
+  persistido.
+- **Exclusão de artefato exige o nome exato do arquivo como confirmação**, no backend
+  (`delete_artifact`) e na tela (`prompt()` comparado por igualdade) — nunca um clique único.
+  O registro do job nunca é apagado por essa ação; só o binário. Isso introduziu a única
+  mudança num teste da Fase 2: `test_studio_is_read_only_over_the_event_data` bania
+  qualquer `method: 'DELETE'` no HTML, e essa proibição nunca se referia a apagar um
+  artefato gerado — foi reescrita para banir edição/exclusão de evento (`editEvent`,
+  `deleteEvent`, `PUT`) e permitir exatamente um `DELETE`, sob o prefixo de distribuições.
+- **`generator`/`source` gravados em todo job novo, best-effort.** Usuário do SO + hostname
+  (nunca domínio/e-mail) e `git rev-parse`/`git status --porcelain` do repositório que gerou
+  a distribuição; falha ao ler qualquer um deles não derruba o job (job de distribuição não
+  pode depender de o `git` estar no PATH).
+- **`ISSigTool.exe` vira dependência de runtime do executável distribuído** (não só de
+  build): a importação de um `.sepack` assinado precisa verificar, e isso acontece dentro do
+  `.exe` do usuário final. `main.spec` inclui o binário condicionalmente (só se o cache local
+  do Inno Setup existir), então um ambiente de build sem Inno Setup instalado continua
+  funcionando — só não conseguirá verificar um pacote assinado até alguém adicionar o
+  binário depois.
+
+**Pendências que exigem infraestrutura fora deste ambiente (não automatizáveis aqui):**
+
+- **Certificado Authenticode real.** Sem ele, não é possível assinar de verdade
+  `SmartEvents.exe`/`Setup.exe`/desinstalador nem validar a assinatura com o Windows/
+  SmartScreen. O código está pronto (`core/authenticode.py`, testado com dublê) e ativa
+  sozinho assim que `SMARTEVENTS_SIGNTOOL_PATH`/`SMARTEVENTS_CODE_SIGN_PFX` forem
+  configurados numa máquina de release com certificado — mas essa validação real fica para
+  quem tiver o certificado.
+- **Matriz de homologação Windows 10/11, antivírus/SmartScreen e transferência por canal
+  corporativo real.** Nenhuma VM ou ambiente com antivírus corporativo está disponível
+  nesta sessão. A Fase 3 já validou instalação/atualização/conflito/desinstalação com
+  smoke tests automatizados; a Fase 4 acrescenta apenas a checagem de assinatura a essa
+  mesma matriz, que continua sendo trabalho manual de QA descrito no plano (seção "Validação
+  visual e operacional" da Fase 4).
+- **Chave privada de produção e rotação real.** O mecanismo de rotação está implementado e
+  testado (`registry.json` com `active_from`/`retired_at`), mas nenhuma chave real foi
+  gerada para uso em produção — isso é decisão de quem operar o release, não deste
+  ambiente de desenvolvimento.
+
+Essas três pendências não bloqueiam o critério de aceite de **código**: "artefato de produção
+tem assinatura válida" é uma propriedade que o pipeline agora consegue *produzir e verificar*;
+"validado com antivírus/SmartScreen/VM real" é uma etapa humana que só existe fora deste ambiente.

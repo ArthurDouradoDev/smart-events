@@ -23,6 +23,96 @@ def _frontend_server():
         thread.join(timeout=2)
 
 
+def test_evento_com_menos_de_cem_sites_abre_enquadrado_no_poligono():
+    sync_api = pytest.importorskip("playwright.sync_api")
+    try:
+        with _frontend_server() as url, sync_api.sync_playwright() as playwright:
+            browser = playwright.chromium.launch(headless=True)
+            page = browser.new_page()
+            page.goto(f"{url}/index.html", wait_until="domcontentloaded")
+            page.locator(".leaflet-marker-icon").first.wait_for(
+                state="attached", timeout=8000)
+
+            fitted = page.evaluate(
+                """async () => {
+                  const original = L.Map.prototype.fitBounds;
+                  L.Map.prototype.fitBounds = function(bounds, options) {
+                    const normalized = L.latLngBounds(bounds);
+                    window.__lastFitBounds = {
+                      south: normalized.getSouth(), north: normalized.getNorth(),
+                      west: normalized.getWest(), east: normalized.getEast(),
+                    };
+                    return original.call(this, bounds, options);
+                  };
+                  const { fitToEvent } = await import('/js/map.js?v=20260901-small-event-fit-r1');
+                  const polygon = [
+                    [-23.71, -46.71], [-23.71, -46.69],
+                    [-23.69, -46.69], [-23.69, -46.71],
+                  ];
+                  fitToEvent([
+                    { id: 'inside', lat: -23.70, lng: -46.70, is_event_site: true },
+                    { id: 'neighbor', lat: -10.0, lng: -35.0, is_event_site: false },
+                  ], polygon);
+                  return window.__lastFitBounds;
+                }"""
+            )
+
+            assert fitted == {
+                "south": -23.71, "north": -23.69,
+                "west": -46.71, "east": -46.69,
+            }
+            browser.close()
+    except Exception as exc:
+        if "Executable doesn't exist" in str(exc):
+            pytest.skip("Chromium do Playwright não está instalado neste ambiente")
+        raise
+
+
+def test_evento_com_cem_sites_mantem_enquadramento_de_todos_os_sites():
+    sync_api = pytest.importorskip("playwright.sync_api")
+    try:
+        with _frontend_server() as url, sync_api.sync_playwright() as playwright:
+            browser = playwright.chromium.launch(headless=True)
+            page = browser.new_page()
+            page.goto(f"{url}/index.html", wait_until="domcontentloaded")
+            page.locator(".leaflet-marker-icon").first.wait_for(
+                state="attached", timeout=8000)
+
+            fitted = page.evaluate(
+                """async () => {
+                  const original = L.Map.prototype.fitBounds;
+                  L.Map.prototype.fitBounds = function(bounds, options) {
+                    const normalized = L.latLngBounds(bounds);
+                    window.__lastFitBounds = {
+                      south: normalized.getSouth(), north: normalized.getNorth(),
+                      west: normalized.getWest(), east: normalized.getEast(),
+                    };
+                    return original.call(this, bounds, options);
+                  };
+                  const { fitToEvent } = await import('/js/map.js?v=20260901-small-event-fit-r1');
+                  const sites = Array.from({ length: 100 }, (_, index) => ({
+                    id: `site-${index}`,
+                    lat: index === 99 ? -10.0 : -23.70,
+                    lng: index === 99 ? -35.0 : -46.70,
+                    is_event_site: true,
+                  }));
+                  fitToEvent(sites, [
+                    [-23.71, -46.71], [-23.71, -46.69],
+                    [-23.69, -46.69], [-23.69, -46.71],
+                  ]);
+                  return window.__lastFitBounds;
+                }"""
+            )
+
+            assert fitted["north"] == -10.0
+            assert fitted["east"] == -35.0
+            browser.close()
+    except Exception as exc:
+        if "Executable doesn't exist" in str(exc):
+            pytest.skip("Chromium do Playwright não está instalado neste ambiente")
+        raise
+
+
 @pytest.mark.parametrize("scenario,label,css", [
     ("data", "Com dados", "st-data"),
     ("empty", "Sem novidade", "st-empty"),

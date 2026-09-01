@@ -30,6 +30,8 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 
+from core import authenticode
+
 logger = logging.getLogger(__name__)
 
 
@@ -227,6 +229,7 @@ class BaseBuild:
             "built_at_utc": self.built_at_utc,
             "source_commit": str(self.manifest.get("source_commit") or ""),
             "source_dirty": bool(self.manifest.get("source_dirty")),
+            "signed": bool(self.manifest.get("signed")),
             "executable_sha256": str(self.manifest.get("executable_sha256") or ""),
             "uncompressed_bytes": self.uncompressed_bytes,
             "file_count": int(self.manifest.get("file_count") or 0),
@@ -252,6 +255,7 @@ def write_manifest(
     browsers: dict | None = None,
     package_schema_version: int = 1,
     archive: Path | str | None = None,
+    signed: bool = False,
 ) -> dict:
     """Grava o ``base-manifest.json`` com o hash de cada arquivo do bundle."""
     base = Path(root)
@@ -271,6 +275,9 @@ def write_manifest(
         "source_dirty": bool(source_dirty),
         "playwright_browsers": dict(browsers or {}),
         "package_schema_version": int(package_schema_version),
+        # Fase 4: builds sem certificado configurado saem `signed: false`, sem
+        # fingir confianca -- a ausencia de certificado nao bloqueia o build.
+        "signed": bool(signed),
         "app_id": STABLE_APP_ID,
         "runtime_data_dir": RUNTIME_DATA_DIR,
         "app_dir": APP_DIR_NAME,
@@ -476,6 +483,7 @@ def wrapper_definitions(
     *,
     setup_basename: str,
     repo: Path | str | None = None,
+    authenticode_config: authenticode.AuthenticodeConfig | None = None,
 ) -> dict:
     """Definicoes do wrapper ``.iss``. Nada aqui vem do navegador (decisao 6)."""
     root = Path(repo) if repo is not None else repo_root()
@@ -497,6 +505,10 @@ def wrapper_definitions(
         "MyExpectedEventIds": ",".join(_package_event_ids(package_path)),
         "MyBaseUncompressedSize": str(build.uncompressed_bytes),
     }
+    if authenticode_config is not None:
+        # So o NOME entra no `.iss` (via `#define`); o comando com a senha vira
+        # argumento `/S<nome>=...` do ISCC, nunca texto gravado em disco.
+        definitions["MySignTool"] = authenticode.ISS_SIGN_TOOL_NAME
     return definitions
 
 
@@ -545,11 +557,15 @@ def compile_setup(
     setup_basename: str,
     repo: Path | str | None = None,
     timeout: float = 3600.0,
+    authenticode_config: authenticode.AuthenticodeConfig | None = None,
 ) -> SetupResult:
     """Compila o Setup **sem** chamar o PyInstaller: o programa ja existe no cache.
 
     O build-base e reverificado imediatamente antes da compilacao — um cache que
-    mudou entre a selecao e a geracao nunca vira instalador.
+    mudou entre a selecao e a geracao nunca vira instalador. Quando
+    ``authenticode_config`` e informado, o proprio Inno Setup assina o
+    ``Setup.exe`` e o desinstalador durante a compilacao (``SignTool=``); sem
+    ele, o Setup sai sem assinatura Authenticode.
     """
     verify_base(build)
     compiler = iscc_path(repo)
@@ -560,11 +576,19 @@ def compile_setup(
     output.mkdir(parents=True, exist_ok=True)
     definitions = wrapper_definitions(
         build, package, output, setup_basename=setup_basename, repo=repo,
+        authenticode_config=authenticode_config,
     )
     wrapper = write_wrapper(Path(work_dir) / "distribution.iss", definitions, repo=repo)
 
+    command = [str(compiler)]
+    if authenticode_config is not None:
+        # Argumento de processo do ISCC, nunca escrito no `.iss` nem em log
+        # (`run()` do build.py NAO e usado aqui de proposito).
+        command.append(authenticode.iss_sign_tool_definition(authenticode_config))
+    command.extend(["/Qp", str(wrapper)])
+
     completed = subprocess.run(
-        [str(compiler), "/Qp", str(wrapper)],
+        command,
         cwd=str(Path(repo) if repo is not None else repo_root()),
         capture_output=True,
         text=True,
@@ -594,7 +618,13 @@ def compile_setup(
     )
 
 
-def inspect_setup(result: SetupResult, build: BaseBuild, package: Path | str) -> dict:
+def inspect_setup(
+    result: SetupResult,
+    build: BaseBuild,
+    package: Path | str,
+    *,
+    authenticode_config: authenticode.AuthenticodeConfig | None = None,
+) -> dict:
     """Etapa ``testing``: confere o que foi produzido, sem instalar nada.
 
     A instalacao silenciosa de verdade e um smoke test de quem distribui
@@ -620,10 +650,17 @@ def inspect_setup(result: SetupResult, build: BaseBuild, package: Path | str) ->
     if "error" in lowered and "0 error" not in lowered:
         raise BaseBuildError(f"O log do ISCC reporta erro: {result.log[-500:]}")
 
+    setup_signed = False
+    if authenticode_config is not None:
+        setup_signed = authenticode.verify_file(
+            result.setup, signtool_path=authenticode_config.signtool_path
+        ).ok
+
     return {
         "setup": result.setup.name,
         "setup_bytes": result.bytes,
         "setup_sha256": result.sha256,
+        "setup_signed": setup_signed,
         "package": Path(package).name,
         "package_sha256": sha256_of(package),
         "event_ids": list(inspection.manifest.event_ids),

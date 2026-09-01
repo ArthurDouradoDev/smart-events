@@ -8,8 +8,12 @@ Uso:
   python main.py --dev     # abre DevTools e habilita console
 
 Modos sem janela (usados pelo instalador e pela associação do .sepack):
-  main.py --inspect-event-package <arquivo> [--report <json>]
-  main.py --import-event-package <arquivo> [--conflict preserve] [--report <json>] [--show-dialog]
+  main.py --inspect-event-package <arquivo> [--report <json>] [--require-signature]
+  main.py --import-event-package <arquivo> [--conflict preserve] [--report <json>]
+           [--show-dialog] [--require-signature]
+
+--require-signature recusa pacote sem assinatura válida de uma chave ativa
+(postura de produção). Sem a flag, pacote não assinado é aceito com aviso.
 """
 
 import json
@@ -205,8 +209,13 @@ def _run_event_package_mode() -> int:
         logger.error("Informe o caminho do pacote: %s <arquivo.sepack>", flag)
         return 2
 
+    signature_policy = (
+        event_package.SIGNATURE_POLICY_PRODUCTION if "--require-signature" in sys.argv
+        else event_package.SIGNATURE_POLICY_DEVELOPMENT
+    )
+
     if inspecting:
-        payload = event_package.inspect_package(package)
+        payload = event_package.inspect_package(package, signature_policy=signature_policy)
         exit_code = 0 if payload["ok"] else 3
         lines = (
             ["Pacote válido: " + str((payload.get("manifest") or {}).get("name", ""))]
@@ -215,7 +224,9 @@ def _run_event_package_mode() -> int:
         )
     else:
         conflict = _get_arg("--conflict", "preserve")
-        result = event_package.import_package(package, conflict_policy=conflict)
+        result = event_package.import_package(
+            package, conflict_policy=conflict, signature_policy=signature_policy,
+        )
         payload = result.to_dict()
         lines = event_package.summary_lines(result)
         if not result.ok:

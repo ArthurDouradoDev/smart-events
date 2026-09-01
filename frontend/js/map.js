@@ -24,6 +24,8 @@ const STATUS_COLORS = {
   unknown:  "#484F58",
 };
 
+const SMALL_EVENT_SITE_LIMIT = 100;
+
 const FREQUENCY_RADII = {
   "3G": {
     "850": 11,
@@ -203,10 +205,11 @@ export function renderEventPolygon(polygon) {
 export function fitToEvent(sites, polygon) {
   if (!_map) return;
   _map.invalidateSize();
-  const points = [
-    ...sites.map(s => [s.lat, s.lng]),
-    ...(polygon || []),
-  ];
+  const eventSiteCount = sites.filter(s => s.is_event_site !== false).length;
+  const hasPolygon = Array.isArray(polygon) && polygon.length >= 3;
+  const points = eventSiteCount < SMALL_EVENT_SITE_LIMIT && hasPolygon
+    ? polygon
+    : [...sites.map(s => [s.lat, s.lng]), ...(polygon || [])];
   if (points.length) _map.fitBounds(L.latLngBounds(points), { padding: [40, 40] });
 }
 

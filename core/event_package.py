@@ -33,6 +33,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 
+from core import package_signing as psig
 from core import paths
 from core.seed import validate_collection
 
@@ -56,6 +57,15 @@ _KIND_LABEL = {"event": "Evento", "cliente": "Cliente", "vip": "VIP", "logo": "L
 
 CONFLICT_POLICIES = ("preserve", "replace")
 VIP_POLICIES = ("auto", "explicit", "none")
+
+# Fase 4: quem valida/importa decide a postura de assinatura, nunca o proprio
+# envelope (ele e texto plano, fora do que a assinatura cobre). "development" e
+# o padrao (aceita pacote nao assinado com aviso visivel); "production" exige
+# assinatura valida de uma chave ativa. Uma assinatura PRESENTE e invalida e
+# sempre recusada, nas duas posturas.
+SIGNATURE_POLICY_DEVELOPMENT = "development"
+SIGNATURE_POLICY_PRODUCTION = "production"
+SIGNATURE_POLICIES = (SIGNATURE_POLICY_DEVELOPMENT, SIGNATURE_POLICY_PRODUCTION)
 LOGO_SUFFIXES = frozenset({".png", ".jpg", ".jpeg", ".svg", ".webp", ".gif"})
 
 # Limites de defesa contra ZIP bomb e contra pacotes que nao cabem em memoria.
@@ -240,6 +250,8 @@ class PackageInspection:
                 "logos": len(self.logos),
             },
             "signed": bool(self.envelope and self.envelope.get("signed")),
+            "signature_status": (self.envelope or {}).get("signature_status", ""),
+            "signature_key_id": (self.envelope or {}).get("signature_key_id", ""),
             "errors": [item.to_dict() for item in self.errors],
             "warnings": list(self.warnings),
         }
@@ -797,11 +809,17 @@ def build_package(
     package_id: str | None = None,
     created_at: datetime | None = None,
     force: bool = False,
+    signing_key_path: Path | str | None = None,
+    issigtool_path: Path | str | None = None,
 ) -> PackageManifest:
     """Monta o ``.sepack`` em staging e o publica por substituicao atomica.
 
     ``package_id`` e ``created_at`` sao injetaveis para que o mesmo conjunto de
     entrada produza bytes identicos; sem eles, cada geracao recebe um id novo.
+
+    ``signing_key_path`` assina o ``payload.zip`` com o ISSigTool (Fase 4). Sem
+    ela, o pacote sai exatamente como nas Fases 1-3: sem assinatura, marcado
+    como tal no envelope -- nao ha o que fingir sem uma chave de release.
     """
     if not preview.ok:
         raise PackageBuildError(preview.errors)
@@ -843,13 +861,18 @@ def build_package(
         "schema_version": SCHEMA_VERSION,
         "payload": PAYLOAD_NAME,
         "signature": SIGNATURE_NAME,
-        "signature_required": False,
+        "signature_required": bool(signing_key_path),
         "payload_sha256": _sha256(payload),
     }
-    package = _zip_bytes({
+    package_entries = {
         ENVELOPE_NAME: _json_bytes(envelope),
         PAYLOAD_NAME: payload,
-    })
+    }
+    if signing_key_path is not None:
+        package_entries[SIGNATURE_NAME] = psig.sign_payload_bytes(
+            payload, signing_key_path, issigtool_path=issigtool_path
+        )
+    package = _zip_bytes(package_entries)
 
     destination.parent.mkdir(parents=True, exist_ok=True)
     staging = Path(tempfile.mkdtemp(prefix=".sepack-", dir=destination.parent))
@@ -1044,8 +1067,25 @@ def _manifest_from_dict(value: dict, errors: list[PackageError]) -> PackageManif
     )
 
 
-def validate_package(path: Path | str) -> PackageInspection:
-    """Valida envelope, integridade, estrutura, JSONs e referencias."""
+def validate_package(
+    path: Path | str,
+    *,
+    signature_policy: str = SIGNATURE_POLICY_DEVELOPMENT,
+    keys_dir: Path | str | None = None,
+    issigtool_path: Path | str | None = None,
+) -> PackageInspection:
+    """Valida envelope, integridade, estrutura, JSONs, referencias e assinatura.
+
+    ``signature_policy`` decide a postura, nunca o proprio envelope (ele e texto
+    plano fora do que a assinatura cobre; um atacante que zere
+    ``signature_required`` nao pode se beneficiar disso). Em
+    ``"development"`` (padrao), pacote sem assinatura passa com aviso visivel;
+    em ``"production"``, exige assinatura valida de uma chave ativa. Uma
+    assinatura PRESENTE e invalida (adulterada, chave desconhecida ou
+    revogada) e sempre recusada, nas duas posturas.
+    """
+    if signature_policy not in SIGNATURE_POLICIES:
+        raise ValueError(f"Politica de assinatura desconhecida: {signature_policy!r}.")
     path = Path(path)
     inspection = PackageInspection(path=path)
     errors = inspection.errors
@@ -1103,6 +1143,7 @@ def validate_package(path: Path | str) -> PackageInspection:
             errors.append(PackageError("package.invalid_zip", str(path), f"Pacote ilegivel: {exc}."))
             return inspection
         signed = SIGNATURE_NAME in names
+        signature_bytes = outer.read(SIGNATURE_NAME) if signed else b""
 
     envelope = _parse_json(envelope_raw, ENVELOPE_NAME, errors)
     if envelope is None:
@@ -1126,24 +1167,37 @@ def validate_package(path: Path | str) -> PackageInspection:
             "envelope.invalid", ENVELOPE_NAME, "envelope.json aponta para outro payload."
         ))
         return inspection
-    if bool(envelope.get("signature_required")):
-        # A verificacao de assinatura chega na Fase 4; ate la, exigir assinatura
-        # sem poder valida-la seria fingir confianca.
-        errors.append(PackageError(
-            "signature.unsupported",
-            ENVELOPE_NAME,
-            "O pacote exige assinatura, ainda nao suportada por esta versao.",
-        ))
-        return inspection
     declared_hash = str(envelope.get("payload_sha256") or "")
     if declared_hash and declared_hash != _sha256(payload):
         errors.append(PackageError(
             "payload.hash_mismatch", PAYLOAD_NAME, "O hash do payload.zip nao confere."
         ))
         return inspection
+
+    # A postura de assinatura vem de quem valida (``signature_policy``), nunca do
+    # proprio envelope: ``signature_required`` e texto plano fora do que a
+    # assinatura cobre, e um atacante que o zere nao pode se beneficiar disso.
     if signed:
+        verification = psig.verify_payload_signature(
+            payload, signature_bytes, keys_dir=keys_dir, issigtool_path=issigtool_path,
+        )
+        inspection.envelope["signature_status"] = verification.status
+        inspection.envelope["signature_key_id"] = verification.key_id
+        if not verification.ok:
+            errors.append(PackageError(
+                f"signature.{verification.status}", ENVELOPE_NAME, verification.message,
+            ))
+            return inspection
+        inspection.warnings.append("Pacote assinado e verificado: " + verification.key_id + ".")
+    elif signature_policy == SIGNATURE_POLICY_PRODUCTION:
+        errors.append(PackageError(
+            "signature.missing", ENVELOPE_NAME, "O pacote nao esta assinado; producao exige assinatura.",
+        ))
+        return inspection
+    else:
+        inspection.envelope["signature_status"] = "unsigned"
         inspection.warnings.append(
-            "O pacote traz assinatura; esta versao ainda nao a verifica."
+            "Pacote nao assinado (modo desenvolvimento). Nao instale como artefato de producao."
         )
 
     entries, payload_errors = _read_payload_entries(payload)
@@ -1245,9 +1299,17 @@ def _validate_references(
     return errors
 
 
-def inspect_package(path: Path | str) -> dict:
+def inspect_package(
+    path: Path | str,
+    *,
+    signature_policy: str = SIGNATURE_POLICY_DEVELOPMENT,
+    keys_dir: Path | str | None = None,
+    issigtool_path: Path | str | None = None,
+) -> dict:
     """Resumo pronto para a CLI e para a interface."""
-    return validate_package(path).to_dict()
+    return validate_package(
+        path, signature_policy=signature_policy, keys_dir=keys_dir, issigtool_path=issigtool_path,
+    ).to_dict()
 
 
 # ── Conciliacao de cadastros compartilhados ──────────────────────────
@@ -1541,6 +1603,10 @@ def plan_import(
     package_path: Path | str,
     target: Path | str | None = None,
     conflict_policy: str = "preserve",
+    *,
+    signature_policy: str = SIGNATURE_POLICY_DEVELOPMENT,
+    keys_dir: Path | str | None = None,
+    issigtool_path: Path | str | None = None,
 ) -> ImportPlan:
     """Diz exatamente o que a importacao faria, sem gravar nada."""
     resolved = ImportTarget.resolve(target)
@@ -1551,7 +1617,9 @@ def plan_import(
                 "argument.invalid", "", f"Politica de conflito desconhecida: {conflict_policy}."
             )],
         )
-    inspection = validate_package(package_path)
+    inspection = validate_package(
+        package_path, signature_policy=signature_policy, keys_dir=keys_dir, issigtool_path=issigtool_path,
+    )
     if not inspection.ok:
         return ImportPlan(
             package_id="", name="", target=resolved, conflict_policy=conflict_policy,
@@ -1569,6 +1637,10 @@ def import_package(
     package_path: Path | str,
     target: Path | str | None = None,
     conflict_policy: str = "preserve",
+    *,
+    signature_policy: str = SIGNATURE_POLICY_DEVELOPMENT,
+    keys_dir: Path | str | None = None,
+    issigtool_path: Path | str | None = None,
 ) -> ImportResult:
     """Valida, concilia e grava; qualquer falha reverte tudo que ja foi gravado."""
     resolved = ImportTarget.resolve(target)
@@ -1577,7 +1649,9 @@ def import_package(
             "argument.invalid", "", f"Politica de conflito desconhecida: {conflict_policy}."
         )])
 
-    inspection = validate_package(package_path)
+    inspection = validate_package(
+        package_path, signature_policy=signature_policy, keys_dir=keys_dir, issigtool_path=issigtool_path,
+    )
     if not inspection.ok:
         # Nenhum arquivo e criado quando o pacote nao passa na validacao.
         return ImportResult(

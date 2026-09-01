@@ -627,10 +627,19 @@ class Api:
                 if not placed:
                     clusters.append([site])
 
-            if len(clusters) > 1:
-                for i, left in enumerate(clusters):
-                    for right in clusters[i + 1:]:
-                        a, b = left[0], right[0]
+            # Sites de vizinhança continuam separados quando são homônimos e
+            # distantes, mas não fazem parte da validação do evento. Um cluster
+            # participa do aviso somente quando contém ao menos um site marcado
+            # como pertencente ao polígono (`is_event_site`).
+            event_clusters = [
+                cluster for cluster in clusters
+                if any(site.get("is_event_site", True) for site in cluster)
+            ]
+            if len(event_clusters) > 1:
+                for i, left in enumerate(event_clusters):
+                    for right in event_clusters[i + 1:]:
+                        a = next(site for site in left if site.get("is_event_site", True))
+                        b = next(site for site in right if site.get("is_event_site", True))
                         logger.warning(
                             "Sites homônimos não fundidos (coordenada > %.0fm): "
                             "%s %s (%s,%s) e %s %s (%s,%s)",

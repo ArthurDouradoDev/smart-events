@@ -272,20 +272,50 @@ O projeto possui uma suíte de testes automatizados em [tests/](tests/) configur
 ---
 
 ### 6. Gerando o Executável (`.exe`)
-A distribuição em campo é um executável portátil gerado com **PyInstaller**:
+A distribuição em campo é um executável portátil gerado com **PyInstaller**. Desde a Fase 3, o
+ciclo do **programa** (build-base, roda o PyInstaller) é separado do ciclo do **conteúdo**
+(seleção de eventos, nunca dispara o PyInstaller):
 
 1. Com o ambiente virtual ativo, garanta que os navegadores do Playwright estão instalados (são empacotados no `.exe` para a renovação de sessão):
    ```bash
    playwright install chromium
    ```
-2. Rode o script de build, que invoca o PyInstaller com o [main.spec](main.spec):
+2. Gere o build-base **uma vez por versão** (roda o PyInstaller; genérico, sem evento/cliente):
    ```bash
-   python build.py
+   python build.py base
    ```
-3. O executável final é gerado em `dist/`. A pasta `data/` (bancos, sessão e credenciais) é criada ao lado do `.exe` na primeira execução.
+3. Combine o build-base com uma seleção de eventos — sem recompilar o programa:
+   ```bash
+   python build.py distribution --events evento-a evento-b --format package  # .sepack
+   python build.py distribution --events evento-a evento-b --format setup    # Setup.exe completo
+   ```
+4. O fluxo histórico por perfil (`python build.py legacy-profile --profile <id>`, um `AppId`/pasta
+   de dados dedicados por cliente) continua disponível como **fallback**, mas é considerado
+   legado: `build_profiles/` não recebe novos perfis, e o caminho recomendado para qualquer
+   distribuição nova é `base` + `distribution`.
+
+O executável final fica em `dist/base/<versão>/SmartEvents/` (ou `dist/<perfil>/` no fluxo
+legado). A pasta de dados do operador (`%LOCALAPPDATA%\SmartEvents` no instalado, `data/` em
+dev) é externa ao bundle e sobrevive a atualização/reinstalação.
 
 > [!NOTE]
-> O `main.spec` empacota o Chromium completo do Playwright (necessário para o fluxo de reautenticação interativa com CAPTCHA), o que torna o `.exe` grande (~370 MB). A pasta `data/` é externa ao bundle.
+> O `main.spec` empacota o Chromium completo do Playwright (necessário para o fluxo de reautenticação interativa com CAPTCHA), o que torna o bundle grande (~880 MiB descompactado). A pasta de dados do operador é sempre externa ao bundle.
+
+**Assinatura (Fase 4, opcional).** Sem nenhuma variável de ambiente configurada, os artefatos
+saem sem assinatura e o manifesto declara isso honestamente (`"signed": false`) — desenvolvimento
+não é bloqueado pela ausência de certificado. Numa máquina de release com um certificado
+Authenticode real:
+
+```bash
+set SMARTEVENTS_SIGNTOOL_PATH=C:\...\signtool.exe
+set SMARTEVENTS_CODE_SIGN_PFX=C:\segredo\release.pfx
+set SMARTEVENTS_CODE_SIGN_PFX_PASSWORD=...
+python build.py base                                        # assina SmartEvents.exe
+python build.py distribution --events evento-a --format setup  # assina Setup.exe + desinstalador
+```
+
+A chave **privada** nunca entra no repositório nem é lida de um caminho fixo — só existe via essas
+variáveis, na máquina de quem faz o release. Veja [core/authenticode.py](core/authenticode.py).
 
 ### Credenciais de acesso (Cliente → Regional)
 
@@ -308,6 +338,34 @@ python -m tools.distribution_studio --port 8020
 - O `server.py` e o `server_frontend/index.html` **não** conhecem nada disso, e o `main.spec` não empacota o estúdio: o executável distribuído sabe apenas **importar** um `.sepack` (`SmartEvents.exe --import-event-package <arquivo> --show-dialog`).
 - As saídas ficam em `data/distributions/<job-id>/`; o estado de cada job em `data/distributions/jobs/<job-id>.json`, para o resultado sobreviver a um F5.
 - Para inspecionar ou importar um pacote pela linha de comando, veja [tools/event_package.py](tools/event_package.py) (`preview`, `build`, `inspect`, `import`).
+
+**Assinatura do `.sepack` (Fase 4).** Quando a máquina que roda o estúdio tem
+`SMARTEVENTS_SEPACK_SIGNING_KEY` apontando para uma chave privada (`.iskey`, gerada com
+`ISSigTool.exe`), todo pacote gerado sai assinado; sem a variável, sai sem assinatura, como nas
+Fases 1–3. A importação (CLI, `main.py --import-event-package` e a Central) sempre **verifica**
+uma assinatura presente contra `keys/sepack_signing/registry.json` — pacote adulterado, de chave
+desconhecida ou revogada nunca é aceito, em nenhum modo. Por padrão, pacote **sem** assinatura
+ainda é aceito com aviso (`"Não assinado — desenvolvimento"`); `--require-signature` (CLI/`main.py`)
+ou `SMARTEVENTS_SEPACK_SIGNATURE_POLICY=production` (Central) endurecem para exigir assinatura
+válida. Detalhes e rotação de chave em [core/package_signing.py](core/package_signing.py).
+
+**Histórico de distribuições (Fase 4).** A seção "Distribuições geradas" do estúdio lista todo job
+já concluído (gerador, commit de origem, hash, status de assinatura), com filtros por evento,
+cliente, formato e estado. Excluir remove só o binário — o registro de auditoria nunca é apagado.
+
+**Migrando uma instalação isolada (`AppId`/pasta de dados próprios do fluxo `legacy-profile`) para
+o SmartEvents genérico.** Não existe conversão automática — os dois usam `AppId` diferentes e o
+Windows os trata como aplicações distintas. Procedimento manual:
+
+1. No SmartEvents antigo, exporte os eventos: `python -m tools.event_package build --source
+   <pasta-de-dados-antiga>\server_data --events <ids> --output migracao.sepack` (ou gere pelo
+   Distribution Studio, apontando `--source` para a pasta de dados da instalação antiga).
+2. Instale o SmartEvents genérico (`Setup.exe` gerado por `build.py distribution --format setup`)
+   normalmente — ele não conflita com a instalação antiga, já que os `AppId` são diferentes.
+3. Importe `migracao.sepack` na instalação nova (duplo clique, ou `SmartEvents.exe
+   --import-event-package migracao.sepack --show-dialog`).
+4. Confira os eventos, peça a credencial de cada cliente/regional (nunca é transportada) e só
+   então desinstale a instalação antiga.
 
 O plano completo (formato do `.sepack`, conciliação de cadastros, build-base e assinatura) está em [docs/plans/2026-08-31-001-feat-distribuicao-automatizada-eventos-plan.md](docs/plans/2026-08-31-001-feat-distribuicao-automatizada-eventos-plan.md).
 

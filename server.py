@@ -2,6 +2,7 @@ import contextlib
 import json
 import logging
 import math
+import os
 import re
 import shutil
 import sys
@@ -20,6 +21,19 @@ from core.seed import seed_operator_data
 # Configure logging
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(name)s: %(message)s")
 logger = logging.getLogger("SmartEventsServer")
+
+# Postura de assinatura da importacao de pacotes (Fase 4). O padrao aceita
+# pacote nao assinado com aviso -- e o que toda instalacao gerada ate a Fase 3
+# continua sendo. Uma instalacao de producao com chave de release configurada
+# liga a variavel de ambiente para exigir assinatura valida.
+_SEPACK_SIGNATURE_POLICY_ENV = "SMARTEVENTS_SEPACK_SIGNATURE_POLICY"
+
+
+def _import_signature_policy() -> str:
+    value = os.environ.get(_SEPACK_SIGNATURE_POLICY_ENV, "").strip().lower()
+    if value in event_package.SIGNATURE_POLICIES:
+        return value
+    return event_package.SIGNATURE_POLICY_DEVELOPMENT
 
 
 def _slugify(text: str) -> str:
@@ -448,7 +462,9 @@ def _staged_package(file: UploadFile) -> Iterator[Path]:
 async def preview_event_package(file: UploadFile = File(...)):
     """Revisão: o que o pacote adicionaria, conciliaria e preservaria. Não grava."""
     with _staged_package(file) as staged:
-        plan = event_package.plan_import(staged, conflict_policy="preserve")
+        plan = event_package.plan_import(
+            staged, conflict_policy="preserve", signature_policy=_import_signature_policy(),
+        )
         payload = plan.to_dict()
         payload["sha256"] = event_package.sha256_of(staged)
     payload["filename"] = Path(file.filename or "").name
@@ -475,7 +491,9 @@ async def import_event_package(
                 status_code=409,
                 detail="O arquivo mudou depois da revisão. Revise novamente antes de importar.",
             )
-        result = event_package.import_package(staged, conflict_policy="preserve")
+        result = event_package.import_package(
+            staged, conflict_policy="preserve", signature_policy=_import_signature_policy(),
+        )
 
     payload = result.to_dict()
     payload["summary"] = event_package.summary_lines(result)

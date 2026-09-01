@@ -41,6 +41,11 @@
 #ifndef MyIconFile
   #define MyIconFile "..\assets\logoSmartEvents.ico"
 #endif
+; Fase 4 - so definido quando o build.py encontrou signtool + certificado
+; configurados (SMARTEVENTS_SIGNTOOL_PATH / SMARTEVENTS_CODE_SIGN_PFX). Sem
+; isso, o Setup e o desinstalador saem sem assinatura Authenticode, e o
+; manifesto do build declara `signed: false` -- nao ha o que fingir sem
+; certificado de release.
 
 #define MyAppPublisher "SmartEvents"
 #define MyAppExeName "SmartEvents.exe"
@@ -74,6 +79,10 @@ CloseApplicationsFilter={#MyAppExeName}
 ChangesAssociations=yes
 #else
 ChangesAssociations=no
+#endif
+#ifdef MySignTool
+SignTool={#MySignTool}
+SignedUninstaller=yes
 #endif
 ExtraDiskSpaceRequired=700000000
 RestartIfNeededByRun=yes
