@@ -1288,6 +1288,23 @@ html[data-window-active="false"] .window-control:not(:hover):not(:focus-visible)
   flex-shrink: 0;
 }
 
+.scope-picker-filter {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin: 1px 8px 4px;
+  color: var(--text-secondary);
+  font-size: 11px;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.scope-picker-filter input {
+  width: auto;
+  margin: 0;
+  accent-color: var(--accent);
+}
+
 .scope-picker-options {
   padding: 3px 4px 6px;
   overflow-y: auto;

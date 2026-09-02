@@ -10,6 +10,7 @@
 import State from "./state.js";
 import API from "./bridge.js";
 import { escalaDaMetrica, esquecerEscalas, formatar } from "./units.js";
+import { siteInsidePolygon } from "./geometry.js?v=20260901-polygon-filter-r1";
 
 const PANELS = {
   "4G": [
@@ -57,6 +58,7 @@ let _hoveredPanelId = null;
 let _scopeSites = [];
 let _scopeClusters = [];
 let _scopeCells = [];
+let _onlyEventPolygonSites = true;
 const _selection = { cluster: new Set(), site: new Set(), cell: new Set(), siteCarrier: new Set() };
 const _hiddenScopes = new Set();
 // Sites com a expansão "separar por portadora" aberta no seletor de sites.
@@ -174,6 +176,7 @@ function _open() {
   _scopeSites = State.sites || [];
   _scopeClusters = State.clusters || [];
   _scopeCells = [];
+  _onlyEventPolygonSites = true;
   _family = _preferredFamily();
   _hiddenScopes.clear();
   _expandedSites.clear();
@@ -247,7 +250,8 @@ function _applyPreferredSelection() {
   // invisível que a troca de aba acabou de purgar.
   const visibleClusters = _familyFilteredClusters();
   const clusterIds = new Set(visibleClusters.map(cluster => cluster.id));
-  const siteIds = new Set(_scopeSites.map(site => site.id));
+  const pickerSites = _sitePickerSites();
+  const siteIds = new Set(pickerSites.map(site => site.id));
 
   if (State.selectedSite === "clusters:compare") {
     visibleClusters.forEach(cluster => _selection.cluster.add(cluster.id));
@@ -265,9 +269,19 @@ function _applyPreferredSelection() {
     _selection.cluster.add(State.clusterFilter);
   }
   if (!_selectionSize()) {
-    if (visibleClusters[0]) _selection.cluster.add(visibleClusters[0].id);
-    else if (_scopeSites[0]) _selection.site.add(_scopeSites[0].id);
+    if (pickerSites[0]) _selection.site.add(pickerSites[0].id);
+    else if (visibleClusters[0]) _selection.cluster.add(visibleClusters[0].id);
   }
+}
+
+function _eventPolygon() {
+  return State.activeEvent?.polygon || State.historicalEvent?.polygon || [];
+}
+
+function _sitePickerSites() {
+  if (!_onlyEventPolygonSites) return _scopeSites;
+  const polygon = _eventPolygon();
+  return _scopeSites.filter(site => siteInsidePolygon(site, polygon));
 }
 
 /**
@@ -552,6 +566,41 @@ function _renderSitePicker() {
   search.addEventListener("input", () => _renderSiteOptions());
   menu.appendChild(search);
 
+  const polygonFilter = document.createElement("label");
+  polygonFilter.className = "scope-picker-filter";
+  polygonFilter.innerHTML = `
+    <input type="checkbox" ${_onlyEventPolygonSites ? "checked" : ""}>
+    <span>Apenas sites do polígono</span>`;
+  polygonFilter.querySelector("input").addEventListener("change", event => {
+    _onlyEventPolygonSites = event.target.checked;
+    if (_onlyEventPolygonSites) {
+      const allowed = new Set(_sitePickerSites().map(site => String(site.id)));
+      let changed = false;
+      [..._selection.site].forEach(id => {
+        if (!allowed.has(String(id))) {
+          _selection.site.delete(id);
+          changed = true;
+        }
+      });
+      [..._selection.siteCarrier].forEach(key => {
+        const siteId = key.slice(0, key.lastIndexOf("::"));
+        if (!allowed.has(String(siteId))) {
+          _selection.siteCarrier.delete(key);
+          changed = true;
+        }
+      });
+      [..._expandedSites].forEach(id => {
+        if (!allowed.has(String(id))) _expandedSites.delete(id);
+      });
+      if (changed) {
+        _onSelectionChanged();
+        return;
+      }
+    }
+    _renderSiteOptions();
+  });
+  menu.appendChild(polygonFilter);
+
   const options = document.createElement("div");
   options.className = "scope-picker-options";
   menu.appendChild(options);
@@ -574,7 +623,8 @@ function _renderSiteOptions() {
   const options = menu?.querySelector(".scope-picker-options");
   if (!options) return;
   const term = (menu.querySelector(".scope-picker-search")?.value || "").trim().toLowerCase();
-  const matches = _scopeSites.filter(site =>
+  const availableSites = _sitePickerSites();
+  const matches = availableSites.filter(site =>
     !term || `${site.name || ""} ${site.original_name || ""} ${site.id}`
       .toLowerCase().includes(term));
 
@@ -582,7 +632,11 @@ function _renderSiteOptions() {
   if (!matches.length) {
     const empty = document.createElement("div");
     empty.className = "scope-picker-empty";
-    empty.textContent = _scopeSites.length ? "Nenhum site encontrado." : "Nenhum site no evento.";
+    empty.textContent = term
+      ? "Nenhum site encontrado."
+      : (_onlyEventPolygonSites && _scopeSites.length
+          ? "Nenhum site dentro do polígono."
+          : "Nenhum site no evento.");
     options.appendChild(empty);
     return;
   }

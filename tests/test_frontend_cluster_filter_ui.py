@@ -51,9 +51,9 @@ def test_dashboard_assets_tem_versao_para_evitar_cache_incompativel_do_webview()
     assert 'href="css/main.css?v=' in html
     assert 'src="js/app.js?v=' in html
     assert "function _isVirtualKpiScope(siteId)" in app
-    assert "export function preferredInitialSiteId(sites = [])" in app
+    assert "export function preferredInitialSiteId(sites = [], polygon = [])" in app
     assert app.count("_ensureAvailableSiteSelected(sites);") == 2
-    assert 'sites.find(site => site.is_event_site !== false)' in app
+    assert "sites.find(site => siteInsidePolygon(site, polygon))" in app
     assert app.count("selectedSite: null,") == 2
 
 

@@ -9,7 +9,8 @@ import { initWindowChrome } from "./window_chrome.js?v=20260831-window-chrome-r5
 import { initMap, renderSites, renderEventPolygon, fitToEvent, resizeMap } from "./map.js?v=20260901-small-event-fit-r1";
 import { initVip, resizeVipChart }    from "./vip.js?v=20260830-window-chrome-r1";
 import { initKpi, refreshChart, resizeKpiCharts }    from "./kpi.js?v=20260830-window-chrome-r1";
-import { initKpiOverview, resizeKpiOverviewCharts } from "./kpi_overview.js?v=20260901-unlimited-scopes-r1";
+import { initKpiOverview, resizeKpiOverviewCharts } from "./kpi_overview.js?v=20260901-polygon-filter-r1";
+import { siteInsidePolygon } from "./geometry.js?v=20260901-polygon-filter-r1";
 import { initAlerts, injectAlerts } from "./alerts.js?v=20260826-site-filter";
 import { initAlarms, injectAlarms } from "./alarms.js?v=20260826-site-filter";
 import { initLogs } from "./logs.js";
@@ -35,18 +36,24 @@ function _isVirtualKpiScope(siteId) {
 }
 
 /**
- * Site inicial de um evento: prioriza quem pertence ao polígono. Eventos
- * legados não possuem `is_event_site`; nesses casos a ausência da marcação
- * continua significando que o site pertence ao evento.
+ * Site inicial de um evento: prioriza a posição realmente contida no polígono.
+ * A marcação da EP fica apenas como fallback para eventos legados sem geometria
+ * utilizável ou sem nenhum site localizado dentro dela.
  */
-export function preferredInitialSiteId(sites = []) {
-  return (sites.find(site => site.is_event_site !== false) || sites[0])?.id || null;
+export function preferredInitialSiteId(sites = [], polygon = []) {
+  const inside = Array.isArray(polygon) && polygon.length >= 3
+    ? sites.find(site => siteInsidePolygon(site, polygon))
+    : null;
+  return (inside
+    || sites.find(site => site.is_event_site !== false)
+    || sites[0])?.id || null;
 }
 
 function _ensureAvailableSiteSelected(sites) {
   if (_isVirtualKpiScope(State.selectedSite)) return;
   if (State.selectedSite && sites.some(site => site.id === State.selectedSite)) return;
-  const preferred = preferredInitialSiteId(sites);
+  const polygon = State.activeEvent?.polygon || State.historicalEvent?.polygon || [];
+  const preferred = preferredInitialSiteId(sites, polygon);
   if (State.selectedSite !== preferred) State.set("selectedSite", preferred);
 }
 

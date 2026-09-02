@@ -85,6 +85,14 @@ def _open_picker(page, picker_id):
         page.locator(f"#{picker_id} .scope-picker-trigger").click()
 
 
+def _show_all_sites(page):
+    _open_picker(page, "kpi-overview-site-picker")
+    checkbox = page.locator("#kpi-overview-site-picker .scope-picker-filter input")
+    if checkbox.is_checked():
+        checkbox.click()
+    page.locator("#kpi-overview-site-picker .scope-picker-trigger").click()
+
+
 def _pick(page, picker_id, name, checked=True):
     """Abre o dropdown e deixa a opção com o rótulo informado no estado pedido."""
     _open_picker(page, picker_id)
@@ -156,9 +164,60 @@ def test_toolbar_tem_dropdowns_separados_de_clusters_e_sites():
                 site_options = page.locator(
                     "#kpi-overview-site-picker .scope-picker-option"
                 ).all_inner_texts()
-                assert any("ERB-07" in o for o in site_options)
+                assert any("ERB-03" in o for o in site_options)
                 assert not any("Arquibancada Sul" in o for o in site_options)
     except Exception as exc:  # pragma: no cover - depende do browser instalado
+        _skip_if_no_browser(exc)
+
+
+def test_seletor_de_sites_filtra_pela_geometria_real_do_poligono():
+    sync_api = pytest.importorskip("playwright.sync_api")
+    try:
+        with _frontend_server() as url, sync_api.sync_playwright() as playwright:
+            with _overview(playwright) as (page, _browser):
+                _open_overview(page, url)
+                _open_picker(page, "kpi-overview-site-picker")
+
+                checkbox = page.locator(
+                    "#kpi-overview-site-picker .scope-picker-filter input")
+                assert checkbox.is_checked()
+                assert page.locator(
+                    "#kpi-overview-site-picker .scope-picker-filter"
+                ).inner_text() == "Apenas sites do polígono"
+
+                filtered = page.locator(
+                    "#kpi-overview-site-picker .scope-picker-option"
+                ).all_inner_texts()
+                assert any("ERB-03" in item for item in filtered)
+                assert any("ERB-15" in item for item in filtered)
+                # Todos vêm marcados como `is_event_site` no mock. Estes três
+                # ficam de fora exclusivamente pela geometria do polígono.
+                assert not any("ERB-07" in item for item in filtered)
+                assert not any("ERB-11" in item for item in filtered)
+                assert not any("SPSMG7" in item for item in filtered)
+
+                checkbox.click()
+                all_sites = page.locator(
+                    "#kpi-overview-site-picker .scope-picker-option"
+                ).all_inner_texts()
+                assert len(all_sites) == 5
+                assert any("SPSMG7" in item for item in all_sites)
+
+                page.locator(
+                    "#kpi-overview-site-picker .scope-picker-option",
+                    has_text="SPSMG7",
+                ).first.locator("input").click()
+                checkbox.click()
+                assert checkbox.is_checked()
+                assert page.locator(
+                    "#kpi-overview-site-picker .scope-picker-option",
+                    has_text="SPSMG7",
+                ).count() == 0
+                assert page.locator(
+                    "#kpi-overview-context .kpi-overview-chip",
+                    has_text="SPSMG7",
+                ).count() == 0
+    except Exception as exc:  # pragma: no cover
         _skip_if_no_browser(exc)
 
 
@@ -220,6 +279,7 @@ def test_celulas_recorta_pelo_site_selecionado():
             with _overview(playwright) as (page, _browser):
                 _open_overview(page, url)
                 _clear_selection(page)
+                _show_all_sites(page)
                 # ERB-11 não pertence a nenhum cluster — só a seleção direta do
                 # site deve trazer as células dele para a lista.
                 _pick(page, "kpi-overview-site-picker", "ERB-11 Autódromo Sul")
@@ -241,6 +301,7 @@ def test_celula_ja_selecionada_continua_visivel_fora_do_escopo():
             with _overview(playwright) as (page, _browser):
                 _open_overview(page, url)
                 _clear_selection(page)
+                _show_all_sites(page)
                 _pick(page, "kpi-overview-site-picker", "ERB-11 Autódromo Sul")
                 _pick(page, "kpi-overview-cell-picker", "ERB-11-A1")
 
@@ -357,7 +418,7 @@ def test_cluster_e_site_podem_ser_comparados_juntos():
                 _open_overview(page, url)
                 _clear_selection(page)
                 _pick(page, "kpi-overview-cluster-picker", "Arquibancada Sul")
-                _pick(page, "kpi-overview-site-picker", "ERB-07")
+                _pick(page, "kpi-overview-site-picker", "ERB-03")
                 page.wait_for_function(
                     """() => {
                       const canvas = document.querySelector(
@@ -370,7 +431,7 @@ def test_cluster_e_site_podem_ser_comparados_juntos():
 
                 panel = page.evaluate(_PANEL_DATASETS, "drop_rate")
                 assert [d["scopeKey"] for d in panel["datasets"]] == [
-                    "cluster:sul", "site:ERB-07"]
+                    "cluster:sul", "site:ERB-03"]
                 # Séries distintas: escopos diferentes não podem virar a mesma curva.
                 values = page.evaluate(
                     """() => {
@@ -381,7 +442,7 @@ def test_cluster_e_site_podem_ser_comparados_juntos():
                 )
                 assert values[0] != values[1]
                 context = page.locator("#kpi-overview-context").inner_text()
-                assert "Arquibancada Sul" in context and "ERB-07" in context
+                assert "Arquibancada Sul" in context and "ERB-03" in context
                 # Cluster e site nunca podem sair com a mesma cor no mesmo painel.
                 assert panel["datasets"][0]["color"] != panel["datasets"][1]["color"]
     except Exception as exc:  # pragma: no cover
@@ -575,13 +636,13 @@ def test_visao_4g_abre_com_site_do_dashboard_sem_portadoras_marcadas():
                         '#kpi-overview-context .kpi-overview-chip')]
                         .map(el => el.textContent.trim());
                       return chips.length === 1
-                        && chips.includes('ERB-07 Interlagos');
+                        && chips.includes('ERB-03 Av. Interlagos');
                     }""",
                     timeout=8000,
                 )
                 chips = page.locator(
                     "#kpi-overview-context .kpi-overview-chip").all_inner_texts()
-                assert chips == ["ERB-07 Interlagos"]
+                assert chips == ["ERB-03 Av. Interlagos"]
                 _open_picker(page, "kpi-overview-cluster-picker")
                 assert page.locator(
                     "#kpi-overview-cluster-picker .scope-picker-option",
@@ -625,6 +686,7 @@ def test_troca_de_tecnologia_carrega_so_cluster_sem_familia_e_site():
             with _overview(playwright) as (page, _browser):
                 _open_overview(page, url, "?kpiOverview=earfcn")
                 _clear_selection(page)
+                _show_all_sites(page)
                 _pick(page, "kpi-overview-cluster-picker", "Arquibancada Sul")
                 _pick(page, "kpi-overview-cluster-picker", "Portadora 1276")
                 _pick(page, "kpi-overview-site-picker", "SPSMG7")
@@ -649,11 +711,11 @@ def test_troca_de_familia_preserva_site_herdado_do_dashboard():
         with _frontend_server() as url, sync_api.sync_playwright() as playwright:
             with _overview(playwright) as (page, _browser):
                 _open_overview(page, url, "?kpiOverview=earfcn")
-                _wait_chips(page, ["ERB-07 Interlagos"])
+                _wait_chips(page, ["ERB-03 Av. Interlagos"])
 
                 page.locator('#kpi-overview-family-tabs [data-family="5G"]').click()
 
-                _wait_chips(page, ["ERB-07 Interlagos"])
+                _wait_chips(page, ["ERB-03 Av. Interlagos"])
                 assert page.locator("#kpi-overview-error").is_hidden()
     except Exception as exc:  # pragma: no cover
         _skip_if_no_browser(exc)
@@ -685,6 +747,7 @@ def test_interface_permite_selecionar_mais_de_oito_escopos():
             with _overview(playwright) as (page, _browser):
                 _open_overview(page, url)
                 _clear_selection(page)
+                _show_all_sites(page)
                 _pick(page, "kpi-overview-cluster-picker", "Todos os clusters")
                 for site in ("ERB-07 Interlagos", "ERB-03 Av. Interlagos",
                              "ERB-11 Autódromo Sul", "ERB-15 Buffer Norte", "SPSMG7"):
