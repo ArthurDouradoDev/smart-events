@@ -1310,7 +1310,6 @@ html[data-window-active="false"] .window-control:not(:hover):not(:focus-visible)
 
 .scope-picker-option:hover { background: var(--bg-hover); }
 .scope-picker-option input { width: auto; flex-shrink: 0; accent-color: var(--accent); }
-.scope-picker-option.is-blocked { opacity: 0.42; cursor: not-allowed; }
 
 .scope-picker-option-name {
   min-width: 5em;
@@ -1372,12 +1371,6 @@ html[data-window-active="false"] .window-control:not(:hover):not(:focus-visible)
   padding: 10px 9px;
   color: var(--text-secondary);
   font-size: 11px;
-}
-
-.kpi-overview-scope-hint {
-  color: var(--text-muted);
-  font-size: 10px;
-  white-space: nowrap;
 }
 
 .kpi-overview-time-tabs {
@@ -1585,7 +1578,6 @@ html[data-window-active="false"] .window-control:not(:hover):not(:focus-visible)
   .kpi-overview-toolbar { padding-inline: 10px; flex-wrap: wrap; }
   .scope-picker { flex: 1; }
   .scope-picker-trigger { width: 100%; min-width: 0; }
-  .kpi-overview-scope-hint { display: none; }
   .kpi-overview-time-tabs { width: 100%; margin-left: 0; }
   .kpi-overview-time-tabs .time-tab { flex: 1; }
   .kpi-overview-grid { grid-template-columns: 1fr; grid-auto-rows: 210px; }

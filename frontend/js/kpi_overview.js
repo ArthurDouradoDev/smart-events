@@ -47,7 +47,6 @@ const SERIES_COLORS = [
   "#388BFD", "#F85149", "#ab7df6", "#3FB950",
   "#00d2ff", "#D29922", "#f692cc", "#FF7B00",
 ];
-const MAX_SCOPES = SERIES_COLORS.length;
 const UL_DASH = [6, 4];
 
 let _family = "4G";
@@ -211,11 +210,6 @@ function _syncTimeTabs() {
 
 // ── Seleção de escopos ─────────────────────────────────────────────
 
-/** Clusters gerados automaticamente a partir do DLEARFCN, da família ativa. */
-function _carrierClusters() {
-  return _familyFilteredClusters().filter(cluster => cluster.source === "earfcn");
-}
-
 /**
  * Clusters visíveis na aba ativa: os de família diferente da aba ficam de fora
  * — senão "Todos os clusters" marcaria escopos que renderizariam vazios na
@@ -254,22 +248,20 @@ function _applyPreferredSelection() {
   const visibleClusters = _familyFilteredClusters();
   const clusterIds = new Set(visibleClusters.map(cluster => cluster.id));
   const siteIds = new Set(_scopeSites.map(site => site.id));
-  const carriers = _carrierClusters();
 
   if (State.selectedSite === "clusters:compare") {
-    visibleClusters.slice(0, MAX_SCOPES).forEach(cluster => _selection.cluster.add(cluster.id));
+    visibleClusters.forEach(cluster => _selection.cluster.add(cluster.id));
   } else if (typeof State.selectedSite === "string" && State.selectedSite.startsWith("cluster:")) {
     const id = State.selectedSite.slice("cluster:".length);
     if (clusterIds.has(id)) _selection.cluster.add(id);
-  } else if (carriers.length) {
-    // Portadoras (EARFCN) são o recorte padrão em qualquer família, à frente
-    // do site que o dashboard sempre deixa selecionado na lista.
-    carriers.slice(0, MAX_SCOPES).forEach(cluster => _selection.cluster.add(cluster.id));
   } else if (siteIds.has(State.selectedSite)) {
     _selection.site.add(State.selectedSite);
   }
 
-  if (!_selectionSize() && clusterIds.has(State.clusterFilter)) {
+  // O filtro de cluster e o site podem estar selecionados ao mesmo tempo no
+  // dashboard. A visão geral herda os dois, sem introduzir portadoras que o
+  // usuário não escolheu explicitamente.
+  if (clusterIds.has(State.clusterFilter)) {
     _selection.cluster.add(State.clusterFilter);
   }
   if (!_selectionSize()) {
@@ -489,13 +481,13 @@ function _renderPickers() {
   _syncPickerSummaries();
 }
 
-function _optionRow({ checked, blocked, color, name, meta, onToggle }) {
+function _optionRow({ checked, color, name, meta, onToggle }) {
   const label = document.createElement("label");
-  label.className = `scope-picker-option${blocked ? " is-blocked" : ""}`;
+  label.className = "scope-picker-option";
   label.setAttribute("role", "option");
   label.setAttribute("aria-selected", String(checked));
   label.innerHTML = `
-    <input type="checkbox" ${checked ? "checked" : ""} ${blocked ? "disabled" : ""}>
+    <input type="checkbox" ${checked ? "checked" : ""}>
     ${color ? `<span class="scope-picker-swatch" style="background:${_safeColor(color)}"></span>` : ""}
     <span class="scope-picker-option-name">${_esc(name)}</span>
     ${meta ? `<span class="scope-picker-option-meta">${_esc(meta)}</span>` : ""}`;
@@ -516,11 +508,8 @@ function _renderClusterPicker() {
   const options = document.createElement("div");
   options.className = "scope-picker-options";
   const allSelected = clusters.every(cluster => _selection.cluster.has(cluster.id));
-  const fitsAll = clusters.length + _selection.site.size + _selection.cell.size
-    + _selection.siteCarrier.size <= MAX_SCOPES;
   options.appendChild(_optionRow({
     checked: allSelected,
-    blocked: !allSelected && !fitsAll,
     name: "Todos os clusters",
     meta: _plural(clusters.length, "cluster"),
     onToggle: checked => {
@@ -537,7 +526,6 @@ function _renderClusterPicker() {
     const checked = _selection.cluster.has(cluster.id);
     options.appendChild(_optionRow({
       checked,
-      blocked: !checked && _selectionSize() >= MAX_SCOPES,
       color: _clusterColor(cluster, index),
       name: cluster.name || cluster.id,
       meta: _plural(cluster.site_count, "site"),
@@ -606,7 +594,6 @@ function _renderSiteOptions() {
       !carrier.family || carrier.family === _family);
     const row = _optionRow({
       checked,
-      blocked: !checked && _selectionSize() >= MAX_SCOPES,
       color: baseColors.get(String(site.id)),
       name: site.name || site.id,
       meta: _siteOptionMeta(site, carriers),
@@ -648,7 +635,6 @@ function _renderSiteOptions() {
       const carrierChecked = _selection.siteCarrier.has(key);
       const subRow = _optionRow({
         checked: carrierChecked,
-        blocked: !carrierChecked && _selectionSize() >= MAX_SCOPES,
         color: carrierColors.get(`earfcn-${carrier.earfcn}`),
         name: `Portadora ${carrier.earfcn}`,
         meta: _plural(carrier.cell_count, "célula"),
@@ -667,9 +653,8 @@ function _renderSiteOptions() {
 /**
  * Chevron "separar por portadora": alterna a expansão do site no seletor.
  * Na primeira vez que um site é expandido nesta sessão, marca todas as
- * portadoras dele de uma vez — expandir tem que simplesmente funcionar, e não
- * bater no teto de escopos em silêncio, então a seleção anterior é limpa
- * quando as portadoras não cabem sozinhas.
+ * portadoras dele de uma vez. A comparação não possui teto de escopos, então
+ * a seleção que já existia é preservada.
  */
 function _toggleSiteCarrierExpansion(site, carriers) {
   if (_expandedSites.has(site.id)) {
@@ -682,13 +667,6 @@ function _toggleSiteCarrierExpansion(site, carriers) {
   if (!_autoMarkedCarrierSites.has(site.id)) {
     _autoMarkedCarrierSites.add(site.id);
     const keys = carriers.map(carrier => `${site.id}::${carrier.earfcn}`);
-    const newKeys = keys.filter(key => !_selection.siteCarrier.has(key));
-    if (_selectionSize() + newKeys.length > MAX_SCOPES) {
-      _selection.cluster.clear();
-      _selection.site.clear();
-      _selection.cell.clear();
-      _selection.siteCarrier.clear();
-    }
     keys.forEach(key => _selection.siteCarrier.add(key));
   }
   _onSelectionChanged();
@@ -772,7 +750,6 @@ function _renderCellOptions() {
     const checked = _selection.cell.has(cell.id);
     options.appendChild(_optionRow({
       checked,
-      blocked: !checked && _selectionSize() >= MAX_SCOPES,
       color: baseColors.get(String(cell.id)),
       name: cell.name || cell.id,
       meta: cell.site_name || "",
@@ -830,12 +807,6 @@ function _syncPickerSummaries() {
   if (siteValue) siteValue.textContent = _siteSummaryText();
   if (cellValue) cellValue.textContent = _summaryText("cell", _scopeCells);
 
-  const hint = document.getElementById("kpi-overview-scope-hint");
-  if (hint) {
-    hint.textContent = _selectionSize() >= MAX_SCOPES
-      ? `Limite de ${MAX_SCOPES} escopos atingido`
-      : "";
-  }
   _syncContextLabel();
 }
 

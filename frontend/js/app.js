@@ -9,7 +9,7 @@ import { initWindowChrome } from "./window_chrome.js?v=20260831-window-chrome-r5
 import { initMap, renderSites, renderEventPolygon, fitToEvent, resizeMap } from "./map.js?v=20260901-small-event-fit-r1";
 import { initVip, resizeVipChart }    from "./vip.js?v=20260830-window-chrome-r1";
 import { initKpi, refreshChart, resizeKpiCharts }    from "./kpi.js?v=20260830-window-chrome-r1";
-import { initKpiOverview, resizeKpiOverviewCharts } from "./kpi_overview.js?v=20260830-window-chrome-r1";
+import { initKpiOverview, resizeKpiOverviewCharts } from "./kpi_overview.js?v=20260901-unlimited-scopes-r1";
 import { initAlerts, injectAlerts } from "./alerts.js?v=20260826-site-filter";
 import { initAlarms, injectAlarms } from "./alarms.js?v=20260826-site-filter";
 import { initLogs } from "./logs.js";
@@ -32,6 +32,22 @@ let _visualResizeTimer = null;
 function _isVirtualKpiScope(siteId) {
   return typeof siteId === "string" &&
     (siteId.startsWith("cluster:") || siteId === "clusters:compare");
+}
+
+/**
+ * Site inicial de um evento: prioriza quem pertence ao polígono. Eventos
+ * legados não possuem `is_event_site`; nesses casos a ausência da marcação
+ * continua significando que o site pertence ao evento.
+ */
+export function preferredInitialSiteId(sites = []) {
+  return (sites.find(site => site.is_event_site !== false) || sites[0])?.id || null;
+}
+
+function _ensureAvailableSiteSelected(sites) {
+  if (_isVirtualKpiScope(State.selectedSite)) return;
+  if (State.selectedSite && sites.some(site => site.id === State.selectedSite)) return;
+  const preferred = preferredInitialSiteId(sites);
+  if (State.selectedSite !== preferred) State.set("selectedSite", preferred);
 }
 
 // ── Bootstrap ─────────────────────────────────────────────────────
@@ -147,6 +163,7 @@ async function _enterActiveMode(event) {
     mode: "active",
     activeEvent: event,
     historicalEvent: null,
+    selectedSite: null,
   });
 
   // Troca telas
@@ -218,6 +235,7 @@ async function _enterHistoricalMode(event) {
     mode: "historical",
     historicalEvent: event,
     activeEvent: null,
+    selectedSite: null,
   });
 
   document.getElementById("standby-screen").classList.remove("active");
@@ -275,15 +293,8 @@ async function _poll() {
         `REC ${status.db_size_mb} MB`;
     }
 
-    // Atualiza seleção de site se ainda válida
-    if (State.selectedSite) {
-      const still = sites.find(s => s.id === State.selectedSite);
-      if (!still && !_isVirtualKpiScope(State.selectedSite) && sites.length) {
-        State.set("selectedSite", sites[0].id);
-      }
-    } else if (sites.length) {
-      State.set("selectedSite", sites[0].id);
-    }
+    // Ao abrir/trocar de evento, inicia em um site pertencente ao polígono.
+    _ensureAvailableSiteSelected(sites);
 
     // Atualiza o gráfico de KPIs automaticamente a cada ciclo (sem reabrir popup fechado).
     refreshChart();
@@ -463,14 +474,7 @@ async function _updateHistoricalView(index) {
     State.set("alerts", alerts);
     injectAlarms(alarms);
 
-    if (State.selectedSite) {
-      const still = sites.find(s => s.id === State.selectedSite);
-      if (!still && !_isVirtualKpiScope(State.selectedSite) && sites.length) {
-        State.set("selectedSite", sites[0].id);
-      }
-    } else if (sites.length) {
-      State.set("selectedSite", sites[0].id);
-    }
+    _ensureAvailableSiteSelected(sites);
   } catch (err) {
     console.error("Erro ao atualizar visualização histórica:", err);
   }
@@ -882,8 +886,6 @@ async function _switchEvent(event) {
     clearInterval(_eventTimer);
     _eventTimer = null;
   }
-
-  State.set("selectedSite", null);
 
   if (event.status === "ACTIVE" || event.status === "SCHEDULED") {
     event.status = "ACTIVE";

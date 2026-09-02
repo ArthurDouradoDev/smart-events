@@ -46,11 +46,6 @@ KPI_OVERVIEW_METRICS = {
     ),
 }
 
-# Teto de escopos comparados de uma vez na visao geral. Cada escopo custa uma
-# varredura completa das metricas do painel, e a paleta categorica do app tem
-# oito cores estaveis — acima disso as linhas deixam de ser distinguiveis.
-KPI_OVERVIEW_MAX_SCOPES = 8
-
 # Paleta dos clusters automáticos por portadora, defasada da do cadastro
 # (que começa em vermelho/azul) para não colidir quando os dois tipos
 # aparecem juntos na visão geral.
@@ -527,6 +522,63 @@ class Api:
         return 2 * radius * math.asin(min(1.0, math.sqrt(h)))
 
     @classmethod
+    def _distance_clusters(cls, sites: list[dict]) -> list[list[dict]]:
+        """Agrupa sites conectados por distâncias de até 50 m.
+
+        Esta é a implementação histórica da trava geográfica dos homônimos.
+        Ela permanece disponível somente para a validação inativa em
+        ``_validate_distant_homonyms``; a fusão em produção não usa distância.
+        """
+        clusters: list[list[dict]] = []
+        for site in sites:
+            for cluster in clusters:
+                if any(
+                    (dist := cls._distance_m(site, member)) is not None
+                    and dist <= cls._MERGE_DISTANCE_M
+                    for member in cluster
+                ):
+                    cluster.append(site)
+                    break
+            else:
+                clusters.append([site])
+        return clusters
+
+    @classmethod
+    def _validate_distant_homonyms(cls, config: dict) -> list[tuple[dict, dict]]:
+        """Validação histórica de homônimos separados por mais de 50 m.
+
+        A rotina está deliberadamente inativa: nenhum fluxo de produção a
+        chama. Ela foi preservada para uma eventual reativação e considera
+        somente os sites marcados como pertencentes ao polígono do evento.
+        Retorna os pares conflitantes, além de manter o warning legado.
+        """
+        by_name: dict[str, list[dict]] = {}
+        for site in list((config or {}).get("sites") or []):
+            key = cls._normalize_site_name(site.get("name") or "")
+            if key:
+                by_name.setdefault(key, []).append(site)
+
+        conflicts: list[tuple[dict, dict]] = []
+        for group in by_name.values():
+            event_clusters = [
+                cluster for cluster in cls._distance_clusters(group)
+                if any(site.get("is_event_site", True) for site in cluster)
+            ]
+            for i, left in enumerate(event_clusters):
+                for right in event_clusters[i + 1:]:
+                    a = next(site for site in left if site.get("is_event_site", True))
+                    b = next(site for site in right if site.get("is_event_site", True))
+                    conflicts.append((a, b))
+                    logger.warning(
+                        "Sites homônimos não fundidos (coordenada > %.0fm): "
+                        "%s %s (%s,%s) e %s %s (%s,%s)",
+                        cls._MERGE_DISTANCE_M,
+                        a.get("id"), a.get("name"), a.get("lat"), a.get("lng"),
+                        b.get("id"), b.get("name"), b.get("lat"), b.get("lng"),
+                    )
+        return conflicts
+
+    @classmethod
     def _annotate_cell(cls, cell) -> dict:
         if isinstance(cell, str):
             return {"id": cell, "label": cell, "family": cls._cell_technology_family(cell)}
@@ -585,7 +637,7 @@ class Api:
 
     @classmethod
     def _merged_sites(cls, config: dict) -> list[dict]:
-        """Única fonte de fusão 4G/5G: nome normalizado + coordenada ≤ 50 m."""
+        """Única fonte de fusão 4G/5G: todo nome normalizado igual é unificado."""
         raw_sites = list((config or {}).get("sites") or [])
         by_name: dict[str, list[dict]] = {}
         unnamed: list[dict] = []
@@ -612,48 +664,11 @@ class Api:
             return unique
 
         for name, group in by_name.items():
-            clusters: list[list[dict]] = []
-            for site in group:
-                placed = False
-                for cluster in clusters:
-                    if any(
-                        (dist := cls._distance_m(site, member)) is not None
-                        and dist <= cls._MERGE_DISTANCE_M
-                        for member in cluster
-                    ):
-                        cluster.append(site)
-                        placed = True
-                        break
-                if not placed:
-                    clusters.append([site])
-
-            # Sites de vizinhança continuam separados quando são homônimos e
-            # distantes, mas não fazem parte da validação do evento. Um cluster
-            # participa do aviso somente quando contém ao menos um site marcado
-            # como pertencente ao polígono (`is_event_site`).
-            event_clusters = [
-                cluster for cluster in clusters
-                if any(site.get("is_event_site", True) for site in cluster)
-            ]
-            if len(event_clusters) > 1:
-                for i, left in enumerate(event_clusters):
-                    for right in event_clusters[i + 1:]:
-                        a = next(site for site in left if site.get("is_event_site", True))
-                        b = next(site for site in right if site.get("is_event_site", True))
-                        logger.warning(
-                            "Sites homônimos não fundidos (coordenada > %.0fm): "
-                            "%s %s (%s,%s) e %s %s (%s,%s)",
-                            cls._MERGE_DISTANCE_M,
-                            a.get("id"), a.get("name"), a.get("lat"), a.get("lng"),
-                            b.get("id"), b.get("name"), b.get("lat"), b.get("lng"),
-                        )
-
-            for cluster in clusters:
-                if len(cluster) > 1:
-                    site_id = _unique_id(name, cluster[0]["id"])
-                else:
-                    site_id = _unique_id(str(cluster[0]["id"]), name)
-                result.append(cls._as_merged_site(cluster, site_id))
+            if len(group) > 1:
+                site_id = _unique_id(name, group[0]["id"])
+            else:
+                site_id = _unique_id(str(group[0]["id"]), name)
+            result.append(cls._as_merged_site(group, site_id))
 
         for site in unnamed:
             result.append(cls._as_merged_site([site], _unique_id(str(site["id"]), "site")))
@@ -1851,15 +1866,6 @@ class Api:
                 "labels": [], "series": [], "units": {}, "thresholds": {},
                 "reasons": {},
             }
-        if len(requested) > KPI_OVERVIEW_MAX_SCOPES:
-            return {
-                "ok": False,
-                "error": (f"compare no maximo {KPI_OVERVIEW_MAX_SCOPES} escopos "
-                          f"por vez (foram pedidos {len(requested)})"),
-                "labels": [], "series": [], "units": {}, "thresholds": {},
-                "reasons": {},
-            }
-
         try:
             metric_ids = KPI_OVERVIEW_METRICS[family]
             collected: list[dict] = []

@@ -123,13 +123,12 @@ def test_paleta_de_series_nao_e_reordenada_sem_revalidar():
     assert '"#00d2ff", "#D29922", "#f692cc", "#FF7B00",' in source
 
 
-def test_visao_prefere_clusters_de_portadora_quando_existem_em_qualquer_familia():
-    # Decisão 2 (plano-portadora-por-site.md): a aba 5G também abre com as
-    # portadoras marcadas, igual à 4G — não é mais um `if` restrito a "4G".
+def test_visao_herda_site_ou_cluster_sem_marcar_portadoras_por_padrao():
     source = OVERVIEW_JS.read_text(encoding="utf-8")
 
-    assert 'cluster.source === "earfcn"' in source
-    assert '} else if (carriers.length) {' in source
+    assert 'siteIds.has(State.selectedSite)' in source
+    assert 'clusterIds.has(State.clusterFilter)' in source
+    assert '} else if (carriers.length) {' not in source
 
 
 def test_toolbar_tem_dropdowns_separados_de_clusters_e_sites():
@@ -564,7 +563,7 @@ def test_empty_panel_distinguishes_no_traffic_from_no_data():
         _skip_if_no_browser(exc)
 
 
-def test_visao_4g_abre_com_clusters_por_portadora_marcados():
+def test_visao_4g_abre_com_site_do_dashboard_sem_portadoras_marcadas():
     sync_api = pytest.importorskip("playwright.sync_api")
     try:
         with _frontend_server() as url, sync_api.sync_playwright() as playwright:
@@ -575,21 +574,19 @@ def test_visao_4g_abre_com_clusters_por_portadora_marcados():
                       const chips = [...document.querySelectorAll(
                         '#kpi-overview-context .kpi-overview-chip')]
                         .map(el => el.textContent.trim());
-                      return chips.includes('Portadora 1276')
-                        && chips.includes('Portadora 1700');
+                      return chips.length === 1
+                        && chips.includes('ERB-07 Interlagos');
                     }""",
                     timeout=8000,
                 )
                 chips = page.locator(
                     "#kpi-overview-context .kpi-overview-chip").all_inner_texts()
-                assert "Portadora 1276" in chips
-                assert "Portadora 1700" in chips
-                assert "ERB-07" not in chips
+                assert chips == ["ERB-07 Interlagos"]
                 _open_picker(page, "kpi-overview-cluster-picker")
                 assert page.locator(
                     "#kpi-overview-cluster-picker .scope-picker-option",
                     has_text="Portadora 1276",
-                ).first.locator("input").is_checked()
+                ).first.locator("input").is_checked() is False
     except Exception as exc:  # pragma: no cover
         _skip_if_no_browser(exc)
 
@@ -646,20 +643,17 @@ def test_troca_de_tecnologia_carrega_so_cluster_sem_familia_e_site():
         _skip_if_no_browser(exc)
 
 
-def test_troca_que_esvazia_a_comparacao_semeia_a_familia_nova():
-    """Purga que zera a comparação re-semeia — abrir a aba no estado de erro
-    "selecione ao menos um" lê como painel quebrado, não como escolha."""
+def test_troca_de_familia_preserva_site_herdado_do_dashboard():
     sync_api = pytest.importorskip("playwright.sync_api")
     try:
         with _frontend_server() as url, sync_api.sync_playwright() as playwright:
             with _overview(playwright) as (page, _browser):
-                # A 4G abre com as portadoras dela; nenhuma sobrevive no 5G.
                 _open_overview(page, url, "?kpiOverview=earfcn")
-                _wait_chips(page, ["Portadora 1276", "Portadora 1700"])
+                _wait_chips(page, ["ERB-07 Interlagos"])
 
                 page.locator('#kpi-overview-family-tabs [data-family="5G"]').click()
 
-                _wait_chips(page, ["Portadora 627264"])
+                _wait_chips(page, ["ERB-07 Interlagos"])
                 assert page.locator("#kpi-overview-error").is_hidden()
     except Exception as exc:  # pragma: no cover
         _skip_if_no_browser(exc)
@@ -680,5 +674,30 @@ def test_comparacao_esvaziada_de_proposito_continua_vazia_ao_trocar():
                 error.wait_for(state="visible", timeout=5000)
                 assert page.locator(
                     "#kpi-overview-context .kpi-overview-chip").count() == 0
+    except Exception as exc:  # pragma: no cover
+        _skip_if_no_browser(exc)
+
+
+def test_interface_permite_selecionar_mais_de_oito_escopos():
+    sync_api = pytest.importorskip("playwright.sync_api")
+    try:
+        with _frontend_server() as url, sync_api.sync_playwright() as playwright:
+            with _overview(playwright) as (page, _browser):
+                _open_overview(page, url)
+                _clear_selection(page)
+                _pick(page, "kpi-overview-cluster-picker", "Todos os clusters")
+                for site in ("ERB-07 Interlagos", "ERB-03 Av. Interlagos",
+                             "ERB-11 Autódromo Sul", "ERB-15 Buffer Norte", "SPSMG7"):
+                    _pick(page, "kpi-overview-site-picker", site)
+                for cell in ("ERB-07-A1", "ERB-07-A2", "ERB-07-A3"):
+                    _pick(page, "kpi-overview-cell-picker", cell)
+
+                page.wait_for_function(
+                    """() => document.querySelectorAll(
+                      '#kpi-overview-context .kpi-overview-chip').length === 10""",
+                    timeout=8000,
+                )
+                assert page.locator(".scope-picker-option input:disabled").count() == 0
+                assert page.locator("#kpi-overview-error").is_hidden()
     except Exception as exc:  # pragma: no cover
         _skip_if_no_browser(exc)

@@ -522,7 +522,7 @@ class TestSiteMerge:
         assert len(sites["725469"]["cells"]) == 10
         assert sites["725469"]["members"] == [{"site_id": "725469", "family": "4G"}]
 
-    def test_nome_igual_em_coordenada_distante_nao_funde(
+    def test_nome_igual_em_coordenada_distante_funde_sem_validacao(
             self, api, sample_event, caplog):
         event = {
             **sample_event,
@@ -538,18 +538,19 @@ class TestSiteMerge:
 
         with caplog.at_level("WARNING"):
             sites = api.get_sites(event["id"])
-        ids = {site["id"] for site in sites}
+        assert [site["id"] for site in sites] == ["SPSMG7"]
+        assert {member["site_id"] for member in sites[0]["members"]} == {"A1", "B1"}
+        assert len(sites[0]["cells"]) == 4
+        assert "não fundidos" not in caplog.text
 
-        assert ids == {"A1", "B1"}
-        assert "não fundidos" in caplog.text
-
-    @pytest.mark.parametrize("inside_a,inside_b", [
-        (False, False),
-        (True, False),
-        (False, True),
+    @pytest.mark.parametrize("inside_a,inside_b,expected_conflicts", [
+        (True, True, 1),
+        (False, False, 0),
+        (True, False, 0),
+        (False, True, 0),
     ])
-    def test_homonimos_distantes_fora_do_poligono_nao_geram_validacao(
-            self, api, sample_event, caplog, inside_a, inside_b):
+    def test_validacao_inativa_de_homonimos_distantes_fica_preservada(
+            self, api, sample_event, caplog, inside_a, inside_b, expected_conflicts):
         event = {
             **sample_event,
             "id": f"homonym-outside-{inside_a}-{inside_b}",
@@ -562,13 +563,11 @@ class TestSiteMerge:
                  "cells": _cells("5G-SPSMG7", 2)},
             ],
         }
-        database.save_event(event)
-
         with caplog.at_level("WARNING"):
-            sites = api.get_sites(event["id"])
+            conflicts = api._validate_distant_homonyms(event)
 
-        assert {site["id"] for site in sites} == {"A1", "B1"}
-        assert "não fundidos" not in caplog.text
+        assert len(conflicts) == expected_conflicts
+        assert ("não fundidos" in caplog.text) is bool(expected_conflicts)
 
     def test_valor_da_lista_nao_depende_da_ordem_das_linhas_site(
             self, api, sample_event):
@@ -1596,17 +1595,30 @@ class TestKpiOverviewMulti:
             sample_event["id"], [{"scope": "celula", "scope_id": "x"}], "4G",
         )["ok"] is False
 
-    def test_recusa_mais_escopos_que_o_teto_da_paleta(self, api, sample_event):
+    def test_aceita_mais_de_oito_escopos(self, api, sample_event, monkeypatch):
         database.save_event(sample_event)
-        excesso = [
+        scopes = [
             {"scope": "site", "scope_id": f"SITE-{index}"}
-            for index in range(api_module.KPI_OVERVIEW_MAX_SCOPES + 1)
+            for index in range(12)
         ]
 
-        result = api.get_kpi_overview_multi(sample_event["id"], excesso, "4G")
+        def overview_ok(event_id, scope, scope_id, family, minutes):
+            metrics = api_module.KPI_OVERVIEW_METRICS[family]
+            return {
+                "ok": True,
+                "labels": ["2026-08-20T12:00:00"],
+                "metrics": {metric: [1.0] for metric in metrics},
+                "units": {},
+                "thresholds": {},
+                "reasons": {metric: "ok" for metric in metrics},
+            }
 
-        assert result["ok"] is False
-        assert str(api_module.KPI_OVERVIEW_MAX_SCOPES) in result["error"]
+        monkeypatch.setattr(api, "get_kpi_overview", overview_ok)
+
+        result = api.get_kpi_overview_multi(sample_event["id"], scopes, "4G")
+
+        assert result["ok"] is True
+        assert len(result["series"]) == 12
 
     def test_familia_invalida_nao_chega_a_consultar(self, api, sample_event):
         database.save_event(sample_event)
