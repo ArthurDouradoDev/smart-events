@@ -130,6 +130,16 @@ def _titlebar_assets() -> str:
     return f"{len(required)} arquivo(s); icone={icon.stat().st_size} bytes"
 
 
+def _event_package_contract() -> str:
+    """Prova que o bundle conhece a propria versao antes de validar `.sepack`."""
+    from core import event_package
+
+    version = event_package.app_version()
+    if version == "0.0.0":
+        raise RuntimeError("VERSION ausente do bundle; pacotes validos seriam recusados.")
+    return f"SmartEvents {version}; schema de pacote {event_package.SCHEMA_VERSION}"
+
+
 def _window_chrome_window() -> str:
     """Prova o ciclo attach/consulta/detach numa janela WebView2 de verdade."""
     diagnostics = data_dir() / "diagnostics"
@@ -463,6 +473,7 @@ def run_self_test(
         _check("controlador de moldura Win32", _window_chrome),
         _check("moldura Win32 em janela WebView2", _window_chrome_window),
         _check("assets da barra de titulo", _titlebar_assets),
+        _check("versao para pacotes de eventos", _event_package_contract),
         _check("Chromium headless e Chromium visual", _playwright),
         _check("gravacao nos dados do operador", _write_access),
         _check("banco SQLite local", _database),

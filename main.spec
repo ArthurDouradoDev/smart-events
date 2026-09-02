@@ -129,6 +129,10 @@ a = Analysis(
     pathex=[],
     binaries=_pw_binaries,
     datas=[
+        # `core.event_package.app_version()` le este arquivo em runtime. Sem ele,
+        # o executavel congelado assume 0.0.0 e recusa todo `.sepack` que exige
+        # a versao normal do aplicativo (por exemplo, 1.0.0).
+        ('VERSION', '.'),
         ('frontend', 'frontend'),
         ('server_frontend', 'server_frontend'),
         (str(_server_data_seed), 'server_data'),

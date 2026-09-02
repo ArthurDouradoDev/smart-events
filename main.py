@@ -73,6 +73,10 @@ _install_log_buffer()
 
 FRONTEND = resource_dir() / "frontend" / "index.html"
 
+# Segundos apos o `loaded` para refazer a superficie do WebView2. Medido: em
+# t+10s o dashboard ja esta montado e o ciclo devolve o quadro completo.
+FIRST_PAINT_REPAINT_DELAY = 8.0
+
 
 _JOB_HANDLE = None  # mantém o handle do Job Object vivo durante a sessão
 
@@ -563,6 +567,17 @@ def main():
             )
         if mock_mode:
             window.evaluate_js("window.__MOCK_MODE__ = true;")
+        if custom_titlebar:
+            # O primeiro quadro do WebView2 e composto enquanto a janela ainda
+            # esta sendo maximizada e o WM_NCCALCSIZE da moldura customizada
+            # ainda mexe na area cliente; as camadas perdidas nessa corrida
+            # nunca voltam sozinhas (ver ERRORS.md). O atraso existe porque o
+            # dashboard so termina de ser montado alguns segundos depois do
+            # `loaded` — refazer a superficie antes disso nao adianta, a
+            # corrida ainda estaria em curso.
+            threading.Timer(
+                FIRST_PAINT_REPAINT_DELAY, chrome_controller.force_repaint
+            ).start()
 
     window.events.before_show += _on_before_show
     window.events.loaded += _on_loaded

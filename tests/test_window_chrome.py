@@ -7,6 +7,7 @@ import sys
 
 import pytest
 
+from core import window_chrome
 from core.window_chrome import (
     NATIVE_RECT,
     WM_NCCALCSIZE,
@@ -502,6 +503,28 @@ def test_window_actions_and_state_transitions():
     assert controller.get_state()["state"] == "minimized"
     assert controller.close() is True
     assert adapter.closed is True
+
+
+def test_force_repaint_rebuilds_the_surface_with_a_restore_maximize_cycle(monkeypatch):
+    """O ciclo e o unico jeito de recuperar as camadas perdidas na abertura."""
+    monkeypatch.setattr(window_chrome, "REPAINT_SETTLE_SECONDS", 0)
+    controller, adapter = attached_controller()
+    adapter.zoomed = True
+
+    assert controller.force_repaint() is True
+
+    # Restaurar e re-maximizar, nessa ordem: e o WM_SIZE do par que faz o
+    # WebView2 refazer a superficie e reapresentar as camadas.
+    assert adapter.show_commands == [SW_RESTORE, SW_MAXIMIZE]
+
+
+def test_force_repaint_does_nothing_when_the_window_is_not_maximized():
+    """Sem a corrida da maximizacao o ciclo so piscaria a tela do operador."""
+    controller, adapter = attached_controller()
+    adapter.zoomed = False
+
+    assert controller.force_repaint() is False
+    assert adapter.show_commands == []
 
 
 def test_drag_delegates_the_maximized_case_to_the_native_move_loop():

@@ -2141,3 +2141,36 @@ configurar um certificado real, mas isso não foi (e não podia ser) validado aq
 Essas três pendências não bloqueiam o critério de aceite de **código**: "artefato de produção
 tem assinatura válida" é uma propriedade que o pipeline agora consegue *produzir e verificar*;
 "validado com antivírus/SmartScreen/VM real" é uma etapa humana que só existe fora deste ambiente.
+
+---
+
+## 2026-09-02 — Primeiro quadro do WebView2: `force_repaint` na abertura
+
+**Decisão:** a janela continua nascendo **maximizada** (`maximized=True`) e o
+`WindowChromeController.force_repaint()` faz um ciclo `SW_RESTORE` → `SW_MAXIMIZE`
+`FIRST_PAINT_REPAINT_DELAY` (8 s) depois do `loaded`, só no modo de moldura customizada.
+
+**Por quê:** o WebView2 compõe o primeiro quadro enquanto a maximização e o `WM_NCCALCSIZE` ainda
+mexem na área cliente; as camadas perdidas nessa corrida nunca voltam sozinhas, e o app abre com
+faixas por pintar que ficam pretas a cada repintura (inclusive no hover). Só um redimensionamento
+real do host refaz a superfície. Detalhes, medições e as 6 alternativas descartadas estão no
+ERRORS.md (entrada de 2026-09-02).
+
+**Travas que valem para quem mexer nisso depois:**
+
+- **Não trocar por `maximized=False` + maximizar no fim do boot.** Conserta a pintura, mas o
+  `fitToEvent` roda no viewport restaurado (1558×922) e o mapa abre na região metropolitana em vez
+  do evento — regressão direta no "zoom na área monitorada".
+- **Não trocar por flags de GPU.** Medido: `--disable-gpu-compositing` deixa resto,
+  `--disable-gpu` piora, `--disable-features=CalculateNativeWinOcclusion` não muda nada.
+- **Não trocar por invalidação em JS.** A falha é da superfície do WebView2, não do layout da
+  página; `opacity`/`display` toggle não resolvem.
+- O `REPAINT_SETTLE_SECONDS = 0.5` entre restaurar e maximizar não é enfeite: sem a pausa as duas
+  mensagens se anulam e a superfície não é refeita.
+- O atraso de 8 s é heurístico (medido: em t+10s o dashboard já está montado e o ciclo devolve o
+  quadro completo). Se o boot ficar mais lento, esse número precisa subir junto.
+
+**Custo aceito:** um piscar único da janela na abertura. É o que o operador já fazia à mão.
+
+**Verificação:** `.exe` compilado, perfil de dados isolado — baseline falhou 4/4 aberturas, com o
+fix 3/3 limpas. Suíte: 855 passed, 10 skipped.

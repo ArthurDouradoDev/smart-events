@@ -149,6 +149,13 @@ def test_spec_refuses_client_catalog_and_profile_seed_in_base_mode():
     assert "'legacy'" in spec
 
 
+def test_spec_embeds_version_used_by_event_package_validation():
+    """O executavel nao pode cair em 0.0.0 e recusar pacotes da propria versao."""
+    spec = SPEC_PATH.read_text(encoding="utf-8")
+
+    assert "('VERSION', '.')" in spec
+
+
 def test_seed_operator_data_creates_the_empty_layout_for_a_generic_install(tmp_path, monkeypatch):
     """Primeiro boot sem pacote: as pastas existem e o app abre num estado vazio."""
     from core import seed as seed_module

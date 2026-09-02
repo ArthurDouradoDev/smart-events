@@ -13,6 +13,7 @@ import math
 import os
 import sys
 import threading
+import time
 from ctypes import wintypes
 from dataclasses import dataclass
 from typing import Any, Mapping, Sequence
@@ -72,6 +73,11 @@ SPI_GETWORKAREA = 0x0030
 SM_CXSIZEFRAME = 32
 SM_CYSIZEFRAME = 33
 SM_CXPADDEDBORDER = 92
+
+# Pausa entre restaurar e re-maximizar em ``force_repaint``. Precisa ser longa
+# o bastante para o WebView2 processar o WM_SIZE da restauracao — sem isso as
+# duas mensagens se anulam e a superficie nao e refeita.
+REPAINT_SETTLE_SECONDS = 0.5
 
 DEFAULT_TITLEBAR_HEIGHT = 36.0
 DEFAULT_RESIZE_BORDER = 8.0
@@ -921,6 +927,35 @@ class WindowChromeController:
         # janela por conta propria antes do loop e o que a fazia "abrir torta".
         return self._run_window_action(
             "begin_drag", lambda adapter, hwnd: adapter.begin_drag(hwnd)
+        )
+
+    def force_repaint(self) -> bool:
+        """Refaz a superficie do WebView2 com um ciclo restaurar/maximizar.
+
+        O WebView2 compoe o primeiro quadro enquanto a janela ainda esta sendo
+        maximizada e o ``WM_NCCALCSIZE`` da moldura customizada ainda recalcula
+        a area cliente. As camadas que perdem a shared image nessa janela de
+        tempo nunca voltam a ser apresentadas: o app abre com faixas do
+        cabecalho, do mapa e do painel de VIPs por pintar, e dai em diante toda
+        repintura daquelas regioes — ate a do hover — sai preta, porque o que
+        aparece e o fundo da janela. So um redimensionamento real refaz a
+        superficie; e o que o operador vinha fazendo a mao no botao restaurar.
+
+        Sem efeito quando a janela nao esta maximizada: ali nao houve corrida e
+        um ciclo desses so piscaria a tela a toa.
+        """
+        if self.get_state().get("state") != "maximized":
+            return False
+        # Os dois passos sao acoes separadas de proposito: ``_run_window_action``
+        # segura o lock do controlador, e dormir com ele na mao travaria o
+        # ``window_get_state`` que a barra de titulo consulta a cada 500 ms.
+        if not self._run_window_action(
+            "force_repaint/restore", lambda adapter, hwnd: adapter.show_window(hwnd, SW_RESTORE)
+        ):
+            return False
+        time.sleep(REPAINT_SETTLE_SECONDS)
+        return self._run_window_action(
+            "force_repaint/maximize", lambda adapter, hwnd: adapter.show_window(hwnd, SW_MAXIMIZE)
         )
 
     def toggle_maximize(self) -> bool:

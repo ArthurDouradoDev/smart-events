@@ -241,6 +241,17 @@ def test_generic_base_seed_passes_the_program_self_test(tmp_path, monkeypatch):
         assert (operator / "server_data" / name).is_dir()
 
 
+def test_self_test_rejects_bundle_without_application_version(monkeypatch):
+    from core import event_package, self_test
+
+    monkeypatch.setattr(event_package, "app_version", lambda: "0.0.0")
+    with pytest.raises(RuntimeError, match="VERSION ausente"):
+        self_test._event_package_contract()
+
+    monkeypatch.setattr(event_package, "app_version", lambda: "1.0.0")
+    assert self_test._event_package_contract() == "SmartEvents 1.0.0; schema de pacote 1"
+
+
 def test_self_test_only_demands_events_when_the_distribution_declares_them(tmp_path, monkeypatch):
     from core import self_test
 

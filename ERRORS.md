@@ -1077,3 +1077,64 @@ futuro) que construa o objeto de outra forma legítima escapa da redação em si
 de falha de segurança, porque não quebra teste nenhum a não ser que alguém pense exatamente nesse
 caso. Prova disso: o bug só apareceu porque o teste construía `AuthenticodeConfig` manualmente em
 vez de passar por `load_config()`.
+
+---
+
+## 2026-09-02 — App abria com faixas por pintar; hover deixava o cabeçalho e o mapa pretos
+
+**Como apareceu:** relatado como "o executável gerado pro Rock in Rio está totalmente quebrado ao
+abrir". Faixas pretas no cabeçalho (seletor de evento), no mapa e no painel de VIPs; passar o mouse
+por cima **pintava de preto** o que estava embaixo. Clicar em restaurar/maximizar consertava tudo.
+A severidade variava a cada abertura.
+
+**O que NÃO era (verificado antes de mexer em código):** o build e o instalador estavam íntegros —
+`self-test` do build-base e do app instalado 100% verde, `frontend/` empacotado **byte-idêntico** ao
+fonte (hash de todos os arquivos), DPI `per-monitor-v2`, janela maximizada com geometria exata
+(`(0,0)-(1920,1128)` = área útil), todos os HWND filhos do WebView2 cobrindo a área cliente, e o log
+do app sem um único erro (coleta, alarmes e VIPs funcionando). O app não estava quebrado: estava
+**mal pintado**.
+
+**Causa raiz:** o WebView2 compõe o primeiro quadro enquanto a janela ainda está sendo maximizada e
+o `WM_NCCALCSIZE` da moldura customizada ainda recalcula a área cliente. As camadas que perdem a
+*shared image* nessa janela de tempo **nunca voltam a ser apresentadas**. Dali em diante toda
+repintura daquelas regiões — inclusive a do hover — mostra o `background_color` da janela
+(`#0D1117`), que é o preto que o operador via. Assinatura no `debug.log`: **6028** ocorrências de
+`SharedImageManager::ProduceMemory: Trying to Produce a Memory representation from a non-existent
+mailbox`, presentes **desde 21/08 em execuções de dev** — não é regressão do instalador, e reproduz
+igual rodando do fonte quando o primeiro render é pesado o bastante.
+
+**Correção:** `WindowChromeController.force_repaint()` — um ciclo `SW_RESTORE` → `SW_MAXIMIZE`
+agendado para `FIRST_PAINT_REPAINT_DELAY` (8 s) depois do `loaded`. É exatamente o que o operador
+fazia à mão. A janela **continua nascendo maximizada**, então o `fitToEvent` roda no viewport final
+e o zoom no evento não regride. Verificado no `.exe` compilado: baseline falhou 4/4 aberturas, com o
+fix 3/3 limpas.
+
+**Alternativas descartadas por medição, não por opinião:**
+
+1. `--disable-gpu-compositing`: melhora muito, mas **sobra** um retângulo preto no topo.
+2. `--disable-gpu`: **pior** que o baseline (preto no topo + faixa grande no mapa).
+3. `--disable-features=CalculateNativeWinOcclusion` (o suspeito clássico): **não muda nada**.
+4. Invalidação por JS (toggle de `opacity`, de `display`): não resolve — a falha é da superfície do
+   WebView2, não da árvore de layout da página.
+5. Redimensionar o HWND filho do WebView2 direto por `SetWindowPos`: **piora**, briga com o layout
+   do WinForms.
+6. Abrir restaurada e maximizar depois do boot: conserta a pintura, mas o `fitToEvent` já rodou no
+   viewport menor e o mapa abre mostrando a região metropolitana inteira em vez do evento.
+
+**Regras:**
+
+1. **Sintoma visual não é sintoma de empacotamento.** Antes de suspeitar do build, compare o hash
+   do `frontend/` empacotado com o do fonte e leia o `self-test` — foram 2 comandos que eliminaram
+   toda a hipótese de instalador quebrado.
+2. **"Passar o mouse deixa preto" = superfície do compositor, não CSS.** Região que ao repintar
+   mostra o `background_color` da janela é camada não apresentada; nenhuma invalidação por JS
+   resolve isso, só um redimensionamento real do host.
+3. **O harness de teste não pode tocar no que ele mede.** O script de captura chamava
+   `ShowWindow(SW_MAXIMIZE)` antes do screenshot: ele era a "correção" que eu achava estar
+   verificando, e três resultados "bons" seguidos eram do próprio script. Capturar estado sempre
+   com `IsZoomed`/`GetWindowRect` e **nunca** com uma chamada que muda esse estado.
+4. **Instância concorrente contamina medição.** Várias instâncias compartilham o perfil WebView2
+   (`storage_path`) e chegam a servir o frontend uma da outra pelo servidor HTTP do pywebview — o
+   app de teste carregava o `index.html` de outro processo, com o `?v=` antigo, e nenhuma alteração
+   de frontend fazia efeito. Testar sempre com `SMARTEVENTS_DATA_DIR` isolado e sem outra instância
+   aberta.
