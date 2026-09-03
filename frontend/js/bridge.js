@@ -76,6 +76,7 @@ const _kpiTechnologyScenario = new URLSearchParams(window.location.search).get("
 // Visão geral: "empty" devolve a janela sem nenhuma coleta, para exercitar a
 // distinção do B6 entre "sem dados" e "sem tráfego".
 const _kpiOverviewScenario = new URLSearchParams(window.location.search).get("kpiOverview") || "default";
+const _kpiChartScenario = new URLSearchParams(window.location.search).get("kpiChart") || "default";
 const _vipErrorOnceSeen = new Set(); // nomes de VIP já vistos pelo cenário error_once
 let _vpnProbeCount = 0;
 let _eventActivated = false;
@@ -436,12 +437,26 @@ const _mock = {
         ? [family]
         : [...new Set(siteCells.map(c => c.family).filter(Boolean))];
       const techs = families.length ? families : ["4G"];
-      const series = techs.map((tech, i) => ({
+      let series = techs.map((tech, i) => ({
         technology: tech, labels, values: makeValues(40 + i * 18, 0.18 + i * 0.04),
       }));
+      const reasons = Object.fromEntries(techs.map(tech => [tech, "ok"]));
+      if (_kpiChartScenario === "sparse" && !family && techs.includes("5G")) {
+        const isolated = Math.max(1, Math.floor(labels.length / 4));
+        series = series.map(item => item.technology === "5G"
+          ? { ...item, values: labels.map((_, index) => index === isolated ? 61 : null) }
+          : item);
+      }
+      if (_kpiChartScenario === "missing" && !family && techs.includes("5G")) {
+        series = series.filter(item => item.technology !== "5G");
+        reasons["5G"] = "no_data";
+      }
+      if (_kpiChartScenario === "unknown" && !family) {
+        series.push({ technology: null, labels, values: makeValues(72, 0.1) });
+      }
       return {
         ok: true, labels, values: series.length === 1 ? series[0].values : [],
-        series, cells_data: {}, gaps, thresholds,
+        series, cells_data: {}, gaps, thresholds, reasons,
       };
     }
 

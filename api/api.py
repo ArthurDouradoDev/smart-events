@@ -1546,7 +1546,7 @@ class Api:
                 for row in rows:
                     if str(row.get("cell_id")) not in wanted or row.get("value") is None:
                         continue
-                    family = self._cell_technology_family(row.get("cell_id"))
+                    family = self._row_technology_family(row)
                     if technology_family and family and family != technology_family:
                         continue
                     family = family or technology_family or "unknown"
@@ -1585,13 +1585,15 @@ class Api:
                 if not raw:
                     combined = {}
                     for r in db.get_kpi_series(event_id, member_id, "utilization_dl", minutes):
-                        combined[(r["cell_id"], r["timestamp"])] = r["value"]
+                        key = (r["cell_id"], r["timestamp"], r.get("technology"))
+                        combined[key] = r["value"]
                     for r in db.get_kpi_series(event_id, member_id, "utilization_ul", minutes):
-                        key = (r["cell_id"], r["timestamp"])
+                        key = (r["cell_id"], r["timestamp"], r.get("technology"))
                         combined[key] = max(combined[key], r["value"]) if key in combined else r["value"]
                     raw = [
-                        {"cell_id": cell, "timestamp": ts, "value": val, "site_id": member_id}
-                        for (cell, ts), val in combined.items()
+                        {"cell_id": cell, "timestamp": ts, "value": val,
+                         "site_id": member_id, "technology": technology}
+                        for (cell, ts, technology), val in combined.items()
                     ]
                 rows.extend(raw)
             else:
@@ -1606,12 +1608,20 @@ class Api:
         }
         return {cid: [cell_ts_vals.get((cid, ts)) for ts in labels] for cid in cell_ids}
 
+    @classmethod
+    def _row_technology_family(cls, row: dict) -> str | None:
+        """Família autoritativa da linha, com fallback só para legado vazio."""
+        technology = row.get("technology")
+        if technology not in (None, ""):
+            return cls._technology_family(technology)
+        return cls._cell_technology_family(row.get("cell_id"))
+
     def _filter_cell_rows_for_family(self, rows: list, family: str | None) -> list:
         if not family:
             return list(rows)
         return [
             row for row in rows
-            if self._cell_technology_family(row.get("cell_id")) in (family, None)
+            if self._row_technology_family(row) in (family, None)
         ]
 
     def _average_series_by_family(self, rows: list) -> list[dict]:
@@ -1619,7 +1629,7 @@ class Api:
         for row in rows:
             if row.get("value") is None:
                 continue
-            family = self._cell_technology_family(row.get("cell_id")) or "unknown"
+            family = self._row_technology_family(row) or "unknown"
             by_family.setdefault(family, {}).setdefault(row["timestamp"], []).append(row["value"])
         series = []
         for family in sorted(by_family, key=lambda item: (item == "unknown", item)):
@@ -1632,6 +1642,51 @@ class Api:
                 "values": values,
             })
         return series
+
+    @staticmethod
+    def _expected_series_families(site: dict | None,
+                                  requested_family: str | None = None) -> list[str]:
+        if requested_family in ("4G", "5G"):
+            return [requested_family]
+        families = list((site or {}).get("tech_families") or [])
+        if not families:
+            families = [
+                member.get("family") for member in (site or {}).get("members") or []
+                if member.get("family")
+            ]
+        return [family for family in dict.fromkeys(families) if family in ("4G", "5G")]
+
+    @classmethod
+    def _attach_series_reasons(cls, result: dict, expected_families: list[str],
+                               collection_rows: list[dict],
+                               metric_rows: list[dict] | None = None) -> dict:
+        """Acrescenta o motivo por família sem omitir séries realmente esperadas."""
+        series_by_family = {
+            item.get("technology"): item for item in (result.get("series") or [])
+        }
+        collected_families = {
+            family for row in (collection_rows or [])
+            if (family := cls._row_technology_family(row)) in ("4G", "5G")
+        }
+        metric_families = {
+            family for row in (metric_rows or []) if row.get("value") is not None
+            if (family := cls._row_technology_family(row)) in ("4G", "5G")
+        }
+        expected = list(dict.fromkeys(
+            [family for family in (expected_families or []) if family in ("4G", "5G")]
+            + [family for family in series_by_family if family in ("4G", "5G")]
+        ))
+        result["reasons"] = {
+            family: (
+                "ok" if family in metric_families or any(
+                    value is not None
+                    for value in (series_by_family.get(family) or {}).get("values", []))
+                else "no_traffic" if family in collected_families
+                else "no_data"
+            )
+            for family in expected
+        }
+        return result
 
     def _kpi_series_for_one_site(self, event_id: str, site_id: str, metric: str,
                                  minutes: int, cell_id: str, technology: str | None) -> dict:
@@ -1715,6 +1770,7 @@ class Api:
                         "ok": True, "labels": [], "values": [], "series": [],
                         "cells_data": {}, "gaps": [],
                         "thresholds": self._metric_thresholds(event_id, metric),
+                        "reasons": {},
                     }
                 site_id = owner["id"]
                 cell_id = scope_id
@@ -1727,18 +1783,29 @@ class Api:
                     return {
                         "ok": True, "labels": [], "values": [], "series": [],
                         "cells_data": {}, "gaps": [], "thresholds": thresholds,
+                        "reasons": {},
                     }
                 selections = self._cluster_raw_selections(cluster, merged, config)
                 series = self._cluster_series_by_family(
                     event_id, selections, metric, minutes, technology, family)
+                selected_ids = [selection["site_id"] for selection in selections]
+                member_index = self._index_original_to_merged(merged)
+                expected_families = (
+                    [family] if family else [
+                        member_index.get(site_id, (None, None))[1]
+                        for site_id in selected_ids
+                    ]
+                )
+                collection_rows = db.get_kpi_collection_rows(
+                    event_id, selected_ids, minutes)
                 if not series:
-                    return {
+                    return self._attach_series_reasons({
                         "ok": True, "labels": [], "values": [], "series": [],
                         "cells_data": {}, "gaps": [], "thresholds": thresholds,
-                    }
+                    }, expected_families, collection_rows)
                 aligned, common = self._align_kpi_series(series)
                 axis = aligned[0]["labels"] if len(aligned) == 1 else common
-                return {
+                return self._attach_series_reasons({
                     "ok": True,
                     "labels": axis,
                     "values": aligned[0]["values"] if len(aligned) == 1 else [],
@@ -1746,7 +1813,7 @@ class Api:
                     "cells_data": {},
                     "gaps": self._detect_gaps(axis, max_gap_seconds=90),
                     "thresholds": thresholds,
-                }
+                }, expected_families, collection_rows)
 
             if scope == "site_carrier":
                 family = technology_family if technology_family in ("4G", "5G") else None
@@ -1758,14 +1825,24 @@ class Api:
                 )
                 series = self._cluster_series_by_family(
                     event_id, selections, metric, minutes, technology, family)
+                selected_ids = [selection["site_id"] for selection in selections]
+                member_index = self._index_original_to_merged(merged)
+                expected_families = (
+                    [family] if family else [
+                        member_index.get(site_id, (None, None))[1]
+                        for site_id in selected_ids
+                    ]
+                )
+                collection_rows = db.get_kpi_collection_rows(
+                    event_id, selected_ids, minutes)
                 if not series:
-                    return {
+                    return self._attach_series_reasons({
                         "ok": True, "labels": [], "values": [], "series": [],
                         "cells_data": {}, "gaps": [], "thresholds": thresholds,
-                    }
+                    }, expected_families, collection_rows)
                 aligned, common = self._align_kpi_series(series)
                 axis = aligned[0]["labels"] if len(aligned) == 1 else common
-                return {
+                return self._attach_series_reasons({
                     "ok": True,
                     "labels": axis,
                     "values": aligned[0]["values"] if len(aligned) == 1 else [],
@@ -1773,7 +1850,7 @@ class Api:
                     "cells_data": {},
                     "gaps": self._detect_gaps(axis, max_gap_seconds=90),
                     "thresholds": thresholds,
-                }
+                }, expected_families, collection_rows)
 
             site = self._find_merged_site(merged, site_id)
             members = list((site or {}).get("members") or [{"site_id": site_id, "family": None}])
@@ -1787,8 +1864,8 @@ class Api:
                 owner = self._owner_site_id_for_cell(site, cell_id, members[0]["site_id"])
                 result = self._kpi_series_for_one_site(
                     event_id, owner, metric, minutes, cell_id, technology)
+                cell_family = family
                 if result.get("ok"):
-                    cell_family = family
                     if site:
                         for cell in site.get("cells") or []:
                             cid = cell if isinstance(cell, str) else cell.get("id")
@@ -1802,12 +1879,18 @@ class Api:
                         "labels": result.get("labels") or [],
                         "values": result.get("values") or [],
                     }]
-                return result
+                return self._attach_series_reasons(
+                    result,
+                    [cell_family] if cell_family in ("4G", "5G") else [],
+                    db.get_kpi_collection_rows(event_id, [owner], minutes),
+                )
 
             member_ids = self._member_ids_for_family(members, family) or [site_id]
             cell_rows = self._filter_cell_rows_for_family(
                 self._collect_cell_rows(event_id, member_ids, metric, minutes), family)
             thresholds = self._metric_thresholds(event_id, metric)
+            expected_families = self._expected_series_families(site, family)
+            collection_rows = db.get_kpi_collection_rows(event_id, member_ids, minutes)
 
             if cell_id == "__media__":
                 series = self._average_series_by_family(cell_rows)
@@ -1815,13 +1898,13 @@ class Api:
                     series = self._site_series_by_family(
                         event_id, member_ids, metric, minutes, technology, family)
                 if not series:
-                    return {
+                    return self._attach_series_reasons({
                         "ok": True, "labels": [], "values": [], "series": [],
                         "cells_data": {}, "gaps": [], "thresholds": thresholds,
-                    }
+                    }, expected_families, collection_rows, cell_rows)
                 aligned, common = self._align_kpi_series(series)
                 axis = aligned[0]["labels"] if len(aligned) == 1 else common
-                return {
+                return self._attach_series_reasons({
                     "ok": True,
                     "labels": axis,
                     "values": aligned[0]["values"] if len(aligned) == 1 else [],
@@ -1829,7 +1912,7 @@ class Api:
                     "cells_data": {},
                     "gaps": self._detect_gaps(axis, max_gap_seconds=90),
                     "thresholds": thresholds,
-                }
+                }, expected_families, collection_rows, cell_rows)
 
             site_series = self._site_series_by_family(
                 event_id, member_ids, metric, minutes, technology, family)
@@ -1850,8 +1933,9 @@ class Api:
                         "labels": result.get("labels") or [],
                         "values": result.get("values") or [],
                     }]
-                return result
-            return {
+                return self._attach_series_reasons(
+                    result, expected_families, collection_rows, cell_rows)
+            return self._attach_series_reasons({
                 "ok": True,
                 "labels": axis,
                 "values": aligned[0]["values"] if len(aligned) == 1 else [],
@@ -1861,10 +1945,11 @@ class Api:
                 "technology": technology,
                 "persisted_site_aggregate": bool(aligned),
                 "thresholds": thresholds,
-            }
+            }, expected_families, collection_rows, cell_rows)
         except Exception as e:
             logger.error(f"get_kpi_series error: {e}")
-            return {"ok": False, "labels": [], "values": [], "series": [], "gaps": []}
+            return {"ok": False, "labels": [], "values": [], "series": [],
+                    "gaps": [], "reasons": {}}
 
     def get_kpi_overview(self, event_id: str, scope: str, scope_id: str,
                          technology_family: str, minutes: int = 60) -> dict:

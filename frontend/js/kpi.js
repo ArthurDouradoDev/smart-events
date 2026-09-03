@@ -77,6 +77,7 @@ const CELL_COLORS = [
 const FAMILY_COLORS = {
   "4G": "#388BFD",
   "5G": "#ab7df6",
+  unknown: "#D29922",
 };
 
 function hexToRgba(hex, alpha) {
@@ -336,8 +337,14 @@ function commonMetricTechnologies(metricId) {
     .map(item => _technologyFamily(item.technology)))].join("/");
 }
 
-function _techFamilyParam() {
-  return State.techFilter === "4G" || State.techFilter === "5G" ? State.techFilter : null;
+function _techFamilyParam(selectedScope = null) {
+  let filter = State.techFilter || "all";
+  if (selectedScope && !_isClusterScope(selectedScope)
+      && !_isClusterCompareScope(selectedScope)) {
+    const site = State.sites.find(item => item.id === selectedScope);
+    filter = _effectiveTechFilter(site);
+  }
+  return filter === "4G" || filter === "5G" ? filter : null;
 }
 
 function _cellFamilyFromId(cellId) {
@@ -890,6 +897,16 @@ async function _loadClusterComparisonData(eventId, metric, minutes, technologyFa
   });
 
   const firstValid = responses.find(({ data }) => data?.ok)?.data;
+  const reasonRank = { ok: 0, no_traffic: 1, no_data: 2 };
+  const reasonFamilies = [...new Set(responses.flatMap(
+    ({ data }) => Object.keys(data?.reasons || {})))];
+  const reasons = Object.fromEntries(reasonFamilies.map(family => {
+    const candidates = responses
+      .filter(({ data }) => data?.ok)
+      .map(({ data }) => data.reasons?.[family] || "no_data");
+    return [family, candidates.sort(
+      (left, right) => reasonRank[left] - reasonRank[right])[0] || "no_data"];
+  }));
   return {
     ok: !!firstValid,
     labels: allLabels,
@@ -898,6 +915,7 @@ async function _loadClusterComparisonData(eventId, metric, minutes, technologyFa
     cells_data: {},
     gaps: [],
     thresholds: firstValid?.thresholds || {},
+    reasons,
   };
 }
 
@@ -916,21 +934,26 @@ async function _refreshChart(arg) {
   const queryWindow = mode === "historical" ? 0 : (timeWindow || 0);
   const data = isClusterComparison
     ? await _loadClusterComparisonData(
-        eventId, selectedMetric, queryWindow, _techFamilyParam())
+        eventId, selectedMetric, queryWindow, _techFamilyParam(selectedSite))
     : isCluster
     ? await API.getKpiSeries(
-        eventId, null, selectedMetric, queryWindow, cellId, _techFamilyParam(),
+        eventId, null, selectedMetric, queryWindow, cellId, _techFamilyParam(selectedSite),
         "cluster", _clusterIdFromScope(selectedSite))
     : await API.getKpiSeries(
-        eventId, selectedSite, selectedMetric, queryWindow, cellId, _techFamilyParam());
+        eventId, selectedSite, selectedMetric, queryWindow, cellId,
+        _techFamilyParam(selectedSite));
   if (requestId !== _chartRequestId) return;
-  if (!data.ok) return;
+  if (!data.ok) {
+    _renderSeriesReasons({});
+    return;
+  }
 
   let labels = data.labels;
   let values = data.values;
   let cellsData = data.cells_data;
   let gaps = data.gaps;
   let techSeries = Array.isArray(data.series) ? data.series : [];
+  _renderSeriesReasons(data.reasons || {});
 
   if (mode === "historical" && historicalTimestamp) {
     const maxTime = new Date(historicalTimestamp).getTime();
@@ -1009,7 +1032,7 @@ async function _refreshChart(arg) {
         backgroundColor: "transparent",
         borderWidth: 2,
         borderDash: item.technology === "5G" ? [7, 4] : [],
-        pointRadius: 0,
+        pointRadius: _seriesPointRadius(item.values || []),
         pointHoverRadius: 4,
         tension: 0.3,
         fill: false,
@@ -1020,14 +1043,16 @@ async function _refreshChart(arg) {
   } else if (useFamilyAverages) {
     labels = techSeries[0].labels || labels;
     techSeries.forEach(item => {
-      const color = FAMILY_COLORS[item.technology] || "#388BFD";
+      const color = FAMILY_COLORS[item.technology || "unknown"];
       datasets.push({
-        label: item.technology ? `Média ${item.technology}` : "Média",
+        label: item.technology
+          ? `Média ${item.technology}`
+          : "Média · tecnologia não identificada",
         data: _applyGaps(item.values || [], gaps),
         borderColor:     color,
         backgroundColor: hexToRgba(color, 0.08),
         borderWidth:     2,
-        pointRadius:     0,
+        pointRadius:     _seriesPointRadius(item.values || []),
         pointHoverRadius:4,
         tension:         0.3,
         fill:            false,
@@ -1051,7 +1076,7 @@ async function _refreshChart(arg) {
         borderColor:     color,
         backgroundColor: hexToRgba(color, 0.02),
         borderWidth:     2,
-        pointRadius:     0,
+        pointRadius:     _seriesPointRadius(adjustedCellValues),
         pointHoverRadius:4,
         tension:         0.3,
         fill:            false,
@@ -1067,7 +1092,7 @@ async function _refreshChart(arg) {
       borderColor:     "#388BFD",
       backgroundColor: "rgba(56,139,253,0.08)",
       borderWidth:     2,
-      pointRadius:     0,
+      pointRadius:     _seriesPointRadius(adjustedValues),
       pointHoverRadius:4,
       tension:         0.3,
       fill:            true,
@@ -1154,6 +1179,31 @@ async function _refreshChart(arg) {
 }
 
 // ── Helpers ───────────────────────────────────────────────────────
+
+function _seriesPointRadius(values) {
+  const present = (values || [])
+    .map((value, index) => value == null ? -1 : index)
+    .filter(index => index >= 0);
+  if (!present.length) return 0;
+  if (present.length <= 3) return 3;
+  const last = (values || []).length - 1;
+  const hasIsolatedPoint = present.some(index =>
+    (index === 0 || values[index - 1] == null)
+    && (index === last || values[index + 1] == null));
+  return hasIsolatedPoint ? 3 : 0;
+}
+
+function _renderSeriesReasons(reasons) {
+  const note = document.getElementById("chart-series-note");
+  if (!note) return;
+  const messages = Object.entries(reasons || {}).flatMap(([family, reason]) => {
+    if (reason === "no_data") return [`${family} sem dado nesta métrica`];
+    if (reason === "no_traffic") return [`${family} sem tráfego no período`];
+    return [];
+  });
+  note.textContent = messages.join(" · ");
+  note.classList.toggle("hidden", messages.length === 0);
+}
 
 function _applyGaps(values, gaps) {
   if (!gaps?.length) return values;

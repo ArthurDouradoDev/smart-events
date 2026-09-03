@@ -830,6 +830,33 @@ def get_latest_site_kpi_by_metric(event_id: str, metric: str, max_timestamp: Opt
     return _canonical(rows, metric)
 
 
+def get_kpi_collection_rows(event_id: str, site_ids: List[str],
+                            minutes: int = 60) -> List[dict]:
+    """Famílias/células que tiveram qualquer coleta na janela pedida.
+
+    O gráfico usa esta leitura para diferenciar uma métrica indefinida em um
+    ciclo que existiu (``no_traffic``) de uma família sem coleta alguma
+    (``no_data``). ``DISTINCT`` mantém o payload pequeno e evita consultar o
+    catálogo inteiro de métricas apenas para descobrir se houve coleta.
+    """
+    ids = list(dict.fromkeys(str(site_id) for site_id in (site_ids or []) if site_id))
+    if not ids:
+        return []
+    placeholders = ",".join("?" for _ in ids)
+    conditions = ["event_id = ?", f"site_id IN ({placeholders})"]
+    params: list = [event_id, *ids]
+    if minutes and minutes > 0:
+        conditions.append(
+            "timestamp >= strftime('%Y-%m-%dT%H:%M:%SZ', 'now', ? || ' minutes')")
+        params.append(f"-{minutes}")
+    rows = get_event_conn(event_id).execute(
+        "SELECT DISTINCT cell_id, technology FROM kpi_measurements WHERE "
+        + " AND ".join(conditions),
+        params,
+    ).fetchall()
+    return [dict(row) for row in rows]
+
+
 def get_latest_kpi_by_metric(
     event_id: str,
     metric: str,

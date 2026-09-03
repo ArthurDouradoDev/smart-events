@@ -2320,3 +2320,43 @@ baseline, com a mesma asserção, e foi reproduzida isoladamente. Os cinco teste
 (2 API + 3 Playwright) passaram.
 
 ---
+
+## 2026-09-03 — Fase 4: linha 4G/5G visível e ausência explicada
+
+Implementada por completo a Fase 4 de
+`docs/plans/2026-09-02-004-perf-leitura-dashboard-e-grafico-4g5g-plan.md`.
+
+- **Família autoritativa:** linhas CELL passam por `_row_technology_family`: a coluna persistida
+  `technology` decide 4G/5G; o token do `cell_id` só é consultado quando a coluna está vazia, para
+  compatibilidade com linhas legadas. A mesma regra vale para média, filtro e seleção parcial de
+  cluster. O fallback de `utilization` preserva `technology` ao sintetizar DL/UL.
+- **Razão por família:** `get_kpi_series` devolve `reasons` para as famílias esperadas do site
+  fundido. Uma única consulta `DISTINCT cell_id, technology` verifica se houve qualquer coleta na
+  janela: valor da métrica vira `ok`, coleta sem valor vira `no_traffic`, ausência de coleta vira
+  `no_data`. O caminho de Site completo também considera linhas CELL quando não existe agregado
+  SITE, evitando o falso `no_traffic` encontrado na revisão.
+- **Filtro efetivo:** o gráfico passa o escopo selecionado a `_techFamilyParam`. Site de família
+  única usa `all` quando o seletor está escondido, mesmo que `State.techFilter` ainda guarde a
+  família do site anterior. Cluster/comparação mantém o filtro visível e explícito.
+- **Ponto esparso:** dataset com até três valores ou qualquer ponto isolado recebe marcador de
+  raio 3; `spanGaps: false` foi preservado, portanto nenhum buraco é ligado artificialmente.
+- **Ausência e família desconhecida:** `#chart-series-note` mostra “5G sem dado nesta métrica” ou
+  “5G sem tráfego no período”. Série sem família usa rótulo “tecnologia não identificada” e âmbar
+  `#D29922`, nunca o azul 4G. Razões também são consolidadas na comparação de clusters.
+- **Cache-busting:** CSS, `app.js` e `kpi.js` usam `20260903-kpi-family-r1`.
+
+**Validação real (`rock-in-rio-2026`, janela Evento):** o cadastro tem 1.006 sites fundidos
+marcados com ambas as famílias e **20 com coleta real nas duas**, reproduzindo o universo do
+diagnóstico. No site `RJ9936`, a média retornou accessibility 4G/5G = **173/20 pontos**,
+drop_rate = **173/17** e throughput_dl = **173/140**, todos com razões `ok`/`ok`. O banco atual
+não contém linha `scope='CELL'` 5G coletada com id neutro; o caso futuro `18NLRJPE41A` está coberto
+por teste sintético que prova classificação 5G pela coluna.
+
+**Gates:** baseline pré-edição = **880 passed, 1 failed, 10 skipped**; a falha era
+`test_filtro_de_alarmes_e_alertas_respeita_o_site_selecionado` (espera ERB-07, seleção inicial
+mock é ERB-03), já documentada nas Fases 2 e 3. Gate focal final de API/banco = **55 passed**;
+gate Playwright de gráfico/visão geral/cluster/poll = **47 passed**. Suíte completa final =
+**888 passed, 1 failed, 10 skipped**; a única falha é a mesma do baseline, com a mesma asserção.
+Os oito testes novos da fase (4 API + 4 Playwright) passaram.
+
+---

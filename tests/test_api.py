@@ -837,6 +837,89 @@ class TestSiteMerge:
         assert spsmg7["status"] == "warning"
         assert spsmg7["metric_value"] == 80.0
 
+
+class TestKpiSeriesFamilySemantics:
+    """Fase 4: família autoritativa, fallback legado e motivo de ausência."""
+
+    def test_serie_usa_a_coluna_technology_e_nao_o_nome(self, api, sample_event):
+        event = _twin_sites_event(sample_event, "series-family-column")
+        database.save_event(event)
+        _insert_cell_kpi(
+            event["id"], "1774059", "18NLRJPE41A", "5G_NRDUCELL", 47.0)
+
+        result = api.get_kpi_series(
+            event["id"], "SPSMG7", "utilization_dl", minutes=0,
+            cell_id="__media__")
+
+        by_family = {item["technology"]: item for item in result["series"]}
+        assert by_family["5G"]["values"] == [47.0]
+
+    def test_nome_da_celula_ainda_resolve_linha_legada(self, api, sample_event):
+        event = _twin_sites_event(sample_event, "series-family-legacy")
+        database.save_event(event)
+        _insert_cell_kpi(
+            event["id"], "1774059", "5G-SPSMG7-LEGACY", "", 53.0)
+
+        result = api.get_kpi_series(
+            event["id"], "SPSMG7", "utilization_dl", minutes=0,
+            cell_id="__media__")
+
+        by_family = {item["technology"]: item for item in result["series"]}
+        assert by_family["5G"]["values"] == [53.0]
+
+    def test_utilization_combinada_preserva_technology(self, api, sample_event):
+        event = _twin_sites_event(sample_event, "series-utilization-family")
+        database.save_event(event)
+        _insert_cell_kpi(
+            event["id"], "1774059", "18NLRJPE41A", "5G_NRDUCELL", 31.0,
+            metric="utilization_dl")
+        _insert_cell_kpi(
+            event["id"], "1774059", "18NLRJPE41A", "5G_NRDUCELL", 44.0,
+            metric="utilization_ul")
+
+        rows = api._collect_cell_rows(
+            event["id"], ["1774059"], "utilization", minutes=0)
+
+        assert rows == [{
+            "cell_id": "18NLRJPE41A",
+            "timestamp": "2026-08-19T12:00:00Z",
+            "value": 44.0,
+            "site_id": "1774059",
+            "technology": "5G_NRDUCELL",
+        }]
+
+    def test_reasons_distingue_sem_coleta_de_sem_trafego(
+            self, api, sample_event):
+        event = _twin_sites_event(sample_event, "series-family-reasons")
+        database.save_event(event)
+        _insert_cell_kpi(
+            event["id"], "725483", "4G-SPSMG7-0", "4G", 98.0,
+            metric="accessibility")
+        # A família 5G foi coletada na janela, mas accessibility ficou sem
+        # linha/valor: é ausência de tráfego, não ausência de coleta.
+        _insert_site_kpi(
+            event["id"], "1774059", "5G_NRDUCELL", 12.0,
+            metric="user_count")
+
+        result = api.get_kpi_series(
+            event["id"], "SPSMG7", "accessibility", minutes=0,
+            cell_id="__media__")
+        assert result["reasons"] == {"4G": "ok", "5G": "no_traffic"}
+
+        complete = api.get_kpi_series(
+            event["id"], "SPSMG7", "accessibility", minutes=0,
+            cell_id="__all__")
+        assert complete["reasons"] == {"4G": "ok", "5G": "no_traffic"}
+
+        empty = _twin_sites_event(sample_event, "series-family-no-data")
+        database.save_event(empty)
+        no_data = api.get_kpi_series(
+            empty["id"], "SPSMG7", "accessibility", minutes=0,
+            cell_id="__media__")
+        assert no_data["reasons"] == {"4G": "no_data", "5G": "no_data"}
+
+
+class TestMergedSiteSeries:
     def test_serie_do_site_fundido_traz_uma_entrada_por_tecnologia(
             self, api, sample_event):
         event = _twin_sites_event(sample_event, "twin-series")

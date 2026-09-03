@@ -1210,3 +1210,26 @@ expectativa foi corrigida e o teste passou.
 (`>=`), não inferir a faixa pelo nome do nível.
 
 ---
+
+## 2026-09-03 — Armadilhas da Fase 4 do gráfico 4G/5G
+
+**SQL multilinha dentro de `python -c` foi interpretado pelo PowerShell.** A primeira checagem no
+banco real embutiu uma expressão SQL com parênteses dentro de aspas inadequadas para PowerShell;
+`UPPER(cell_id)` virou uma tentativa de executar `cell_id` como comando. O Python nem iniciou e o
+banco não foi aberto. A validação foi repetida por um script temporário com `sys.path` explícito e
+o script foi removido ao final.
+
+**Regra:** diagnóstico Python com SQL não trivial no Windows deve usar um arquivo temporário criado
+por patch, não uma cadeia `python -c` com camadas concorrentes de aspas. Scripts em subdiretório
+devem inserir a raiz do repositório no `sys.path`, conforme a regra já registrada na Fase 2.
+
+**Patch textual amplo alcançou o ramo errado.** Ao acrescentar `metric_rows` às razões, uma troca
+por texto também passou `cell_rows` nos ramos de cluster/site-carrier, antes de essa variável
+existir. A inspeção imediata de todas as chamadas de `_attach_series_reasons` encontrou o erro
+antes do gate; o patch foi refeito com contexto de ramo e o teste de Site completo foi ampliado.
+
+**Regra:** ao alterar argumentos repetidos em vários retornos, listar todas as ocorrências depois
+do patch e conferir o escopo de cada variável; não confiar em substituição textual por igualdade
+de linha quando a função possui vários ramos paralelos.
+
+---
