@@ -2174,3 +2174,42 @@ ERRORS.md (entrada de 2026-09-02).
 
 **Verificação:** `.exe` compilado, perfil de dados isolado — baseline falhou 4/4 aberturas, com o
 fix 3/3 limpas. Suíte: 855 passed, 10 skipped.
+
+---
+
+## 2026-09-02 — Fase 1: view indexada por versão do cadastro
+
+Implementada a Fase 1 de
+`docs/plans/2026-09-02-004-perf-leitura-dashboard-e-grafico-4g5g-plan.md`, sem mudança de
+interface ou contrato JSON.
+
+- `core/database.py::get_event` calcula SHA-1 do `config_json` cru, memoiza o parse por
+  `(event_id, digest)` e devolve cópia rasa com `_config_digest`. O cache LRU retém duas versões.
+  `save_event` nunca persiste a chave interna e `close_conn` limpa o cache.
+- `api/api.py::_EventView` retém, pela mesma chave de versão, sites fundidos, clusters e índices
+  `by_site_id`, `by_cell_id`, `identity_exact` e `identity_fuzzy`. O cache da `Api` também retém
+  duas versões. As fachadas `_merged_sites`, `_find_merged_site`, `_find_site_for_cell`,
+  `_cluster_merged_site_ids`, `_clusters_of` e `_resolve_site_for_source` mantêm as assinaturas
+  usadas pelos consumidores.
+- `_resolve_site_for_source` consulta igualdade em O(1) e só percorre a lista fuzzy pré-montada
+  para prefixo/substring. `_earfcn_clusters` resolve `_single_configured_family` uma vez por
+  cadastro, não por célula.
+- `activate_event` e `set_alarm_filter` copiam `oss` antes de alterar, porque o retorno de
+  `get_event` compartilha estruturas internas somente para leitura com o cache.
+
+**Medição real (`rock-in-rio-2026`, 2.479 sites crus / 1.454 fundidos / 50 clusters / banco de
+228 MB):** baseline documentado no plano: `get_sites` 39–48 s, `get_clusters` 44 s,
+`get_alarms` 19 s. Depois da fase, em processo aquecido: **2,84 s / 0,12 s / 0,20 s**. A primeira
+chamada de `get_sites` levou 15,48 s porque ainda pagou a migração de schema por abertura, resíduo
+explicitamente reservado para a Fase 2.
+
+**Paridade no dado real:** comparação exaustiva contra cópias das buscas lineares antigas passou
+para 1.454 sites, todas as 24.086 células, 50 clusters e 500 alarmes; nenhum id/owner mudou.
+
+**Testes:** baseline antes de editar: 853 passed, 10 skipped, 3 falhas Playwright preexistentes
+(filtro de alarmes e dois testes do mapa de cadastro). Gate focalizado depois: **169 passed**
+(`test_api`, `test_database`, `test_alarms`). Suíte completa depois: **861 passed, 10 skipped,
+4 falhas Playwright**; as três do baseline repetiram e um terceiro teste do mesmo mapa encontrou o
+zoom inicial já no máximo. No rerun isolado, dois testes de mapa que falharam na suíte passaram,
+confirmando instabilidade do módulo não tocado; ficaram 9 passed / 2 failures (filtro preexistente
+e botão `+` desabilitado no zoom máximo). Nenhuma falha ocorreu nos arquivos/caminhos alterados.

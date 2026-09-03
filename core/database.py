@@ -1,8 +1,10 @@
 import logging
 import sqlite3
 import json
+import hashlib
 import threading
 import sys
+from collections import OrderedDict
 from pathlib import Path
 from typing import List, Optional
 from datetime import datetime
@@ -35,6 +37,13 @@ _local = threading.local()
 _db_init_lock = threading.Lock()
 _initialized_global_dbs: set[Path] = set()
 _initialized_event_dbs: set[Path] = set()
+
+# Configurações grandes são imutáveis entre gravações. O digest do JSON cru
+# identifica a versão sem exigir coluna de schema nem repetir o json.loads em
+# cada poll. Duas entradas cobrem o evento atual e o anterior.
+_EVENT_CONFIG_CACHE_LIMIT = 2
+_event_config_cache: OrderedDict[tuple[str, str], dict] = OrderedDict()
+_event_config_cache_lock = threading.RLock()
 
 _requests_lib = None
 def _get_requests():
@@ -225,6 +234,8 @@ def close_conn():
             except Exception:
                 pass
         setattr(_event_local, attr, None)
+    with _event_config_cache_lock:
+        _event_config_cache.clear()
 
 
 def init_db():
@@ -374,6 +385,8 @@ def init_db():
 def save_event(config_dict: dict):
     conn = get_conn()
     event_id = config_dict["id"]
+    stored_config = dict(config_dict)
+    stored_config.pop("_config_digest", None)
     conn.execute("""
         INSERT OR REPLACE INTO events
             (id, name, status, start_time, end_time, polygon, config_json)
@@ -385,7 +398,7 @@ def save_event(config_dict: dict):
         config_dict.get("start_time"),
         config_dict.get("end_time"),
         json.dumps(config_dict.get("polygon", [])),
-        json.dumps(config_dict),
+        json.dumps(stored_config),
     ))
     conn.commit()
     
@@ -525,8 +538,25 @@ def get_event(event_id: str) -> Optional[dict]:
     ).fetchone()
     if row:
         try:
-            config = json.loads(row["config_json"])
+            raw_config = row["config_json"]
+            digest = hashlib.sha1(raw_config.encode("utf-8")).hexdigest()
+            cache_key = (event_id, digest)
+            with _event_config_cache_lock:
+                cached = _event_config_cache.get(cache_key)
+                if cached is None:
+                    cached = json.loads(raw_config)
+                    _event_config_cache[cache_key] = cached
+                    while len(_event_config_cache) > _EVENT_CONFIG_CACHE_LIMIT:
+                        _event_config_cache.popitem(last=False)
+                else:
+                    _event_config_cache.move_to_end(cache_key)
+
+            # activate_event altera ``status`` no retorno. A cópia rasa impede
+            # que essa escrita contamine a configuração memoizada; as coleções
+            # internas são compartilhadas e tratadas como somente leitura.
+            config = dict(cached)
             config["status"] = row["status"]
+            config["_config_digest"] = digest
             return config
         except Exception:
             pass

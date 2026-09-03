@@ -10,6 +10,8 @@ import os
 import re
 import subprocess
 import threading
+from collections import OrderedDict
+from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 from typing import Optional
@@ -59,6 +61,18 @@ _EARFCN_CLUSTER_COLORS = (
 _REASON_RANK = {"ok": 0, "no_traffic": 1, "no_data": 2}
 
 
+@dataclass(frozen=True)
+class _EventView:
+    """Estruturas derivadas e indexadas de uma versão do cadastro."""
+
+    sites: list[dict]
+    by_site_id: dict[str, dict]
+    by_cell_id: dict[str, dict]
+    identity_exact: dict[str, tuple[str, str]]
+    identity_fuzzy: list[tuple[str, str, str]]
+    clusters: list[dict]
+
+
 def _overview_reasons(labels: list, metrics: dict) -> dict:
     """B6 — por que um painel esta vazio: falta de coleta ou falta de trafego.
 
@@ -93,6 +107,8 @@ class Api:
         # Uma leitura transitoriamente bloqueada nunca deve ser traduzida para
         # "o evento não tem sites", pois o frontend removeria todos do mapa.
         self._sites_cache: dict[str, list] = {}
+        self._event_views: OrderedDict[tuple[str, str], _EventView] = OrderedDict()
+        self._event_view_lock = threading.RLock()
 
     # ── Ciclo de vida do evento ──────────────────────────────────────
 
@@ -131,7 +147,7 @@ class Api:
             if not config:
                 return {"ok": False, "error": "Evento não encontrado"}
 
-            oss = config.get("oss", {}) or {}
+            oss = dict(config.get("oss", {}) or {})
 
             # Evento legado sem cliente: o operador escolheu um no modal — fixa e persiste.
             if cliente:
@@ -636,7 +652,7 @@ class Api:
         }
 
     @classmethod
-    def _merged_sites(cls, config: dict) -> list[dict]:
+    def _build_merged_sites(cls, config: dict) -> list[dict]:
         """Única fonte de fusão 4G/5G: todo nome normalizado igual é unificado."""
         raw_sites = list((config or {}).get("sites") or [])
         by_name: dict[str, list[dict]] = {}
@@ -681,20 +697,90 @@ class Api:
         return result
 
     @classmethod
-    def _find_merged_site(cls, merged: list[dict], site_id: str) -> dict | None:
+    def _view_from_parts(cls, sites: list[dict], clusters: list[dict]) -> _EventView:
+        by_site_id: dict[str, dict] = {}
+        by_cell_id: dict[str, dict] = {}
+        identity_exact: dict[str, tuple[str, str]] = {}
+        identity_fuzzy: list[tuple[str, str, str]] = []
+        fuzzy_seen: set[tuple[str, str]] = set()
+
+        for site in sites:
+            site_id = str(site.get("id") or "")
+            site_name = str(site.get("name") or "")
+            if site_id:
+                by_site_id.setdefault(site_id, site)
+            for member in site.get("members") or []:
+                member_id = str(member.get("site_id") or "")
+                if member_id:
+                    by_site_id.setdefault(member_id, site)
+            for cell in site.get("cells") or []:
+                cell_id = cell if isinstance(cell, str) else cell.get("id")
+                if cell_id:
+                    by_cell_id.setdefault(str(cell_id).upper(), site)
+
+            for key in cls._site_identity_keys(site):
+                key_upper = str(key).upper()
+                if not key_upper:
+                    continue
+                identity_exact.setdefault(key_upper, (site_id, site_name))
+                fuzzy_key = (key_upper, site_id)
+                if fuzzy_key not in fuzzy_seen:
+                    fuzzy_seen.add(fuzzy_key)
+                    identity_fuzzy.append((key_upper, site_id, site_name))
+
+        identity_fuzzy.sort(key=lambda item: len(item[0]), reverse=True)
+        return _EventView(
+            sites=sites,
+            by_site_id=by_site_id,
+            by_cell_id=by_cell_id,
+            identity_exact=identity_exact,
+            identity_fuzzy=identity_fuzzy,
+            clusters=clusters,
+        )
+
+    def _event_view(self, config: dict) -> _EventView:
+        event_id = str((config or {}).get("id") or "")
+        digest = str((config or {}).get("_config_digest") or "")
+        cache_key = (event_id, digest)
+
+        # Configurações vindas do banco sempre possuem digest. Um fallback em
+        # memória sem versão continua correto, mas não é retido no cache.
+        if not event_id or not digest:
+            sites = self._build_merged_sites(config)
+            return self._view_from_parts(sites, self._build_clusters(config))
+
+        with self._event_view_lock:
+            cached = self._event_views.get(cache_key)
+            if cached is not None:
+                self._event_views.move_to_end(cache_key)
+                return cached
+
+            sites = self._build_merged_sites(config)
+            view = self._view_from_parts(sites, self._build_clusters(config))
+            self._event_views[cache_key] = view
+            while len(self._event_views) > 2:
+                self._event_views.popitem(last=False)
+            return view
+
+    def _view_for_sites(self, sites: list[dict]) -> _EventView:
+        with self._event_view_lock:
+            for view in self._event_views.values():
+                if view.sites is sites:
+                    return view
+        return self._view_from_parts(sites, [])
+
+    def _merged_sites(self, config: dict) -> list[dict]:
+        return self._event_view(config).sites
+
+    def _find_merged_site(self, merged: list[dict], site_id: str) -> dict | None:
         if not site_id:
             return None
-        for site in merged:
-            if site["id"] == site_id:
-                return site
-            if any(member.get("site_id") == site_id for member in site.get("members") or []):
-                return site
-        return None
+        return self._view_for_sites(merged).by_site_id.get(str(site_id))
 
-    @classmethod
-    def _cluster_merged_site_ids(cls, cluster: dict, merged: list[dict]) -> list[str]:
+    def _cluster_merged_site_ids(self, cluster: dict, merged: list[dict]) -> list[str]:
         """Resolve membros antigos e granulares para ids físicos fundidos únicos."""
         seen: list[str] = []
+        by_site_id = self._view_for_sites(merged).by_site_id
         stored_ids = list(cluster.get("site_ids") or [])
         stored_ids.extend(
             member.get("site_id")
@@ -702,15 +788,14 @@ class Api:
             if member.get("site_id")
         )
         for raw_id in stored_ids:
-            site = cls._find_merged_site(merged, raw_id)
+            site = by_site_id.get(str(raw_id))
             merged_id = site["id"] if site else raw_id
             if merged_id not in seen:
                 seen.append(merged_id)
         return seen
 
-    @classmethod
     def _cluster_raw_selections(
-            cls, cluster: dict, merged: list[dict], config: dict) -> list[dict]:
+            self, cluster: dict, merged: list[dict], config: dict) -> list[dict]:
         """Expande um cluster para sites crus e células selecionadas.
 
         ``cell_ids=None`` significa site inteiro. Clusters legados, que possuem
@@ -749,7 +834,7 @@ class Api:
             if stored_id in raw_sites:
                 _add(stored_id, cell_ids, all_cells)
                 return
-            merged_site = cls._find_merged_site(merged, stored_id)
+            merged_site = self._find_merged_site(merged, stored_id)
             targets = list((merged_site or {}).get("members") or [])
             if not targets:
                 _add(stored_id, cell_ids, all_cells)
@@ -784,7 +869,7 @@ class Api:
             for site_id in cluster.get("site_ids") or []:
                 # Contrato legado da Fase 1: um id cru de qualquer gêmeo 4G/5G
                 # representava o site físico fundido inteiro.
-                merged_site = cls._find_merged_site(merged, str(site_id))
+                merged_site = self._find_merged_site(merged, str(site_id))
                 targets = list((merged_site or {}).get("members") or [])
                 if targets:
                     for target in targets:
@@ -853,6 +938,7 @@ class Api:
         """
         grouped: dict[str, dict[str, list[str]]] = {}
         families: dict[str, set[str]] = {}
+        configured_family = cls._single_configured_family(config)
         for site in (config or {}).get("sites") or []:
             site_id = site.get("id")
             if site_id is None:
@@ -866,7 +952,7 @@ class Api:
                 if not cell_id:
                     continue
                 grouped.setdefault(earfcn, {}).setdefault(site_id, []).append(str(cell_id))
-                family = cls._cell_technology_family(cell) or cls._single_configured_family(config)
+                family = cls._cell_technology_family(cell) or configured_family
                 if family:
                     families.setdefault(earfcn, set()).add(family)
 
@@ -920,7 +1006,7 @@ class Api:
         return carriers
 
     @classmethod
-    def _clusters_of(cls, config: dict) -> list[dict]:
+    def _build_clusters(cls, config: dict) -> list[dict]:
         """Clusters cadastrados + portadoras geradas a partir do DLEARFCN.
 
         Um cluster salvo com o mesmo id (``earfcn-1276``) ganha da geração
@@ -931,11 +1017,13 @@ class Api:
         extra = [c for c in cls._earfcn_clusters(config) if c["id"] not in seen]
         return configured + extra
 
-    @classmethod
-    def _find_cluster(cls, config: dict, cluster_id: str) -> dict | None:
+    def _clusters_of(self, config: dict) -> list[dict]:
+        return self._event_view(config).clusters
+
+    def _find_cluster(self, config: dict, cluster_id: str) -> dict | None:
         if not cluster_id:
             return None
-        for cluster in cls._clusters_of(config):
+        for cluster in self._clusters_of(config):
             if cluster.get("id") == cluster_id:
                 return cluster
         return None
@@ -1320,9 +1408,8 @@ class Api:
             if member.get("family") in (family, None)
         ]
 
-    @staticmethod
-    def _find_site_for_cell(merged: list[dict], cell_id: str) -> dict | None:
-        """Acha o site fundido dono de uma célula, varrendo o evento inteiro.
+    def _find_site_for_cell(self, merged: list[dict], cell_id: str) -> dict | None:
+        """Acha no índice o site fundido dono de uma célula.
 
         Usado pelo escopo ``scope="cell"`` da Visão Geral, que recebe só o id
         da célula — ao contrário do gráfico do dashboard, que já sabe o site.
@@ -1330,12 +1417,7 @@ class Api:
         wanted = str(cell_id or "").upper()
         if not wanted:
             return None
-        for site in merged:
-            for cell in site.get("cells") or []:
-                cell_key = cell if isinstance(cell, str) else cell.get("id", "")
-                if str(cell_key).upper() == wanted:
-                    return site
-        return None
+        return self._view_for_sites(merged).by_cell_id.get(wanted)
 
     def _owner_site_id_for_cell(self, site: dict | None, cell_id: str, fallback: str) -> str:
         if not site or not cell_id:
@@ -2280,8 +2362,7 @@ class Api:
             return site_label
         return None
 
-    @staticmethod
-    def _resolve_site_for_source(sites: list, source) -> tuple:
+    def _resolve_site_for_source(self, sites: list, source) -> tuple:
         """Casa o `source` do alarme (meName, ex.: SR-UWCTJ1) com um site do evento.
         Match por igualdade/prefixo/substring contra o id fundido, o nome e os membros."""
         if not source:
@@ -2289,14 +2370,15 @@ class Api:
         src = str(source).strip().upper()
         if not src:
             return None, None
-        for site in sites:
-            for key in Api._site_identity_keys(site):
-                key_u = key.upper()
-                if src == key_u or src.startswith(key_u) or key_u in src:
-                    return site.get("id"), site.get("name")
-            s_name_u = (site.get("name") or "").upper()
-            if s_name_u and (s_name_u in src or src in s_name_u):
-                return site.get("id"), site.get("name")
+        view = self._view_for_sites(sites)
+        exact = view.identity_exact.get(src)
+        if exact is not None:
+            return exact
+        for key, site_id, site_name in view.identity_fuzzy:
+            site_name_upper = site_name.upper()
+            if (src.startswith(key) or key in src
+                    or (site_name_upper and src in site_name_upper)):
+                return site_id, site_name
         return None, None
 
     def get_alarm_catalog(self) -> dict:
@@ -2329,7 +2411,7 @@ class Api:
             config = db.get_event(event_id)
             if not config:
                 return {"ok": False, "error": "Evento não encontrado"}
-            oss = config.get("oss", {}) or {}
+            oss = dict(config.get("oss", {}) or {})
             oss["alarm_filter"] = names
             config["oss"] = oss
             db.save_event(config)
@@ -2697,6 +2779,7 @@ class Api:
 
         # Remove config_json se vier do banco
         out.pop("config_json", None)
+        out.pop("_config_digest", None)
         
         # Remove listagens massivas de sites e vips do payload de metadados
         out.pop("sites", None)

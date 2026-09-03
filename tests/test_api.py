@@ -4,6 +4,8 @@ Testes para api/api.py.
 Usa o banco temporário via fixture tmp_db e monkeypatcha o scheduler
 para não subir threads reais.
 """
+import copy
+import time
 from types import SimpleNamespace
 
 import pytest
@@ -468,6 +470,210 @@ def _insert_cell_kpi(event_id, site_id, cell_id, technology, value,
     }])
 
 
+class TestEventViewIndex:
+    @staticmethod
+    def _linear_site(merged, site_id):
+        for site in merged:
+            if site["id"] == site_id:
+                return site
+            if any(member.get("site_id") == site_id
+                   for member in site.get("members") or []):
+                return site
+        return None
+
+    @staticmethod
+    def _linear_cell_owner(merged, cell_id):
+        wanted = str(cell_id or "").upper()
+        for site in merged:
+            for cell in site.get("cells") or []:
+                candidate = cell if isinstance(cell, str) else cell.get("id", "")
+                if str(candidate).upper() == wanted:
+                    return site
+        return None
+
+    @staticmethod
+    def _linear_alarm_site(sites, source):
+        if not source:
+            return None, None
+        src = str(source).strip().upper()
+        if not src:
+            return None, None
+        for site in sites:
+            for key in Api._site_identity_keys(site):
+                key_upper = key.upper()
+                if src == key_upper or src.startswith(key_upper) or key_upper in src:
+                    return site.get("id"), site.get("name")
+            site_name = (site.get("name") or "").upper()
+            if site_name and (site_name in src or src in site_name):
+                return site.get("id"), site.get("name")
+        return None, None
+
+    def test_view_resolve_site_por_id_fundido_e_por_membro(
+            self, api, sample_event):
+        event = _twin_sites_event(sample_event, "view-site-index")
+        database.save_event(event)
+        view = api._event_view(database.get_event(event["id"]))
+
+        for site in view.sites:
+            assert api._find_merged_site(view.sites, site["id"]) is site
+            assert api._find_merged_site(view.sites, site["id"]) is self._linear_site(
+                view.sites, site["id"])
+            for member in site.get("members") or []:
+                member_id = member["site_id"]
+                assert api._find_merged_site(view.sites, member_id) is site
+                assert api._find_merged_site(
+                    view.sites, member_id) is self._linear_site(view.sites, member_id)
+        assert api._find_merged_site(view.sites, "site-inexistente") is None
+
+    def test_view_resolve_celula_para_o_site_dono(self, api, sample_event):
+        event = _twin_sites_event(sample_event, "view-cell-index")
+        database.save_event(event)
+        view = api._event_view(database.get_event(event["id"]))
+
+        for site in view.sites:
+            for cell in site.get("cells") or []:
+                cell_id = cell if isinstance(cell, str) else cell["id"]
+                assert api._find_site_for_cell(
+                    view.sites, cell_id) is self._linear_cell_owner(view.sites, cell_id)
+        assert api._find_site_for_cell(view.sites, "celula-inexistente") is None
+
+    def test_view_invalida_quando_o_cadastro_muda(self, api, sample_event):
+        event = _twin_sites_event(sample_event, "view-invalidation")
+        database.save_event(event)
+
+        first_config = database.get_event(event["id"])
+        first_view = api._event_view(first_config)
+        assert api._event_view(database.get_event(event["id"])) is first_view
+
+        changed = copy.deepcopy(event)
+        changed["sites"].append({
+            "id": "NEW-SITE", "name": "NEW-SITE", "lat": 0, "lng": 0,
+            "cells": [{"id": "4G-NEW-SITE-A"}],
+        })
+        database.save_event(changed)
+        changed_config = database.get_event(event["id"])
+        changed_view = api._event_view(changed_config)
+
+        assert changed_config["_config_digest"] != first_config["_config_digest"]
+        assert changed_view is not first_view
+        assert changed_view.by_site_id["NEW-SITE"]["id"] == "NEW-SITE"
+
+    def test_caches_mantem_somente_a_versao_atual_e_a_anterior(
+            self, api, sample_event):
+        for version in range(3):
+            event = copy.deepcopy(sample_event)
+            event["name"] = f"Evento versão {version}"
+            database.save_event(event)
+            api._event_view(database.get_event(event["id"]))
+
+        assert len(database._event_config_cache) == 2
+        assert len(api._event_views) == 2
+
+    def test_get_event_devolve_copia_rasa(
+            self, api, sample_event, monkeypatch):
+        database.save_event(sample_event)
+        real_loads = database.json.loads
+        parse_count = 0
+
+        def counted_loads(*args, **kwargs):
+            nonlocal parse_count
+            parse_count += 1
+            return real_loads(*args, **kwargs)
+
+        monkeypatch.setattr(database.json, "loads", counted_loads)
+        first = database.get_event(sample_event["id"])
+        first["status"] = "LOCAL-ONLY"
+        second = database.get_event(sample_event["id"])
+
+        assert first is not second
+        assert first["sites"] is second["sites"]
+        assert second["status"] == sample_event["status"]
+        assert first["_config_digest"] == second["_config_digest"]
+        assert parse_count == 1
+
+        database.save_event(second)
+        raw = database.get_conn().execute(
+            "SELECT config_json FROM events WHERE id = ?", (sample_event["id"],)
+        ).fetchone()["config_json"]
+        assert "_config_digest" not in raw
+
+    def test_sanitize_event_remove_config_digest(self, api, sample_event):
+        event = {**sample_event, "_config_digest": "internal"}
+
+        sanitized = api._sanitize_event(event)
+
+        assert "_config_digest" not in sanitized
+
+    def test_resolve_site_for_source_mantem_paridade(self, api, sample_event):
+        event = _twin_sites_event(sample_event, "view-alarm-parity")
+        event["sites"].append({
+            "id": "FRIENDLY-ID", "name": "Friendly Name", "lat": 0, "lng": 0,
+            "cells": [{"id": "4G-FRIENDLY-A"}],
+        })
+        database.save_event(event)
+        sites = api._event_view(database.get_event(event["id"])).sites
+        sources = (
+            "SPSMG7",
+            "SPSMG7-SECTOR",
+            "OSS-SPSMG7-ALARM",
+            "Friendly Name",
+            "1774059",
+            "UNKNOWN-SITE",
+        )
+
+        for source in sources:
+            assert api._resolve_site_for_source(
+                sites, source) == self._linear_alarm_site(sites, source)
+
+    def test_get_sites_em_evento_grande_fica_abaixo_do_orcamento(
+            self, api, sample_event, monkeypatch):
+        site_count = 1500
+        sites = [
+            {
+                "id": f"SITE-{index:04d}",
+                "name": f"SITE{index:04d}",
+                "lat": -23.0 + index / 100000,
+                "lng": -46.0 + index / 100000,
+                "cells": [{
+                    "id": f"4G-SITE{index:04d}-A",
+                    "earfcn": index % 50,
+                }],
+            }
+            for index in range(site_count)
+        ]
+        clusters = [
+            {
+                "id": f"cluster-{cluster_index}",
+                "name": f"Cluster {cluster_index}",
+                "site_ids": [
+                    f"SITE-{(cluster_index * 29 + offset * 7) % site_count:04d}"
+                    for offset in range(140)
+                ],
+            }
+            for cluster_index in range(50)
+        ]
+        event = {
+            **sample_event,
+            "id": "large-event-view-budget",
+            "integration": {"pm_tasks": [{"task_id": 1, "tech": "4G"}]},
+            "sites": sites,
+            "clusters": clusters,
+        }
+        database.save_event(event)
+        monkeypatch.setattr(database, "get_latest_kpi", lambda *_args, **_kwargs: [])
+        monkeypatch.setattr(
+            database, "get_latest_kpi_by_metric", lambda *_args, **_kwargs: [])
+        monkeypatch.setattr(
+            database, "get_latest_site_kpi_by_metric", lambda *_args, **_kwargs: [])
+
+        started = time.perf_counter()
+        result = api.get_sites(event["id"])
+        elapsed = time.perf_counter() - started
+
+        assert len(result) == site_count
+        assert elapsed < 5.0, f"get_sites levou {elapsed:.2f}s"
+
+
 class TestSiteMerge:
     def test_sites_com_mesmo_nome_e_coordenada_sao_fundidos(self, api, sample_event):
         event = _twin_sites_event(sample_event)
@@ -857,6 +1063,27 @@ class TestEarfcnClusters:
         database.save_event(sample_event)
 
         assert all(c.get("source") != "earfcn" for c in api.get_clusters(sample_event["id"]))
+
+    def test_familia_configurada_e_resolvida_uma_vez_por_cadastro(
+            self, api, sample_event, monkeypatch):
+        event = copy.deepcopy(sample_event)
+        event["sites"][0]["cells"] = [
+            {"id": f"CELL-{index}", "earfcn": index % 5}
+            for index in range(100)
+        ]
+        original = Api._single_configured_family.__func__
+        calls = 0
+
+        def counted(cls, config):
+            nonlocal calls
+            calls += 1
+            return original(cls, config)
+
+        monkeypatch.setattr(Api, "_single_configured_family", classmethod(counted))
+
+        api._earfcn_clusters(event)
+
+        assert calls == 1
 
     def test_agrupa_celulas_4g_pela_portadora(self, api, sample_event):
         event = {

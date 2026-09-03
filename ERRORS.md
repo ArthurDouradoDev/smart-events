@@ -1138,3 +1138,25 @@ fix 3/3 limpas.
    app de teste carregava o `index.html` de outro processo, com o `?v=` antigo, e nenhuma alteração
    de frontend fazia efeito. Testar sempre com `SMARTEVENTS_DATA_DIR` isolado e sem outra instância
    aberta.
+
+---
+
+## 2026-09-02 — Digest interno entraria no próprio `config_json` ao salvar
+
+**Como apareceu:** revisão da primeira iteração do cache de configuração da Fase 1. `get_event`
+passou a acrescentar `_config_digest` ao dict devolvido, mas callers existentes como
+`activate_event` e `set_alarm_filter` devolvem esse mesmo dict a `save_event` depois de editar.
+
+**Causa raiz:** a primeira versão serializava `config_dict` inteiro. Assim, o digest da versão
+anterior entraria no JSON persistido; na próxima leitura o JSON teria outro digest e cada save
+criaria uma versão artificial, mesmo sem alteração funcional. Além disso, editar `oss` diretamente
+alteraria o dicionário aninhado compartilhado com o cache de cópia rasa antes do commit.
+
+**Correção:** `save_event` cria uma cópia rasa e remove `_config_digest` antes de `json.dumps`.
+Os dois callers que alteram `oss` agora copiam esse dicionário antes da escrita. O teste
+`test_get_event_devolve_copia_rasa` verifica memoização, isolamento do `status` e ausência da chave
+interna no JSON salvo.
+
+**Regra:** metadado de cache acrescentado ao objeto de leitura precisa ser removido na fronteira
+de persistência. Quando um cache devolve cópia rasa, toda estrutura aninhada é somente leitura;
+caller que precise alterá-la deve copiar exatamente o ramo que vai modificar.
