@@ -16,6 +16,12 @@ let _showEventOnly = false;
 let _showPolygon = true;
 let _osmLayer = null;
 let _satLayer = null;
+let _sitesById = new Map();
+let _vipSiteIds = new Set();
+let _vipsBySite = new Map();
+let _alarmsBySite = new Map();
+const _markerVisualKeys = new Map();
+const _markerDecorationKeys = new Map();
 
 const STATUS_COLORS = {
   healthy:  "#3FB950",
@@ -132,7 +138,7 @@ export function initMap() {
 
   _map.on("zoomend", () => {
     Object.keys(_markers).forEach(id => {
-      const site = State.sites.find(s => s.id === id);
+      const site = _sitesById.get(id);
       if (site) {
         _updateMarker(site);
       }
@@ -168,25 +174,46 @@ export function setBasemap(type) {
 // ── Renderização dos sites ────────────────────────────────────────
 
 export function renderSites(sites) {
+  _sitesById = new Map((sites || []).map(site => [site.id, site]));
+  _vipsBySite = new Map();
+  (State.vips || []).forEach(vip => {
+    if (!vip.in_event || !vip.serving_site) return;
+    if (!_vipsBySite.has(vip.serving_site)) _vipsBySite.set(vip.serving_site, []);
+    _vipsBySite.get(vip.serving_site).push(vip);
+  });
+  _vipSiteIds = new Set(_vipsBySite.keys());
+  _alarmsBySite = new Map();
+  (State.alarms || []).forEach(alarm => {
+    if (!alarm.in_event || !alarm.serving_site) return;
+    if (!_alarmsBySite.has(alarm.serving_site)) _alarmsBySite.set(alarm.serving_site, []);
+    _alarmsBySite.get(alarm.serving_site).push(alarm);
+  });
+
   // Remove marcadores antigos que não existem mais
-  const siteIds = new Set(sites.map(s => s.id));
+  const siteIds = new Set((sites || []).map(s => s.id));
   Object.keys(_markers).forEach(id => {
     if (!siteIds.has(id)) {
       _markers[id].remove();
       delete _markers[id];
       _removeBadge(id);
+      _markerVisualKeys.delete(id);
+      _markerDecorationKeys.delete(id);
     }
   });
 
-  sites.forEach(site => {
+  (sites || []).forEach(site => {
     if (_markers[site.id]) {
-      _updateMarker(site);
+      if (_markerVisualKeys.get(site.id) !== _markerVisualKey(site)) {
+        _updateMarker(site);
+      } else if (_markerDecorationKeys.get(site.id) !== _markerDecorationKey(site)) {
+        _updateMarkerDecorations(site);
+      }
     } else {
       _createMarker(site);
     }
   });
 
-  _applyVisibility();
+  _applyVisibility(_sitesById);
 }
 
 export function renderEventPolygon(polygon) {
@@ -220,11 +247,31 @@ export function resizeMap() {
 // ── Internos ──────────────────────────────────────────────────────
 
 function _siteHasVip(site) {
-  return (State.vips || []).some(v => v.in_event && v.serving_site === site.id);
+  return _vipSiteIds.has(site.id);
 }
 
 function _siteAlarms(site) {
-  return (State.alarms || []).filter(a => a.in_event && a.serving_site === site.id);
+  return _alarmsBySite.get(site.id) || [];
+}
+
+function _markerVisualKey(site) {
+  const zoom = _map ? _map.getZoom() : 13;
+  const cells = (site.cells || []).map(cell =>
+    `${cell.id || ""}:${cell.azimuth ?? ""}:${cell.family || ""}`).join("|");
+  return [
+    site.status, site.metric_value, site.utilization,
+    site.id === State.selectedSite, zoom, State.techFilter, cells,
+  ].join(";");
+}
+
+function _markerDecorationKey(site) {
+  const vips = _siteHasVip(site)
+    ? (_vipsBySite.get(site.id) || []).map(vip => vip.name).sort().join("|")
+    : "";
+  const alarms = _siteAlarms(site)
+    .map(alarm => `${alarm.severity || ""}:${alarm.id || alarm.csn || ""}`)
+    .sort().join("|");
+  return `${vips};${alarms};${site.id === State.selectedSite}`;
 }
 
 function _markerZIndexOffset(site) {
@@ -347,14 +394,25 @@ function _createMarker(site) {
 
   _markers[site.id] = marker;
   _syncBadge(site);
+  _markerVisualKeys.set(site.id, _markerVisualKey(site));
+  _markerDecorationKeys.set(site.id, _markerDecorationKey(site));
 }
 
 function _updateMarker(site) {
   const marker = _markers[site.id];
+  if (!marker) return;
   marker.setIcon(_buildSectorIcon(site));
+  _markerVisualKeys.set(site.id, _markerVisualKey(site));
+  _updateMarkerDecorations(site);
+}
+
+function _updateMarkerDecorations(site) {
+  const marker = _markers[site.id];
+  if (!marker) return;
   marker.setPopupContent(_buildPopup(site));
   marker.setZIndexOffset(_markerZIndexOffset(site));
   _syncBadge(site);
+  _markerDecorationKeys.set(site.id, _markerDecorationKey(site));
 }
 
 function _resolveTechAndFreq(cell) {
@@ -564,7 +622,7 @@ function _buildPopup(site) {
   const util = site.utilization != null && Number.isFinite(utilization)
     ? `${utilization.toFixed(2)}%`
     : "—";
-  const vipsAtSite = (State.vips || []).filter(v => v.in_event && v.serving_site === site.id);
+  const vipsAtSite = _vipsBySite.get(site.id) || [];
   let vipListHtml = "";
   if (vipsAtSite.length > 0) {
     const vipNames = vipsAtSite.map(v => v.name).join(", ");
@@ -622,10 +680,10 @@ function _renderClusterPolygon() {
   }).addTo(_map);
 }
 
-function _applyVisibility() {
+function _applyVisibility(siteIndex = _sitesById) {
   const clusterFilter = State.clusterFilter || "all";
   Object.entries(_markers).forEach(([id, marker]) => {
-    const site = State.sites.find(s => s.id === id);
+    const site = siteIndex.get(id);
     if (!site) return;
     const hideEventOnly = _showEventOnly && !site.is_event_site;
     const clusterIds = site.cluster_ids || [];
@@ -638,7 +696,9 @@ function _applyVisibility() {
       _removeBadge(id);
     } else {
       if (!_map.hasLayer(marker)) marker.addTo(_map);
-      _syncBadge(site);
+      const badge = _badgeMarkers[id];
+      if (badge && !_map.hasLayer(badge)) badge.addTo(_map);
+      else if (!badge && (_siteHasVip(site) || _siteAlarms(site).length)) _syncBadge(site);
     }
   });
 }
@@ -648,7 +708,7 @@ let _prevSelectedSiteId = null;
 function _onSiteSelected(siteId) {
   // Atualiza o ícone do site selecionado anteriormente para remover o destaque
   if (_prevSelectedSiteId && _prevSelectedSiteId !== siteId) {
-    const prevSite = State.sites.find(s => s.id === _prevSelectedSiteId);
+    const prevSite = _sitesById.get(_prevSelectedSiteId);
     if (prevSite && _markers[_prevSelectedSiteId]) {
       _updateMarker(prevSite);
     }
@@ -660,7 +720,7 @@ function _onSiteSelected(siteId) {
   }
 
   // Atualiza o ícone do novo site selecionado para desenhar o contorno
-  const site = State.sites.find(s => s.id === siteId);
+  const site = _sitesById.get(siteId);
   const marker = _markers[siteId];
   if (marker && site && _map) {
     _updateMarker(site);

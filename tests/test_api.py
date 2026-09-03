@@ -88,6 +88,25 @@ class TestApiEvents:
         monkeypatch.setattr(database, "get_event", locked)
         assert api.get_sites(event["id"]) == first
 
+    def test_layout_mais_status_compoem_get_sites(self, api_with_event):
+        api, event = api_with_event
+
+        layout = api.get_site_layout(event["id"])
+        status = api.get_site_status(event["id"], "utilization_dl")
+
+        assert api._compose_site_payload(layout, status) == api.get_sites(event["id"])
+
+    def test_status_nao_carrega_celulas_nem_portadoras(self, api_with_event):
+        api, event = api_with_event
+
+        status = api.get_site_status(event["id"], "utilization_dl")
+
+        assert status
+        assert all(set(row) == {
+            "id", "status", "utilization", "metric_value", "metric_is_share"
+        } for row in status)
+        assert all("cells" not in row and "carriers" not in row for row in status)
+
     def test_evento_com_um_monitoring_5g_esconde_sites_4g_e_preserva_desconhecidos(
             self, api, sample_event):
         event = {

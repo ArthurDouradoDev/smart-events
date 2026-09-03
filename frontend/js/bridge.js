@@ -272,6 +272,48 @@ function _mockSiteCarriers(site) {
   return _kpiOverviewScenario === "earfcn" ? (_MOCK_SITE_CARRIERS[site.id] || []) : [];
 }
 
+function _mockSites(metric=null, technology_family=null) {
+  const family = technology_family === "4G" || technology_family === "5G" ? technology_family : null;
+  return MOCK_SITES.map((s, _i, arr) => {
+    const cells = family
+      ? (s.cells || []).filter(c => !c.family || c.family === family)
+      : (s.cells || []);
+    // Participação é percentual e não escala; o valor cru da métrica, sim.
+    const isShare = ["user_count","traffic_volume_dl","traffic_volume_ul"].includes(metric);
+    return {
+      ...s,
+      original_name: s.original_name || s.name,
+      cells,
+      members: s.members || [],
+      metric_value: metric === "user_count" ? Math.round(100 / arr.length)
+        : isShare ? s.utilization : s.utilization * _mockMagnitude(metric),
+      metric_is_share: isShare,
+      cluster_ids: _clusterIdsFor(s.id),
+      carriers: _mockSiteCarriers(s),
+    };
+  }).filter(s => !family || (s.cells && s.cells.length) || !(s.tech_families || []).length);
+}
+
+const _SITE_DYNAMIC_FIELDS = new Set([
+  "status", "utilization", "metric_value", "metric_is_share",
+]);
+
+function _mockSiteLayout(technology_family=null) {
+  return _mockSites(null, technology_family).map(site => Object.fromEntries(
+    Object.entries(site).filter(([key]) => !_SITE_DYNAMIC_FIELDS.has(key))
+  ));
+}
+
+function _mockSiteStatus(metric=null, technology_family=null) {
+  return _mockSites(metric, technology_family).map(site => ({
+    id: site.id,
+    status: site.status,
+    utilization: site.utilization,
+    metric_value: site.metric_value,
+    metric_is_share: site.metric_is_share,
+  }));
+}
+
 const _mock = {
   get_active_event: () => ({
     ok: true,
@@ -290,25 +332,12 @@ const _mock = {
     }
   }),
   get_events: () => _mockEvents(),
-  get_sites: (event_id, timestamp=null, metric=null, technology_family=null) => {
-    const family = technology_family === "4G" || technology_family === "5G" ? technology_family : null;
-    return MOCK_SITES.map((s, i, arr) => {
-      const cells = family
-        ? (s.cells || []).filter(c => !c.family || c.family === family)
-        : (s.cells || []);
-      // Participação é percentual e não escala; o valor cru da métrica, sim.
-      const isShare = ["user_count","traffic_volume_dl","traffic_volume_ul"].includes(metric);
-      return {
-        ...s,
-        cells,
-        metric_value: metric === "user_count" ? Math.round(100 / arr.length)
-          : isShare ? s.utilization : s.utilization * _mockMagnitude(metric),
-        metric_is_share: isShare,
-        cluster_ids: _clusterIdsFor(s.id),
-        carriers: _mockSiteCarriers(s),
-      };
-    }).filter(s => !family || (s.cells && s.cells.length) || !(s.tech_families || []).length);
-  },
+  get_sites: (_event_id, _timestamp=null, metric=null, technology_family=null) =>
+    _mockSites(metric, technology_family),
+  get_site_layout: (_event_id, technology_family=null) =>
+    _mockSiteLayout(technology_family),
+  get_site_status: (_event_id, metric=null, _timestamp=null, technology_family=null) =>
+    _mockSiteStatus(metric, technology_family),
   get_clusters: (_eventId) => _allMockClusters().map(c => (
     {
       id: c.id, name: c.name, color: c.color, site_count: c.site_ids.length,
@@ -810,6 +839,8 @@ const API = {
   activateEvent:    (id, mock=false, cliente=null) => API.call("activate_event", id, mock, cliente),
   endEvent:         (id)                     => API.call("end_event", id),
   getSites:         (eventId, timestamp=null, metric=null, technologyFamily=null) => API.call("get_sites", eventId, timestamp, metric, technologyFamily),
+  getSiteLayout:    (eventId, technologyFamily=null) => API.call("get_site_layout", eventId, technologyFamily),
+  getSiteStatus:    (eventId, metric=null, timestamp=null, technologyFamily=null) => API.call("get_site_status", eventId, metric, timestamp, technologyFamily),
   getSiteCells:     (eventId, siteId, technologyFamily=null) => API.call("get_site_cells", eventId, siteId, technologyFamily),
   getEventCells:    (eventId, technologyFamily=null) => API.call("get_event_cells", eventId, technologyFamily),
   getKpiSeries:     (eventId, siteId, m, w, cellId=null, technologyFamily=null, scope=null, scopeId=null) =>

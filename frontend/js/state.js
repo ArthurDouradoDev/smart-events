@@ -3,6 +3,19 @@
  * Padrão pub/sub simples: módulos assinam eventos e reagem a mudanças.
  */
 
+/**
+ * Aplica as linhas pequenas do poll sobre o cadastro estático já carregado.
+ * Sites sem linha nova preservam o último estado conhecido em vez de sumirem
+ * por causa de uma leitura parcial/transitoriamente bloqueada.
+ */
+export function mergeSiteStatus(sites = [], statusRows = []) {
+  const statusById = new Map((statusRows || []).map(row => [row.id, row]));
+  return (sites || []).map(site => {
+    const status = statusById.get(site.id);
+    return status ? { ...site, ...status } : site;
+  });
+}
+
 const State = {
   // ── Dados do evento ──────────────────────────────────────────────
   activeEvent:    null,    // EventConfig | null

@@ -4,11 +4,11 @@
  */
 
 import API     from "./bridge.js";
-import State   from "./state.js";
+import State, { mergeSiteStatus } from "./state.js";
 import { initWindowChrome } from "./window_chrome.js?v=20260831-window-chrome-r5";
-import { initMap, renderSites, renderEventPolygon, fitToEvent, resizeMap } from "./map.js?v=20260901-small-event-fit-r1";
+import { initMap, renderEventPolygon, fitToEvent, resizeMap } from "./map.js?v=20260903-site-poll-r1";
 import { initVip, resizeVipChart }    from "./vip.js?v=20260830-window-chrome-r1";
-import { initKpi, refreshChart, resizeKpiCharts }    from "./kpi.js?v=20260830-window-chrome-r1";
+import { initKpi, refreshChart, resizeKpiCharts }    from "./kpi.js?v=20260903-site-poll-r1";
 import { initKpiOverview, resizeKpiOverviewCharts } from "./kpi_overview.js?v=20260901-polygon-filter-r1";
 import { siteInsidePolygon } from "./geometry.js?v=20260901-polygon-filter-r1";
 import { initAlerts, injectAlerts } from "./alerts.js?v=20260826-site-filter";
@@ -16,7 +16,7 @@ import { initAlarms, injectAlarms } from "./alarms.js?v=20260826-site-filter";
 import { initLogs } from "./logs.js";
 import { initCredentials, promptCredentials } from "./credentials.js";
 
-const POLL_INTERVAL_MS = 30_000; // 30s: busca dados atualizados no banco local
+const POLL_INTERVAL_MS = 120_000; // acompanha o ciclo padrão da coleta de KPI
 const VPN_CHECK_INTERVAL_MS = 15 * 60 * 1000; // 15min: verifica conexão com a VPN
 const SYNC_POLL_INTERVAL_MS = 5_000; // 5s: poll leve do status de coleta (indicador no header)
 
@@ -171,6 +171,7 @@ async function _enterActiveMode(event) {
     activeEvent: event,
     historicalEvent: null,
     selectedSite: null,
+    sites: [],
   });
 
   // Troca telas
@@ -207,7 +208,7 @@ async function _enterActiveMode(event) {
   await _activateEventWithCreds(event, isMock);
 
   // Carrega dados iniciais
-  await _poll();
+  await _poll(true);
 
   // Ajusta o zoom do mapa para o evento
   fitToEvent(State.sites, event.polygon);
@@ -275,22 +276,27 @@ function _startPolling() {
   _pollTimer = setInterval(_poll, POLL_INTERVAL_MS);
 }
 
-async function _poll() {
+async function _poll(reloadLayout = false) {
   if (State.mode !== "active") return;
   const id = State.eventId;
   if (!id) return;
 
   try {
-    const [sites, vips, alerts, alarms, status] = await Promise.all([
-      API.getSites(id, null, State.selectedMetric, State.techFilter === "all" ? null : State.techFilter),
+    const family = State.techFilter === "all" ? null : State.techFilter;
+    const layoutPromise = reloadLayout || !State.sites.length
+      ? API.getSiteLayout(id, family)
+      : Promise.resolve(State.sites);
+    const [layout, siteStatus, vips, alerts, alarms, status] = await Promise.all([
+      layoutPromise,
+      API.getSiteStatus(id, State.selectedMetric, null, family),
       API.getVips(id),
       API.getAlerts(id),
       API.getAlarms(id),
       API.getAppStatus(),
     ]);
+    const sites = mergeSiteStatus(layout, siteStatus);
 
     State.merge({ sites, vips });
-    renderSites(sites);
     injectAlerts(alerts);
     injectAlarms(alarms);
 
@@ -477,7 +483,6 @@ async function _updateHistoricalView(index) {
     ]);
 
     State.merge({ sites, vips });
-    renderSites(sites);
     State.set("alerts", alerts);
     injectAlarms(alarms);
 

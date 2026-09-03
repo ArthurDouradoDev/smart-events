@@ -107,6 +107,7 @@ class Api:
         # Uma leitura transitoriamente bloqueada nunca deve ser traduzida para
         # "o evento não tem sites", pois o frontend removeria todos do mapa.
         self._sites_cache: dict[str, list] = {}
+        self._site_status_cache: dict[tuple, list] = {}
         self._event_views: OrderedDict[tuple[str, str], _EventView] = OrderedDict()
         self._event_view_lock = threading.RLock()
 
@@ -1085,105 +1086,174 @@ class Api:
             return values[0]
         return self._combine_family_values(metric, values)
 
-    def get_sites(self, event_id: str, timestamp: Optional[str] = None,
-                  metric: str = "utilization_dl",
-                  technology_family: Optional[str] = None) -> list:
-        """Retorna sites com status atual para renderização no mapa."""
+    def _site_cluster_membership(self, config: dict, merged: list[dict]) -> dict[str, list[str]]:
+        membership: dict[str, list[str]] = {}
+        for cluster in self._clusters_of(config):
+            cluster_id = cluster.get("id")
+            if not cluster_id:
+                continue
+            for merged_id in self._cluster_merged_site_ids(cluster, merged):
+                membership.setdefault(merged_id, []).append(cluster_id)
+        return membership
+
+    def _build_site_layout(self, config: dict,
+                           technology_family: Optional[str] = None) -> list[dict]:
+        """Monta somente o cadastro estático usado pelo mapa e pela lista."""
+        merged = self._merged_sites(config)
+        configured_family = self._single_configured_family(config)
+        user_family = technology_family if technology_family in ("4G", "5G") else None
+        cell_family = user_family or configured_family
+        cluster_membership = self._site_cluster_membership(config, merged)
+        layout = []
+        for site in merged:
+            visible_cells = self._filter_cells_for_family(
+                site.get("cells", []), cell_family)
+            if cell_family and not visible_cells:
+                continue
+            layout.append({
+                "id":            site["id"],
+                "name":          site["name"],
+                "original_name": site.get("original_name") or site["name"],
+                "lat":           site["lat"],
+                "lng":           site["lng"],
+                "cells":         visible_cells,
+                "members":       site.get("members") or [],
+                "tech_families": site.get("tech_families") or [],
+                "is_event_site": site.get("is_event_site", True),
+                "cluster_ids":   cluster_membership.get(site["id"], []),
+                "carriers":      self._site_carriers(visible_cells, config),
+            })
+        return layout
+
+    def _build_site_status(self, config: dict, event_id: str, metric: str,
+                           timestamp: Optional[str] = None,
+                           technology_family: Optional[str] = None) -> list[dict]:
+        """Monta apenas os campos que podem mudar entre dois ciclos de coleta."""
+        metric = metric or "utilization_dl"
+        merged = self._merged_sites(config)
+        original_index = self._index_original_to_merged(merged)
+
+        latest = db.get_latest_kpi(event_id, timestamp)
+        util_by_original = self._aggregate_utilization(latest)
+        latest_metric = (
+            db.get_latest_kpi_by_metric(event_id, metric, timestamp)
+            if metric != "utilization_dl" else latest
+        )
+        metric_by_original = self._aggregate_metric_for_list(latest_metric, metric)
+        metric_by_key = self._remap_metric_by_family(metric_by_original, original_index)
+        util_by_key = self._remap_metric_by_family(util_by_original, original_index)
+
+        # Dados novos possuem uma linha SITE por (site_id, technology); a
+        # chave (merged_id, family) impede que 4G e 5G se sobrescrevam.
+        persisted_metric = db.get_latest_site_kpi_by_metric(event_id, metric, timestamp)
+        for row in persisted_metric:
+            mapped = original_index.get(row["site_id"])
+            if not mapped:
+                continue
+            merged_id, member_family = mapped
+            family = self._technology_family(row.get("technology")) or member_family
+            metric_by_key[(merged_id, family)] = row["value"]
+
+        persisted_util = db.get_latest_site_kpi_by_metric(
+            event_id, "utilization_dl", timestamp)
+        for row in persisted_util:
+            mapped = original_index.get(row["site_id"])
+            if not mapped:
+                continue
+            merged_id, member_family = mapped
+            family = self._technology_family(row.get("technology")) or member_family
+            util_by_key[(merged_id, family)] = row["value"]
+
+        configured_family = self._single_configured_family(config)
+        user_family = technology_family if technology_family in ("4G", "5G") else None
+        cell_family = user_family or configured_family
+        thresholds = config.get("thresholds", {})
+        warn = threshold_value(thresholds.get("utilization_warning"), 80)
+        crit = threshold_value(thresholds.get("utilization_critical"), 95)
+        status_rows = []
+        for site in merged:
+            if cell_family and not self._filter_cells_for_family(
+                    site.get("cells", []), cell_family):
+                continue
+            util = self._metric_value_for_merged(
+                util_by_key, site["id"], site.get("tech_families") or [],
+                user_family, "utilization_dl")
+            status = "unknown"
+            if util is not None:
+                if util >= crit:
+                    status = "critical"
+                elif util >= warn:
+                    status = "warning"
+                else:
+                    status = "healthy"
+            status_rows.append({
+                "id":              site["id"],
+                "status":          status,
+                "utilization":     round(util, 1) if util is not None else None,
+                "metric_value":    self._metric_value_for_merged(
+                    metric_by_key, site["id"], site.get("tech_families") or [],
+                    user_family, metric),
+                "metric_is_share": False,
+            })
+        return status_rows
+
+    @staticmethod
+    def _compose_site_payload(layout: list[dict], status_rows: list[dict]) -> list[dict]:
+        status_by_id = {row["id"]: row for row in status_rows}
+        return [
+            {**site, **status_by_id.get(site["id"], {
+                "status": "unknown", "utilization": None,
+                "metric_value": None, "metric_is_share": False,
+            })}
+            for site in layout
+        ]
+
+    def get_site_layout(self, event_id: str,
+                        technology_family: Optional[str] = None) -> list:
+        """Retorna a parte estática dos sites, carregada uma vez pelo frontend."""
+        config = (_active_event if _active_event and _active_event.get("id") == event_id else None)
+        try:
+            config = db.get_event(event_id) or config
+            return self._build_site_layout(config, technology_family) if config else []
+        except Exception as e:
+            logger.error(f"get_site_layout error: {e}")
+            cached = self._sites_cache.get(event_id) or []
+            dynamic = {"status", "utilization", "metric_value", "metric_is_share"}
+            return [{k: v for k, v in site.items() if k not in dynamic} for site in cached]
+
+    def get_site_status(self, event_id: str, metric: str = "utilization_dl",
+                        timestamp: Optional[str] = None,
+                        technology_family: Optional[str] = None) -> list:
+        """Retorna somente status e valores mutáveis para o poll do dashboard."""
+        metric = metric or "utilization_dl"
+        cache_key = (event_id, metric, timestamp, technology_family)
         config = (_active_event if _active_event and _active_event.get("id") == event_id else None)
         try:
             config = db.get_event(event_id) or config
             if not config:
                 return []
+            rows = self._build_site_status(
+                config, event_id, metric, timestamp, technology_family)
+            self._site_status_cache[cache_key] = rows
+            return rows
+        except Exception as e:
+            logger.error(f"get_site_status error: {e}")
+            return self._site_status_cache.get(cache_key, [])
 
-            merged = self._merged_sites(config)
-            original_index = self._index_original_to_merged(merged)
-
-            latest = db.get_latest_kpi(event_id, timestamp)
-            util_by_original = self._aggregate_utilization(latest)
-
-            if metric != "utilization_dl":
-                latest_metric = db.get_latest_kpi_by_metric(event_id, metric, timestamp)
-            else:
-                latest_metric = latest
-
-            metric_by_original = self._aggregate_metric_for_list(latest_metric, metric)
-            metric_by_key = self._remap_metric_by_family(metric_by_original, original_index)
-            util_by_key = self._remap_metric_by_family(util_by_original, original_index)
-
-            # Dados novos possuem uma linha SITE por (site_id, technology); a
-            # chave (merged_id, family) impede que 4G e 5G se sobrescrevam.
-            persisted_metric = db.get_latest_site_kpi_by_metric(event_id, metric, timestamp)
-            for row in persisted_metric:
-                mapped = original_index.get(row["site_id"])
-                if not mapped:
-                    continue
-                merged_id, member_family = mapped
-                family = self._technology_family(row.get("technology")) or member_family
-                metric_by_key[(merged_id, family)] = row["value"]
-
-            persisted_util = db.get_latest_site_kpi_by_metric(
-                event_id, "utilization_dl", timestamp)
-            for row in persisted_util:
-                mapped = original_index.get(row["site_id"])
-                if not mapped:
-                    continue
-                merged_id, member_family = mapped
-                family = self._technology_family(row.get("technology")) or member_family
-                util_by_key[(merged_id, family)] = row["value"]
-
-            sites_out = []
-            configured_family = self._single_configured_family(config)
-            user_family = technology_family if technology_family in ("4G", "5G") else None
-            cell_family = user_family or configured_family
-            thresholds = config.get("thresholds", {})
-            warn = threshold_value(thresholds.get("utilization_warning"), 80)
-            crit = threshold_value(thresholds.get("utilization_critical"), 95)
-
-            cluster_membership: dict[str, list[str]] = {}
-            for cluster in self._clusters_of(config):
-                cluster_id = cluster.get("id")
-                if not cluster_id:
-                    continue
-                for merged_id in self._cluster_merged_site_ids(cluster, merged):
-                    cluster_membership.setdefault(merged_id, []).append(cluster_id)
-
-            for site in merged:
-                visible_cells = self._filter_cells_for_family(
-                    site.get("cells", []), cell_family)
-                if cell_family and not visible_cells:
-                    continue
-                util = self._metric_value_for_merged(
-                    util_by_key, site["id"], site.get("tech_families") or [],
-                    user_family, "utilization_dl")
-                status = "unknown"
-                if util is not None:
-                    if util >= crit:
-                        status = "critical"
-                    elif util >= warn:
-                        status = "warning"
-                    else:
-                        status = "healthy"
-
-                sites_out.append({
-                    "id":              site["id"],
-                    "name":            site["name"],
-                    "original_name":   site.get("original_name") or site["name"],
-                    "lat":             site["lat"],
-                    "lng":             site["lng"],
-                    "cells":           visible_cells,
-                    "members":         site.get("members") or [],
-                    "tech_families":   site.get("tech_families") or [],
-                    "status":          status,
-                    "utilization":     round(util, 1) if util is not None else None,
-                    "metric_value":    self._metric_value_for_merged(
-                        metric_by_key, site["id"], site.get("tech_families") or [],
-                        user_family, metric or "utilization_dl"),
-                    "metric_is_share": False,
-                    "is_event_site":   site.get("is_event_site", True),
-                    "cluster_ids":     cluster_membership.get(site["id"], []),
-                    "carriers":        self._site_carriers(visible_cells, config),
-                })
-
+    def get_sites(self, event_id: str, timestamp: Optional[str] = None,
+                  metric: str = "utilization_dl",
+                  technology_family: Optional[str] = None) -> list:
+        """Compatibilidade: compõe layout estático e status dinâmico."""
+        metric = metric or "utilization_dl"
+        config = (_active_event if _active_event and _active_event.get("id") == event_id else None)
+        try:
+            config = db.get_event(event_id) or config
+            if not config:
+                return []
+            layout = self._build_site_layout(config, technology_family)
+            status_rows = self._build_site_status(
+                config, event_id, metric, timestamp, technology_family)
+            sites_out = self._compose_site_payload(layout, status_rows)
             self._sites_cache[event_id] = sites_out
             return sites_out
         except Exception as e:
@@ -1192,21 +1262,8 @@ class Api:
             if cached is not None:
                 return cached
             if config:
-                fallback = []
-                for site in self._merged_sites(config):
-                    fallback.append({
-                        "id": site["id"], "name": site["name"],
-                        "original_name": site.get("original_name") or site["name"],
-                        "lat": site["lat"], "lng": site["lng"],
-                        "cells": site.get("cells", []), "status": "unknown",
-                        "members": site.get("members") or [],
-                        "tech_families": site.get("tech_families") or [],
-                        "utilization": None, "metric_value": None,
-                        "metric_is_share": False,
-                        "is_event_site": site.get("is_event_site", True),
-                        "cluster_ids": [],
-                        "carriers": self._site_carriers(site.get("cells", []), config),
-                    })
+                layout = self._build_site_layout(config, technology_family)
+                fallback = self._compose_site_payload(layout, [])
                 self._sites_cache[event_id] = fallback
                 return fallback
             return []

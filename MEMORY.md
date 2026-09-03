@@ -2278,3 +2278,45 @@ marcador antes de sua criação; no rerun isolado ele passou. O filtro de alarme
 baseline no rerun. Nenhum arquivo de frontend foi alterado nesta fase.
 
 ---
+
+## 2026-09-03 — Fase 3: payload de status e render incremental do dashboard
+
+Implementada por completo a Fase 3 de
+`docs/plans/2026-09-02-004-perf-leitura-dashboard-e-grafico-4g5g-plan.md`.
+
+- **Contrato separado sem quebrar o legado:** `Api.get_site_layout` devolve apenas cadastro
+  estático (`cells`, membros, coordenadas, clusters e portadoras) e `Api.get_site_status` devolve
+  somente `id`, `status`, `utilization`, `metric_value` e `metric_is_share`. `get_sites` continua
+  público e compõe os dois builders; teste e medição real confirmaram igualdade exata.
+- **Poll ao vivo pequeno:** o carregamento/troca de evento e a troca de tecnologia buscam layout;
+  os ciclos seguintes e a troca de métrica buscam apenas status. O modo histórico preserva
+  `get_sites`, pois cada posição do slider precisa de um snapshot composto. O poll pesado passou
+  de 30 s para 120 s; o indicador leve de sincronismo continua em 5 s.
+- **Falha transitória não apaga o mapa:** a fusão frontend é por `id` e preserva o último
+  estado do site quando uma linha de status não chega. Backend mantém caches separados do payload
+  composto e de status.
+- **Render incremental:** `map.js` guarda assinatura visual por site (status, valor, utilização,
+  seleção, zoom, tecnologia e células) e uma assinatura separada para VIP/alarme. Poll idêntico
+  faz zero `setIcon`; uma mudança repinta somente o site afetado. Zoom e seleção continuam
+  atualizando os SVGs necessários. Visibilidade, site, VIP e alarmes usam mapas por id, sem
+  `find`/`filter` dentro do laço de marcadores.
+- **Lista lateral linear:** `_renderSiteList` monta uma vez por render `Set` de sites com VIP e
+  `Map` de alarmes por site; badges da lista e do mapa continuam aparecendo e sumindo juntos.
+- **Cache-busting:** `app.js`, `map.js` e `kpi.js` usam a versão
+  `20260903-site-poll-r1`, evitando que o WebView2 reaproveite os módulos anteriores.
+
+**Medição real (`rock-in-rio-2026`, 1.454 sites, aquecido):** layout 0,218 s; status
+1,768 s; `get_sites` composto 1,776 s. JSON completo 5.117.057 bytes; status 157.474 bytes
+(**32,5× menor**); composição igual ao payload legado. A projeção do plano dizia "dezenas de
+kB", mas os cinco campos nomeados para 1.454 sites ocupam 157 kB com `json.dumps` padrão; o
+contrato não foi mutilado para perseguir a estimativa.
+
+**Gates:** baseline anterior à edição = 874 passed, 2 failed, 10 skipped. As duas falhas eram
+`test_filtro_de_alarmes_e_alertas_respeita_o_site_selecionado` (espera ERB-07, seleção inicial
+mock é ERB-03) e `test_zoom_reaproveita_o_marcador_em_vez_de_recriar_a_camada` (marcador do
+editor ainda sem `_icon`); nenhuma pertence à Fase 3. Focal API = 109 passed. Focal frontend =
+24 passed. Gate final = **880 passed, 1 failed, 10 skipped**; a única falha é a primeira do
+baseline, com a mesma asserção, e foi reproduzida isoladamente. Os cinco testes novos da fase
+(2 API + 3 Playwright) passaram.
+
+---

@@ -44,7 +44,7 @@ def test_evento_com_menos_de_cem_sites_abre_enquadrado_no_poligono():
                     };
                     return original.call(this, bounds, options);
                   };
-                  const { fitToEvent } = await import('/js/map.js?v=20260901-small-event-fit-r1');
+                  const { fitToEvent } = await import('/js/map.js?v=20260903-site-poll-r1');
                   const polygon = [
                     [-23.71, -46.71], [-23.71, -46.69],
                     [-23.69, -46.69], [-23.69, -46.71],
@@ -89,7 +89,7 @@ def test_evento_com_cem_sites_mantem_enquadramento_de_todos_os_sites():
                     };
                     return original.call(this, bounds, options);
                   };
-                  const { fitToEvent } = await import('/js/map.js?v=20260901-small-event-fit-r1');
+                  const { fitToEvent } = await import('/js/map.js?v=20260903-site-poll-r1');
                   const sites = Array.from({ length: 100 }, (_, index) => ({
                     id: `site-${index}`,
                     lat: index === 99 ? -10.0 : -23.70,

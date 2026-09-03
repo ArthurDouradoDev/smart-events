@@ -2,7 +2,7 @@
  * kpi.js — Lista de sites e gráfico de linha temporal.
  */
 
-import State from "./state.js";
+import State, { mergeSiteStatus } from "./state.js";
 import API   from "./bridge.js";
 import { escalaDaMetrica, esquecerEscalas, formatar } from "./units.js";
 
@@ -203,7 +203,12 @@ export function initKpi() {
     if (!eventId) return;
     const ts = mode === "historical" ? historicalTimestamp : null;
     const metric = State.selectedMetric;
-    const sites = await API.getSites(eventId, ts, metric, _techFamilyParam());
+    const sites = mode === "historical"
+      ? await API.getSites(eventId, ts, metric, _techFamilyParam())
+      : mergeSiteStatus(
+          State.sites,
+          await API.getSiteStatus(eventId, metric, null, _techFamilyParam()),
+        );
     if (sites) State.set("sites", sites);
   });
 
@@ -369,7 +374,18 @@ async function _onTechFilterChanged() {
   );
   if (eventId) {
     const ts = mode === "historical" ? historicalTimestamp : null;
-    const sites = await API.getSites(eventId, ts, State.selectedMetric, _techFamilyParam());
+    let sites;
+    if (mode === "historical") {
+      sites = await API.getSites(
+        eventId, ts, State.selectedMetric, _techFamilyParam());
+    } else {
+      const family = _techFamilyParam();
+      const [layout, status] = await Promise.all([
+        API.getSiteLayout(eventId, family),
+        API.getSiteStatus(eventId, State.selectedMetric, null, family),
+      ]);
+      sites = mergeSiteStatus(layout, status);
+    }
     if (sites) State.set("sites", sites);
   }
   if (selectedSite) await _populateCellSelector(selectedSite, true);
@@ -404,6 +420,15 @@ function _renderSiteList(sites) {
   summary.textContent = `${counts.healthy} ok · ${counts.critical} críticos`;
 
   const clusterFilter = State.clusterFilter || "all";
+  const vipSiteIds = new Set(
+    (State.vips || []).filter(vip => vip.in_event).map(vip => vip.serving_site)
+  );
+  const alarmsBySite = new Map();
+  (State.alarms || []).forEach(alarm => {
+    if (!alarm.in_event || !alarm.serving_site) return;
+    if (!alarmsBySite.has(alarm.serving_site)) alarmsBySite.set(alarm.serving_site, []);
+    alarmsBySite.get(alarm.serving_site).push(alarm);
+  });
   if (clusterFilter === CLUSTER_COMPARE_FILTER) {
     const clusters = (State.clusters || []).filter(cluster => {
       const name = (cluster.name || "").toLowerCase();
@@ -468,9 +493,9 @@ function _renderSiteList(sites) {
       displayVal = `${_formatNumber(site.utilization, null)}%`;
     }
 
-    const hasVip = (State.vips || []).some(v => v.in_event && v.serving_site === site.id);
+    const hasVip = vipSiteIds.has(site.id);
 
-    const siteAlarms = (State.alarms || []).filter(a => a.in_event && a.serving_site === site.id);
+    const siteAlarms = alarmsBySite.get(site.id) || [];
     const hasCritical = siteAlarms.some(a => a.severity === "Critical");
     const alarmTag = siteAlarms.length
       ? ` <span class="site-alarm${hasCritical ? " critical" : ""}" title="${siteAlarms.length} alarme(s)">⚠</span>`
