@@ -2236,3 +2236,45 @@ WinForms depois que o message loop já tinha sido destruído.
 `test_frontend_window_chrome_ui`); smoke real com dados mock isolados fechou por `WM_CLOSE` com
 `exit_code=0` e nenhuma ocorrência de `InternalPythonnetException`,
 `InvalidAsynchronousStateException` ou `Unhandled Exception` no stderr.
+
+---
+
+## 2026-09-03 — Fase 2: janela recente de KPI e migração única do banco de evento
+
+Implementada por completo a Fase 2 de
+`docs/plans/2026-09-02-004-perf-leitura-dashboard-e-grafico-4g5g-plan.md`.
+
+- `LATEST_WINDOW_MINUTES = 15` limita `get_latest_kpi`, `get_latest_kpi_by_metric` e
+  `get_latest_site_kpi_by_metric`. No modo ao vivo, a âncora é o `MAX(timestamp)` do evento;
+  no histórico, é o `max_timestamp` pedido. O início da janela é resolvido uma vez antes do
+  `GROUP BY` e passado como parâmetro. Assim, parada de coleta não esvazia o mapa, mas uma célula
+  mais de 15 minutos atrasada em relação ao ciclo mais novo passa corretamente a `unknown`.
+- `init_event_db` usa `PRAGMA user_version = 1`. Banco em versão 0 deduplica, recria o índice
+  único de replay e grava a versão; banco já migrado executa somente os `CREATE ... IF NOT
+  EXISTS` e as garantias aditivas de colunas. A manutenção destrutiva não se repete por abertura.
+- `close_conn` chama `PRAGMA wal_checkpoint(TRUNCATE)` antes de fechar cada conexão global/de
+  evento. Falha por WAL ainda ocupado é registrada em debug e nunca impede o fechamento.
+- Não foi adicionado índice secundário novo. A medição do candidato `(event_id, timestamp)`
+  reduziu a mediana de `get_latest_kpi` de aproximadamente 1,36 s para 0,93 s, mas acrescentou
+  43.298.816 bytes ao arquivo, manteve `USE TEMP B-TREE FOR GROUP BY` e cobraria escrita em todo
+  ciclo. Como o caminho sem ele já ficou abaixo das metas, esse custo permanente não se justifica.
+
+**Medição real em cópia isolada** de `smart_events_rock-in-rio-2026.db` (265.666.560 bytes,
+1.004.333 linhas; banco original não foi aberto para escrita e a cópia foi removida ao final):
+
+- primeira migração: **9,219 s**; segunda inicialização do mesmo arquivo: **0,000 s**;
+- janela de 15 min: 67.361 das 1.004.333 linhas;
+- consulta antiga de última medição: **2,755 s** / 9.018 linhas;
+- consulta recortada: **1,133 s fria**, **1,361 s aquecida** / 8.638 linhas;
+- API aquecida: `get_sites` **2,593 s**, `get_clusters` **0,137 s**, `get_alarms` **0,233 s**;
+- WAL antes/depois de `_checkpoint_and_close`: **94.768.272 bytes → 0**.
+
+**Testes:** baseline pré-edição: **867 passed, 10 skipped, 1 failed** — falha já conhecida em
+`test_frontend_alerts_alarms_filter_ui` (seleção inicial ERB-03/ERB-07). Gate focalizado final:
+**153 passed** (`test_database`, `test_api`). Suíte completa final: **874 passed, 10 skipped,
+2 failed**; os 8 testes adicionados passaram. Além da mesma falha do baseline, o teste intermitente
+`test_zoom_reaproveita_o_marcador_em_vez_de_recriar_a_camada`, já documentado na Fase 1, leu o
+marcador antes de sua criação; no rerun isolado ele passou. O filtro de alarmes repetiu a falha do
+baseline no rerun. Nenhum arquivo de frontend foi alterado nesta fase.
+
+---

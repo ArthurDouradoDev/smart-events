@@ -1179,3 +1179,34 @@ zero e sem erro de pythonnet.
 
 **Regra:** testes externos da janela customizada devem obter o HWND pelo diagnóstico do
 `WindowChromeController`, nunca por `Process.MainWindowHandle` quando o console foi ocultado.
+
+---
+
+## 2026-09-03 — Armadilhas do harness na Fase 2 de leitura do dashboard
+
+**Pytest concorrente no mesmo checkout.** A primeira tentativa de acelerar o baseline e o gate
+focalizado iniciou duas suítes ao mesmo tempo. Ambas usam `.tmp/pytest`; a focalizada encontrou
+`FileExistsError`/`WinError 145` enquanto uma removia a árvore temporária da outra. Não era falha de
+banco nem de migração. O baseline, que já havia coletado/importado os módulos antes das edições,
+terminou válido; o gate focalizado foi repetido sozinho e passou 153/153.
+
+**Regra:** neste repositório, execuções de Pytest que usam `tmp_path` devem ser seriais enquanto o
+`basetemp` compartilhado for `.tmp/pytest`. Paralelismo só é seguro com `--basetemp` distintos.
+
+**Script temporário fora da raiz não importou `api`.** A primeira execução da medição real colocou
+o script em um subdiretório e o iniciou pelo caminho do arquivo; o Python acrescentou apenas esse
+subdiretório ao `sys.path`, produzindo `ModuleNotFoundError: api`. A correção foi acrescentar a raiz
+do repositório explicitamente antes dos imports; a medição seguinte concluiu normalmente.
+
+**Regra:** harness temporário executado por caminho deve usar `python -m` a partir de um pacote ou
+inserir explicitamente a raiz do projeto no `sys.path`; não assumir que o diretório de trabalho é
+automaticamente importável.
+
+**Limiar de status é inclusivo.** O primeiro teste de paridade da API esperou `healthy` para
+utilização 80, mas o contrato usa `util >= utilization_warning`, portanto 80 é `warning`. A
+expectativa foi corrigida e o teste passou.
+
+**Regra:** casos de fronteira de threshold devem reproduzir os comparadores inclusivos da API
+(`>=`), não inferir a faixa pelo nome do nível.
+
+---

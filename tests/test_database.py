@@ -1,4 +1,5 @@
 """Testes de integração para core/database.py usando banco SQLite temporário."""
+import sqlite3
 import threading
 
 import pytest
@@ -80,6 +81,91 @@ def test_schema_do_evento_e_inicializado_uma_vez_entre_threads(tmp_db, monkeypat
     assert len(calls) == 1
 
 
+def test_migracao_de_schema_roda_uma_vez(tmp_path):
+    db_path = tmp_path / "schema-once.db"
+
+    first_statements = []
+    first = sqlite3.connect(db_path)
+    first.row_factory = sqlite3.Row
+    first.set_trace_callback(first_statements.append)
+    database.init_event_db(first)
+    assert first.execute("PRAGMA user_version").fetchone()[0] == 1
+    first.close()
+
+    second_statements = []
+    second = sqlite3.connect(db_path)
+    second.row_factory = sqlite3.Row
+    second.set_trace_callback(second_statements.append)
+    database.init_event_db(second)
+    assert second.execute("PRAGMA user_version").fetchone()[0] == 1
+    second.close()
+
+    first_sql = "\n".join(first_statements).upper()
+    second_sql = "\n".join(second_statements).upper()
+    assert "DELETE FROM KPI_MEASUREMENTS" in first_sql
+    assert "DROP INDEX IF EXISTS UQ_KPI_MEASUREMENT_REPLAY" in first_sql
+    assert "DELETE FROM KPI_MEASUREMENTS" not in second_sql
+    assert "DROP INDEX IF EXISTS UQ_KPI_MEASUREMENT_REPLAY" not in second_sql
+    assert "CREATE UNIQUE INDEX IF NOT EXISTS UQ_KPI_MEASUREMENT_REPLAY" in second_sql
+
+
+def test_banco_legado_sem_user_version_ainda_deduplica(tmp_path):
+    db_path = tmp_path / "legacy.db"
+    conn = sqlite3.connect(db_path)
+    conn.row_factory = sqlite3.Row
+    conn.execute("""
+        CREATE TABLE kpi_measurements (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            site_id TEXT NOT NULL,
+            cell_id TEXT NOT NULL,
+            event_id TEXT NOT NULL,
+            timestamp TEXT NOT NULL,
+            metric TEXT NOT NULL,
+            value REAL,
+            scope TEXT NOT NULL DEFAULT 'CELL',
+            technology TEXT NOT NULL DEFAULT ''
+        )
+    """)
+    row = ("SITE-1", "CELL-1", "legacy", "2026-09-01T10:00:00Z",
+           "utilization_dl", 42.0, "CELL", "4G")
+    conn.executemany("""
+        INSERT INTO kpi_measurements
+            (site_id, cell_id, event_id, timestamp, metric, value, scope, technology)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    """, [row, row])
+    conn.commit()
+
+    database.init_event_db(conn)
+
+    assert conn.execute("SELECT COUNT(*) FROM kpi_measurements").fetchone()[0] == 1
+    assert conn.execute("PRAGMA user_version").fetchone()[0] == 1
+    conn.close()
+
+
+def test_checkpoint_wal_acontece_antes_do_fechamento():
+    calls = []
+
+    class Result:
+        @staticmethod
+        def fetchone():
+            return (0, 0, 0)
+
+    class Connection:
+        def execute(self, sql):
+            calls.append(("execute", sql))
+            return Result()
+
+        def close(self):
+            calls.append(("close", None))
+
+    database._checkpoint_and_close(Connection())
+
+    assert calls == [
+        ("execute", "PRAGMA wal_checkpoint(TRUNCATE)"),
+        ("close", None),
+    ]
+
+
 class TestKpiMeasurements:
     def _make_kpi(self, event_id, site_id, cell_id, metric, value, ts=None):
         # insert_kpi_batch espera dicts (mesmo formato que collect_kpis() retorna)
@@ -122,6 +208,86 @@ class TestKpiMeasurements:
         database.insert_kpi_batch([m])
         rows = database.get_latest_kpi_by_metric(sample_event["id"], "availability")
         assert any(r["value"] == 99.0 for r in rows)
+
+    def test_latest_kpi_recorta_pela_janela_ancorada_no_dado(
+            self, event_in_db, sample_event):
+        event_id = sample_event["id"]
+        database.insert_kpi_batch([
+            self._make_kpi(event_id, "STALE", "STALE-1", "availability", 91.0,
+                           "2026-06-01T10:00:00Z"),
+            self._make_kpi(event_id, "BOUNDARY", "BOUNDARY-1", "availability", 95.0,
+                           "2026-06-01T10:05:00Z"),
+            self._make_kpi(event_id, "FRESH", "FRESH-1", "availability", 99.0,
+                           "2026-06-01T10:20:00Z"),
+        ])
+
+        latest = database.get_latest_kpi(event_id)
+        by_metric = database.get_latest_kpi_by_metric(event_id, "availability")
+
+        assert {row["site_id"] for row in latest} == {"BOUNDARY", "FRESH"}
+        assert {row["site_id"] for row in by_metric} == {"BOUNDARY", "FRESH"}
+
+    def test_latest_kpi_em_coleta_parada_mantem_o_ultimo_ciclo(
+            self, event_in_db, sample_event):
+        event_id = sample_event["id"]
+        # Datas deliberadamente antigas em relação ao relógio atual: a âncora
+        # precisa acompanhar o dado, portanto o último ciclo não desaparece.
+        database.insert_kpi_batch([
+            self._make_kpi(event_id, "SITE-OLD", "CELL-OLD", "availability", 98.0,
+                           "2025-01-01T08:00:00Z"),
+        ])
+
+        latest = database.get_latest_kpi(event_id)
+
+        assert [(row["site_id"], row["value"]) for row in latest] == [
+            ("SITE-OLD", 98.0)
+        ]
+
+    def test_latest_kpi_historico_ancora_no_max_timestamp(
+            self, event_in_db, sample_event):
+        event_id = sample_event["id"]
+        database.insert_kpi_batch([
+            self._make_kpi(event_id, "STALE", "STALE-1", "availability", 90.0,
+                           "2026-06-01T10:00:00Z"),
+            self._make_kpi(event_id, "VISIBLE", "VISIBLE-1", "availability", 96.0,
+                           "2026-06-01T10:20:00Z"),
+            self._make_kpi(event_id, "FUTURE", "FUTURE-1", "availability", 99.0,
+                           "2026-06-01T10:40:00Z"),
+        ])
+
+        latest = database.get_latest_kpi(
+            event_id, max_timestamp="2026-06-01T10:25:00Z")
+
+        assert {row["site_id"] for row in latest} == {"VISIBLE"}
+
+    def test_latest_site_kpi_por_metrica_recortado(
+            self, event_in_db, sample_event):
+        event_id = sample_event["id"]
+        rows = [
+            {
+                **self._make_kpi(event_id, "DUAL", "__site__", "utilization_dl", 10.0,
+                                 "2026-06-01T10:00:00Z"),
+                "scope": "SITE", "technology": "4G",
+            },
+            {
+                **self._make_kpi(event_id, "DUAL", "__site__", "utilization_dl", 30.0,
+                                 "2026-06-01T10:10:00Z"),
+                "scope": "SITE", "technology": "5G_NRDUCELL",
+            },
+            {
+                **self._make_kpi(event_id, "FRESH", "__site__", "utilization_dl", 50.0,
+                                 "2026-06-01T10:20:00Z"),
+                "scope": "SITE", "technology": "4G",
+            },
+        ]
+        database.insert_kpi_batch(rows)
+
+        latest = database.get_latest_site_kpi_by_metric(event_id, "utilization_dl")
+
+        assert {(row["site_id"], row["technology"]) for row in latest} == {
+            ("DUAL", "5G_NRDUCELL"),
+            ("FRESH", "4G"),
+        }
 
     def test_clear_event_history(self, event_in_db, sample_event):
         m = self._make_kpi(sample_event["id"], "SR-SPPNB2", "SR-SPPNB2_1", "dl_prb_usage", 70.0)

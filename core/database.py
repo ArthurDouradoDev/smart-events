@@ -45,6 +45,12 @@ _EVENT_CONFIG_CACHE_LIMIT = 2
 _event_config_cache: OrderedDict[tuple[str, str], dict] = OrderedDict()
 _event_config_cache_lock = threading.RLock()
 
+# Consultas que alimentam o estado atual do mapa não devem ressuscitar uma
+# medição antiga. A janela é ancorada no dado mais novo do evento (e não no
+# relógio), para continuar estável quando a coleta estiver parada.
+LATEST_WINDOW_MINUTES = 15
+_EVENT_DB_SCHEMA_VERSION = 1
+
 _requests_lib = None
 def _get_requests():
     global _requests_lib
@@ -163,20 +169,30 @@ def init_event_db(conn: sqlite3.Connection):
         conn.execute("ALTER TABLE kpi_measurements ADD COLUMN scope TEXT NOT NULL DEFAULT 'CELL'")
     if "technology" not in columns:
         conn.execute("ALTER TABLE kpi_measurements ADD COLUMN technology TEXT NOT NULL DEFAULT ''")
-    # Replays são esperados após uma queda antes de salvar o cursor. Conserva a
-    # primeira ocorrência de qualquer duplicata histórica e torna o replay seguro.
-    conn.execute("""
-        DELETE FROM kpi_measurements
-        WHERE id NOT IN (
-            SELECT MIN(id) FROM kpi_measurements
-            GROUP BY event_id, site_id, cell_id, timestamp, metric, scope, technology
-        )
-    """)
-    conn.execute("DROP INDEX IF EXISTS uq_kpi_measurement_replay")
-    conn.execute("""
-        CREATE UNIQUE INDEX uq_kpi_measurement_replay
-        ON kpi_measurements(event_id, site_id, cell_id, timestamp, metric, scope, technology)
-    """)
+    schema_version = conn.execute("PRAGMA user_version").fetchone()[0]
+    if schema_version < _EVENT_DB_SCHEMA_VERSION:
+        # Replays são esperados após uma queda antes de salvar o cursor. Esta é
+        # uma migração de mão única: conserva a primeira duplicata histórica e
+        # nunca repete o DELETE/DROP nas próximas aberturas do arquivo.
+        conn.execute("""
+            DELETE FROM kpi_measurements
+            WHERE id NOT IN (
+                SELECT MIN(id) FROM kpi_measurements
+                GROUP BY event_id, site_id, cell_id, timestamp, metric, scope, technology
+            )
+        """)
+        conn.execute("DROP INDEX IF EXISTS uq_kpi_measurement_replay")
+        conn.execute("""
+            CREATE UNIQUE INDEX uq_kpi_measurement_replay
+            ON kpi_measurements(event_id, site_id, cell_id, timestamp, metric, scope, technology)
+        """)
+        conn.execute(f"PRAGMA user_version = {_EVENT_DB_SCHEMA_VERSION}")
+    else:
+        # Bancos já migrados pagam somente garantias idempotentes de schema.
+        conn.execute("""
+            CREATE UNIQUE INDEX IF NOT EXISTS uq_kpi_measurement_replay
+            ON kpi_measurements(event_id, site_id, cell_id, timestamp, metric, scope, technology)
+        """)
     conn.commit()
 
 def get_event_conn(event_id: str) -> sqlite3.Connection:
@@ -222,15 +238,29 @@ def get_conn() -> sqlite3.Connection:
     return _local.conn
 
 
+def _checkpoint_and_close(conn: sqlite3.Connection) -> None:
+    """Trunca o WAL de uma conexão ociosa antes de fechá-la."""
+    try:
+        result = conn.execute("PRAGMA wal_checkpoint(TRUNCATE)").fetchone()
+        if result and result[0]:
+            _db_logger.debug("Checkpoint WAL ocupado ao fechar conexão: %s", tuple(result))
+    except sqlite3.Error as error:
+        # Fechar continua sendo obrigatório mesmo se outra conexão ainda
+        # estiver usando o WAL e impedir o checkpoint naquele instante.
+        _db_logger.debug("Não foi possível truncar WAL ao fechar conexão: %s", error)
+    finally:
+        conn.close()
+
+
 def close_conn():
     if hasattr(_local, "conn") and _local.conn:
-        _local.conn.close()
+        _checkpoint_and_close(_local.conn)
         _local.conn = None
     for attr in list(_event_local.__dict__.keys()):
         conn = getattr(_event_local, attr)
         if conn:
             try:
-                conn.close()
+                _checkpoint_and_close(conn)
             except Exception:
                 pass
         setattr(_event_local, attr, None)
@@ -781,19 +811,22 @@ def get_kpi_site_series(event_id: str, site_id: str, metric: str, minutes: int =
 def get_latest_site_kpi_by_metric(event_id: str, metric: str, max_timestamp: Optional[str] = None) -> List[dict]:
     """Última linha SITE de cada site/tecnologia para listas e mapas."""
     conn = get_event_conn(event_id)
-    ts_sql = " AND timestamp <= ?" if max_timestamp else ""
-    params = [event_id, metric] + ([max_timestamp] if max_timestamp else []) + [event_id, metric]
-    rows = conn.execute(f"""
+    bounds = _latest_kpi_window_bounds(conn, event_id, max_timestamp)
+    if not bounds:
+        return []
+    window_start, anchor = bounds
+    rows = conn.execute("""
         SELECT k.site_id, k.cell_id, k.metric, k.value, k.timestamp, k.technology, k.scope
         FROM kpi_measurements k
         INNER JOIN (
             SELECT site_id, technology, MAX(timestamp) max_ts
             FROM kpi_measurements
-            WHERE event_id = ? AND metric = ? AND scope = 'SITE' {ts_sql}
+            WHERE event_id = ? AND metric = ? AND scope = 'SITE'
+              AND timestamp >= ? AND timestamp <= ?
             GROUP BY site_id, technology
         ) latest ON latest.site_id = k.site_id AND latest.technology = k.technology AND latest.max_ts = k.timestamp
         WHERE k.event_id = ? AND k.metric = ? AND k.scope = 'SITE'
-    """, params).fetchall()
+    """, (event_id, metric, window_start, anchor, event_id, metric)).fetchall()
     return _canonical(rows, metric)
 
 
@@ -807,61 +840,71 @@ def get_latest_kpi_by_metric(
     Usado para calcular o valor contextual exibido na lista de sites.
     """
     conn = get_event_conn(event_id)
-    ts_filter = "AND k.timestamp <= ?" if max_timestamp else ""
-    params_inner = [event_id, metric]
-    if max_timestamp:
-        params_inner.append(max_timestamp)
-    params_inner.append(event_id)
-
-    rows = conn.execute(f"""
+    bounds = _latest_kpi_window_bounds(conn, event_id, max_timestamp)
+    if not bounds:
+        return []
+    window_start, anchor = bounds
+    rows = conn.execute("""
         SELECT k.site_id, k.cell_id, k.metric, k.value, k.timestamp, k.technology
         FROM kpi_measurements k
         INNER JOIN (
             SELECT site_id, cell_id, MAX(timestamp) AS max_ts
             FROM kpi_measurements
-            WHERE event_id = ? AND metric = ? {ts_filter}
+            WHERE event_id = ? AND metric = ?
+              AND timestamp >= ? AND timestamp <= ?
             GROUP BY site_id, cell_id
         ) latest ON k.site_id = latest.site_id
                     AND k.cell_id = latest.cell_id
                     AND k.timestamp = latest.max_ts
         WHERE k.event_id = ? AND k.metric = ?
-    """, params_inner + [metric]).fetchall()
+    """, (event_id, metric, window_start, anchor, event_id, metric)).fetchall()
     return _canonical(rows, metric)
+
+
+def _latest_kpi_window_bounds(
+    conn: sqlite3.Connection,
+    event_id: str,
+    max_timestamp: Optional[str] = None,
+) -> Optional[tuple[str, str]]:
+    """Resolve uma vez o início e a âncora da janela de estado atual."""
+    anchor = max_timestamp
+    if anchor is None:
+        anchor = conn.execute(
+            "SELECT MAX(timestamp) FROM kpi_measurements WHERE event_id = ?",
+            (event_id,),
+        ).fetchone()[0]
+    if not anchor:
+        return None
+    window_start = conn.execute(
+        "SELECT strftime('%Y-%m-%dT%H:%M:%SZ', ?, ?)",
+        (anchor, f"-{LATEST_WINDOW_MINUTES} minutes"),
+    ).fetchone()[0]
+    if not window_start:
+        raise ValueError(f"Timestamp inválido para janela de KPI: {anchor!r}")
+    return window_start, anchor
 
 
 def get_latest_kpi(event_id: str, max_timestamp: Optional[str] = None) -> List[dict]:
     """Retorna última medição de cada célula para calcular status dos sites (opcionalmente filtrada até max_timestamp)."""
     conn = get_event_conn(event_id)
-    if max_timestamp:
-        rows = conn.execute("""
-            SELECT k.site_id, k.cell_id, k.metric, k.value, k.timestamp, k.technology
-            FROM kpi_measurements k
-            INNER JOIN (
-                SELECT site_id, cell_id, metric, MAX(timestamp) AS max_ts
-                FROM kpi_measurements
-                WHERE event_id = ? AND timestamp <= ?
-                GROUP BY site_id, cell_id, metric
-            ) latest ON k.site_id = latest.site_id
-                        AND k.cell_id = latest.cell_id
-                        AND k.metric  = latest.metric
-                        AND k.timestamp = latest.max_ts
-            WHERE k.event_id = ?
-        """, (event_id, max_timestamp, event_id)).fetchall()
-    else:
-        rows = conn.execute("""
-            SELECT k.site_id, k.cell_id, k.metric, k.value, k.timestamp, k.technology
-            FROM kpi_measurements k
-            INNER JOIN (
-                SELECT site_id, cell_id, metric, MAX(timestamp) AS max_ts
-                FROM kpi_measurements
-                WHERE event_id = ?
-                GROUP BY site_id, cell_id, metric
-            ) latest ON k.site_id = latest.site_id
-                        AND k.cell_id = latest.cell_id
-                        AND k.metric  = latest.metric
-                        AND k.timestamp = latest.max_ts
-            WHERE k.event_id = ?
-        """, (event_id, event_id)).fetchall()
+    bounds = _latest_kpi_window_bounds(conn, event_id, max_timestamp)
+    if not bounds:
+        return []
+    window_start, anchor = bounds
+    rows = conn.execute("""
+        SELECT k.site_id, k.cell_id, k.metric, k.value, k.timestamp, k.technology
+        FROM kpi_measurements k
+        INNER JOIN (
+            SELECT site_id, cell_id, metric, MAX(timestamp) AS max_ts
+            FROM kpi_measurements
+            WHERE event_id = ? AND timestamp >= ? AND timestamp <= ?
+            GROUP BY site_id, cell_id, metric
+        ) latest ON k.site_id = latest.site_id
+                    AND k.cell_id = latest.cell_id
+                    AND k.metric  = latest.metric
+                    AND k.timestamp = latest.max_ts
+        WHERE k.event_id = ?
+    """, (event_id, window_start, anchor, event_id)).fetchall()
     return _canonical(rows)
 
 

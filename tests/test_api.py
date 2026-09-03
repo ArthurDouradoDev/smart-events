@@ -794,6 +794,30 @@ class TestSiteMerge:
 
         assert first["SPSMG7"] == second["SPSMG7"] == 80.0
 
+    def test_get_sites_status_igual_com_recorte(
+            self, api, sample_event, monkeypatch):
+        event = _twin_sites_event(sample_event, "twin-window-parity")
+        database.save_event(event)
+        _insert_cell_kpi(
+            event["id"], "725483", "4G-SPSMG7-0", "4G", 10.0,
+            "2026-08-19T12:00:00Z")
+        _insert_site_kpi(
+            event["id"], "1774059", "5G_NRDUCELL", 80.0,
+            "2026-08-19T12:05:00Z")
+
+        bounded = api.get_sites(event["id"], metric="utilization_dl")
+        monkeypatch.setattr(
+            database,
+            "_latest_kpi_window_bounds",
+            lambda *_args, **_kwargs: ("0001-01-01T00:00:00Z", "9999-12-31T23:59:59Z"),
+        )
+        unbounded = api.get_sites(event["id"], metric="utilization_dl")
+
+        assert bounded == unbounded
+        spsmg7 = next(site for site in bounded if site["id"] == "SPSMG7")
+        assert spsmg7["status"] == "warning"
+        assert spsmg7["metric_value"] == 80.0
+
     def test_serie_do_site_fundido_traz_uma_entrada_por_tecnologia(
             self, api, sample_event):
         event = _twin_sites_event(sample_event, "twin-series")
