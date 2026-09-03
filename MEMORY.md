@@ -2213,3 +2213,26 @@ para 1.454 sites, todas as 24.086 células, 50 clusters e 500 alarmes; nenhum id
 zoom inicial já no máximo. No rerun isolado, dois testes de mapa que falharam na suíte passaram,
 confirmando instabilidade do módulo não tocado; ficaram 9 passed / 2 failures (filtro preexistente
 e botão `+` desabilitado no zoom máximo). Nenhuma falha ocorreu nos arquivos/caminhos alterados.
+
+---
+
+## 2026-09-02 — Encerramento ordenado do WinForms/pythonnet
+
+O stack `InternalPythonnetException` → `InvalidAsynchronousStateException` aparecia depois de
+fechar a janela: a bridge ainda podia concluir uma chamada ou o timer de repaint podia tocar no
+WinForms depois que o message loop já tinha sido destruído.
+
+- `main.py::_ShutdownCoordinator` cancela e aguarda o repaint, remove o callback do scheduler e
+  para seus workers antes da destruição da janela. É idempotente e atende tanto o botão customizado
+  quanto Alt+F4/fechamento nativo via `window.events.closing` (evento bloqueante no pywebview).
+- O botão customizado devolve sucesso à bridge e posta o fechamento nativo 100 ms depois. Isso
+  impede que o HWND/message loop desapareça enquanto o pythonnet ainda serializa o retorno.
+- Timers de repaint/close são daemon. O `finally` repete o shutdown defensivamente e fecha as
+  conexões SQLite da thread principal antes de desanexar a moldura.
+- Regressões novas em `tests/test_main_shutdown.py`: cancelamento/stop idempotente, fechamento
+  diferido sem duplicata e proibição de repaint depois do shutdown.
+
+**Validação:** 87 passed (`test_main_shutdown`, `test_window_chrome`,
+`test_frontend_window_chrome_ui`); smoke real com dados mock isolados fechou por `WM_CLOSE` com
+`exit_code=0` e nenhuma ocorrência de `InternalPythonnetException`,
+`InvalidAsynchronousStateException` ou `Unhandled Exception` no stderr.

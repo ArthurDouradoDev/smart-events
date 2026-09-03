@@ -1160,3 +1160,22 @@ interna no JSON salvo.
 **Regra:** metadado de cache acrescentado ao objeto de leitura precisa ser removido na fronteira
 de persistência. Quando um cache devolve cópia rasa, toda estrutura aninhada é somente leitura;
 caller que precise alterá-la deve copiar exatamente o ramo que vai modificar.
+
+---
+
+## 2026-09-02 — Smoke de fechamento não encontrou HWND por `Process.MainWindowHandle`
+
+**Como apareceu:** a primeira validação automática do shutdown iniciou `main.py --mock` com o
+console oculto e esperou o PowerShell preencher `Process.MainWindowHandle`. O campo permaneceu zero
+por 30 s, apesar de o log provar que o WebView2 abriu em quatro segundos com um HWND válido.
+
+**Causa raiz:** o processo Python oculto não publica de forma confiável a janela WinForms criada
+internamente pelo pywebview como sua `MainWindowHandle`. A janela existe, mas essa propriedade do
+wrapper de processo não é a fonte de verdade para a hierarquia nativa usada pelo app.
+
+**Correção:** o segundo smoke leu `Window chrome anexado | hwnd=...` do log isolado — valor obtido
+por `window.native.Handle`/controlador — e enviou `WM_CLOSE` diretamente a ele. Fechou com código
+zero e sem erro de pythonnet.
+
+**Regra:** testes externos da janela customizada devem obter o HWND pelo diagnóstico do
+`WindowChromeController`, nunca por `Process.MainWindowHandle` quando o console foi ocultado.

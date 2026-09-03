@@ -76,6 +76,62 @@ FRONTEND = resource_dir() / "frontend" / "index.html"
 # Segundos apos o `loaded` para refazer a superficie do WebView2. Medido: em
 # t+10s o dashboard ja esta montado e o ciclo devolve o quadro completo.
 FIRST_PAINT_REPAINT_DELAY = 8.0
+# Dá tempo para a bridge JS receber o retorno de ``window_close`` antes que o
+# WinForms destrua o message loop usado pelo pythonnet para completar a chamada.
+WINDOW_CLOSE_BRIDGE_DELAY = 0.10
+
+
+class _ShutdownCoordinator:
+    """Interrompe callbacks de fundo antes de destruir a janela WinForms."""
+
+    def __init__(self, scheduler_obj, chrome_controller, timer_factory=threading.Timer):
+        self._scheduler = scheduler_obj
+        self._chrome = chrome_controller
+        self._timer_factory = timer_factory
+        self._lock = threading.Lock()
+        self._complete = False
+        self._close_scheduled = False
+        self._repaint_timer = None
+
+    def schedule_repaint(self, delay: float) -> bool:
+        with self._lock:
+            if self._complete or self._repaint_timer is not None:
+                return False
+            timer = self._timer_factory(delay, self._chrome.force_repaint)
+            timer.daemon = True
+            self._repaint_timer = timer
+            timer.start()
+            return True
+
+    def shutdown(self) -> None:
+        with self._lock:
+            if self._complete:
+                return
+            timer = self._repaint_timer
+            if timer is not None:
+                timer.cancel()
+                if timer is not threading.current_thread():
+                    timer.join(timeout=1.0)
+            try:
+                self._scheduler.set_update_callback(None)
+            except Exception:
+                logger.exception("Falha ao remover callback do scheduler")
+            try:
+                self._scheduler.stop()
+            except Exception:
+                logger.exception("Falha ao encerrar o scheduler")
+            self._complete = True
+
+    def request_close(self) -> bool:
+        self.shutdown()
+        with self._lock:
+            if self._close_scheduled:
+                return True
+            self._close_scheduled = True
+            timer = self._timer_factory(WINDOW_CLOSE_BRIDGE_DELAY, self._chrome.close)
+            timer.daemon = True
+            timer.start()
+        return True
 
 
 _JOB_HANDLE = None  # mantém o handle do Job Object vivo durante a sessão
@@ -407,6 +463,7 @@ def main():
 
     import webview
     from api.api import Api
+    from core.scheduler import scheduler
     from core.window_chrome import WindowChromeController
 
     host = host_diagnostic()
@@ -479,6 +536,7 @@ def main():
     os.environ.setdefault("WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS", "--disk-cache-size=1")
 
     chrome_controller = WindowChromeController(log=logger)
+    shutdown = _ShutdownCoordinator(scheduler, chrome_controller)
     # A query informa o modo já na primeira pintura. Sem ela a barra só apareceria
     # depois do primeiro ``window_get_state``, empurrando todo o layout 36 px para
     # baixo com o WebView2 ainda carregando. O fragmento continua sendo exatamente
@@ -506,7 +564,7 @@ def main():
         return chrome_controller.minimize()
 
     def window_close():
-        return chrome_controller.close()
+        return shutdown.request_close()
 
     def window_get_state():
         return chrome_controller.get_state()
@@ -575,12 +633,17 @@ def main():
             # dashboard so termina de ser montado alguns segundos depois do
             # `loaded` — refazer a superficie antes disso nao adianta, a
             # corrida ainda estaria em curso.
-            threading.Timer(
-                FIRST_PAINT_REPAINT_DELAY, chrome_controller.force_repaint
-            ).start()
+            shutdown.schedule_repaint(FIRST_PAINT_REPAINT_DELAY)
+
+    def _on_closing():
+        # ``closing`` é bloqueante no pywebview: os workers param enquanto a
+        # thread WinForms ainda possui message loop. Cobre Alt+F4 e fechamento
+        # pela barra nativa; o botão customizado já chama o mesmo coordenador.
+        shutdown.shutdown()
 
     window.events.before_show += _on_before_show
     window.events.loaded += _on_loaded
+    window.events.closing += _on_closing
 
     try:
         webview.start(
@@ -595,6 +658,10 @@ def main():
             private_mode=False,
         )
     finally:
+        # Defesa para falha de startup e para qualquer caminho que não tenha
+        # disparado ``closing``. Aqui estamos novamente na thread principal.
+        shutdown.shutdown()
+        db.close_conn()
         # Em uma destruicao Win32 normal o WNDPROC ja foi restaurado por
         # WM_NCDESTROY. O finally cobre falhas de startup e encerramentos atipicos.
         chrome_controller.detach()
