@@ -1233,3 +1233,41 @@ do patch e conferir o escopo de cada variável; não confiar em substituição t
 de linha quando a função possui vários ramos paralelos.
 
 ---
+
+## 2026-09-04 — `test_zoom_programatico_tambem_permanece` falha ~2 em 3 execuções
+
+**Como apareceu:** gate da suíte antes de regerar o build-base: `1 failed, 915 passed`, com
+`AssertionError: assert 19 == (19 + 3)`. Rodando o arquivo isolado, **3** testes falhavam, dois
+deles aprovados na suíte completa — sinal claro de precondição instável, não de regressão.
+
+**O que NÃO era:** `server_frontend/index.html` e `tests/test_server_frontend_polygon_map.py` estão
+**byte-idênticos** entre `df99977` (commit do build anterior) e o HEAD `ecde4d7`. Nenhum dos 8
+commits novos toca o código sob teste. `git diff --stat df99977 HEAD -- <arquivos>` vazio resolveu
+isso antes de qualquer leitura de código.
+
+**Causa raiz:** o `_loaded_editor()` sobe o editor com um CSV só de cabeçalho (`sites = 0`), e o
+zoom inicial do mapa **alterna entre 11 e 19** conforme o enquadramento inicial ganhe ou não a
+corrida. 19 é o `maxZoom` do Leaflet. Quando o mapa nasce em 19, `map.setZoom(19 + 3)` é
+**grampeado em 19** e a asserção quebra. Medido em 4 rodadas instrumentadas: `inicial=11 → 14`,
+`11 → 14`, `19 → 19`, `19 → 19`.
+
+O teste quer provar que um reenquadramento automático não desfaz o zoom do operador — e essa
+propriedade **continua valendo nas duas situações**: em 11, o +3 se manteve. A falha é do teste
+medir a partir de um ponto onde o incremento é impossível, não do produto.
+
+**Regras:**
+
+1. **Teste que soma a partir de um valor lido do ambiente precisa garantir o cabeçalho.** Ler
+   `antes = getZoom()` e afirmar `antes + 3` só é válido se `antes + 3 <= maxZoom`. O certo é fixar
+   o ponto de partida (`map.setZoom(13)` antes de medir) ou afirmar contra
+   `min(antes + 3, map.getMaxZoom())`.
+2. **Falha intermitente: comparar o fonte com o último commit bom antes de ler código.** Dois
+   comandos de `git diff` provaram que o alvo não mudou e pouparam a caçada a uma regressão
+   inexistente.
+3. **Rodar o arquivo isolado é parte do diagnóstico, não confirmação.** Aqui isolar *aumentou* as
+   falhas de 1 para 3: a ordem e o tempo da suíte cheia mascaravam a instabilidade.
+
+**Estado:** não corrigido — a sessão era de build, e o teste está fora do escopo dos commits
+entregues. Correção sugerida: fixar o zoom inicial no `_loaded_editor()`.
+
+---

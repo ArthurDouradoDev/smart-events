@@ -2360,3 +2360,46 @@ gate Playwright de gráfico/visão geral/cluster/poll = **47 passed**. Suíte co
 Os oito testes novos da fase (4 API + 4 Playwright) passaram.
 
 ---
+
+## 2026-09-04 — Build-base 1.0.0 regerado no commit `ecde4d7`
+
+O build-base em `dist/base/1.0.0/` estava parado em `df99977`, **8 commits atrás**: não continha a
+exportação de dados do evento, o split `get_site_layout`/`get_site_status`, o recorte de janela dos
+KPIs, a linha 4G/5G sempre visível, o `force_repaint` do primeiro quadro nem a correção do
+`VERSION` empacotado. Regerado com `python build.py base --force` no `.venv-build` (CPython
+3.12.10 x64), com `PLAYWRIGHT_BROWSERS_PATH=%LOCALAPPDATA%\ms-playwright`.
+
+**Resultado:** 1.731 arquivos | 897,6 MiB descompactados | payload 378,8 MiB |
+`executable_sha256 = b3c46df4e2e239b2ef5309656650b6b3c54817dcb6f70c718830a32cd4796b47` |
+`source_dirty: false` (o build anterior saiu com a árvore suja) | `signed: false` (sem certificado
+nesta máquina).
+
+**Gates executados, nesta ordem:**
+
+1. Suíte completa no `.venv-build`: **915 passed, 10 skipped, 1 failed** em 413 s. A única falha é
+   `test_zoom_programatico_tambem_permanece`, flake pré-existente registrado no `ERRORS.md` desta
+   mesma data. `test_filtro_de_alarmes_e_alertas_respeita_o_site_selecionado`, que falhava desde a
+   Fase 2, **passou** — o baseline conhecido de 1 falha mudou de teste, não de contagem.
+2. `self-test` do executável congelado: **13/13 verde**, incluindo a verificação nova de
+   `frontend/js/event_export.js` adicionada por `ecde4d7`.
+3. `frontend/` empacotado **byte-idêntico** ao fonte (22 arquivos, SHA-256 par a par).
+4. Chromium empacotado = **1228**, exatamente a revisão que o `browsers.json` do Playwright 1.61.0
+   exige. O campo `playwright_browsers` do manifesto é enganoso e diz `chromium: 1234`:
+   `_browser_revisions` varre o cache inteiro e sobrescreve por nome, então grava a revisão mais
+   nova presente na pasta, **não a que foi empacotada**. Conferir sempre
+   `_internal/ms-playwright/`, nunca o manifesto.
+5. `core.event_export`, `openpyxl`, `pandas`, `core.paths` e `api.api` presentes no `PYZ-00.toc`.
+   `winreg`, usado pelo `downloads_dir()` novo, **não** aparece no PYZ porque é builtin no Windows
+   (`sys.builtin_module_names`) — ausência esperada, não defeito.
+6. `VERSION` presente em `_internal/` (a correção de `f3605a4`, sem a qual o congelado assume
+   0.0.0 e recusa todo `.sepack`).
+7. Boot real do `.exe` em `--mock` com `SMARTEVENTS_DATA_DIR` isolado: servidor em 8000, chrome
+   custom anexado, banco e sementes criados, "Interface carregada", **zero ERROR/CRITICAL/Traceback**.
+
+**Não gerado nesta sessão:** nenhum `.sepack` e nenhum `Setup.exe`. O
+`Setup_SmartEvents_Rock_In_Rio_2026.exe` em `dist/distributions/` continua sendo o de `df99977` e
+**não** contém nada dos 8 commits novos — para atualizá-lo basta
+`python build.py distribution --events rock-in-rio-2026 --format setup --smoke`, que reaproveita
+este build-base sem rodar o PyInstaller de novo.
+
+---
