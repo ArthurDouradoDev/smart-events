@@ -204,6 +204,19 @@ class Api:
                         except Exception:
                             pass
 
+                # Rede de segurança para o encerramento anormal: se o app foi
+                # morto, o shutdown() nunca rodou e a tabela sobreviveu. Zerar
+                # aqui também é o que torna real a garantia de "só os alarmes
+                # mais recentes" — o scheduler já está parado neste ponto.
+                try:
+                    removed = db.clear_alarms(event_id)
+                    if removed:
+                        logger.info(
+                            f"activate_event: {removed} alarmes residuais removidos"
+                        )
+                except Exception as ex:
+                    logger.warning(f"activate_event: falha ao zerar alarmes: {ex}")
+
                 scheduler.set_update_callback(_notify)
                 try:
                     scheduler.start(config, mock=mock)
@@ -2550,12 +2563,14 @@ class Api:
     def set_alarm_filter(self, event_id: str, names: list) -> dict:
         """Persiste alarm_filter na config do evento e recoleta na hora (se ativo)."""
         try:
+            from core.collector import _DEFAULT_ALARM_NAMES
             if not isinstance(names, list):
                 return {"ok": False, "error": "names deve ser uma lista de nomes."}
             config = db.get_event(event_id)
             if not config:
                 return {"ok": False, "error": "Evento não encontrado"}
             oss = dict(config.get("oss", {}) or {})
+            previous = oss.get("alarm_filter") or list(_DEFAULT_ALARM_NAMES)
             oss["alarm_filter"] = names
             config["oss"] = oss
             db.save_event(config)
@@ -2567,6 +2582,15 @@ class Api:
             global _active_event
             if _active_event and _active_event.get("id") == event_id:
                 _active_event.setdefault("oss", {})["alarm_filter"] = names
+
+            # Tipo desmarcado sai do banco. Deixá-lo para a reconciliação o marcaria
+            # como "limpo", o que é falso: ele não foi limpo na rede, foi desselecionado.
+            removed = [name for name in previous if name not in names]
+            if removed:
+                try:
+                    db.delete_alarms_by_names(event_id, removed)
+                except Exception as ex:
+                    logger.warning(f"set_alarm_filter: falha ao remover tipos desmarcados: {ex}")
 
             # Reflete no coletor ativo (lê oss.alarm_filter a cada ciclo) e recoleta já.
             if (scheduler.is_recording and scheduler._event_config

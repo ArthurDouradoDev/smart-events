@@ -249,7 +249,8 @@ class Scheduler:
 
     def _apply_result(self, collector: str, result: CollectionResult, started_at: float,
                       persist: Callable, evaluate: Optional[Callable] = None,
-                      context: Optional[CollectionContext] = None) -> bool:
+                      context: Optional[CollectionContext] = None,
+                      finalize: Optional[Callable] = None) -> bool:
         if not isinstance(result, CollectionResult):
             raise TypeError(f"{collector} retornou {type(result).__name__}, esperado CollectionResult")
         context = context or self._current_context()
@@ -274,6 +275,12 @@ class Scheduler:
                 result.duplicate = max(result.duplicate, len(measurements) - inserted)
                 if evaluate:
                     evaluate(measurements, context)
+            # Fecha o ciclo depois de persistir e ainda sob o lock. Roda também com
+            # `measurements` vazio: "nenhum alarme ativo" é justamente o caso em que
+            # a reconciliação mais importa — sem isso, limpar o último alarme deixaria
+            # a lista antiga na tela para sempre.
+            if finalize and result.state in {"data", "empty"}:
+                finalize()
             # Checkpoints pertencem ao lote e usam a identidade capturada pelo worker.
             discarded_all = (
                 collector == "kpi"
@@ -406,8 +413,23 @@ class Scheduler:
             t0 = time.time()
             try:
                 result = context.collector.collect_alarms()
+                finalize = None
+                if result.coverage.get("complete"):
+                    # O iManager para de devolver o alarme quando ele é limpo; sumir
+                    # do ciclo é a evidência. Só vale num lote íntegro — uma paginação
+                    # interrompida limparia o painel inteiro.
+                    active = {m["csn"] for m in result.measurements if m.get("csn") is not None}
+                    cleared_at = datetime.utcnow().strftime('%Y-%m-%dT%H:%M:%SZ')
+                    event_id = context.event_id
+
+                    def finalize():
+                        marked = db.reconcile_alarms(event_id, active, cleared_at)
+                        if marked:
+                            logger.info("Alarmes: %s marcados como limpos (ausentes do ciclo).",
+                                        marked)
                 applied = self._apply_result(
-                    "alarms", result, t0, db.insert_alarms_batch, context=context)
+                    "alarms", result, t0, db.insert_alarms_batch, context=context,
+                    finalize=finalize)
                 return result.inserted if applied else 0
             except Exception as e:
                 self._apply_unexpected_error(context, "alarms", e, t0)

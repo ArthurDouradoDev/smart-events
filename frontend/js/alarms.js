@@ -271,7 +271,9 @@ function _esc(str) {
     .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 }
 
-// Substitui a lista de alarmes por uma foto fresca (não acumula: é snapshot corrente).
+// Substitui a lista por uma foto fresca — e agora ela é de fato um snapshot do
+// corrente: o backend só devolve alarmes ativos (marca como limpo o que sumiu da
+// coleta), então o que não vem mais aqui também some da tela.
 export function injectAlarms(alarms) {
   State.set("alarms", alarms || []);
 }

@@ -928,10 +928,12 @@ class EventExportService:
 
     def _export_alarms(self, job_id, sinks, conn, event_id, warnings):
         self._set(job_id, status="exporting_alarms", dataset="alarms", message="Exportando alarmes")
+        # Exporta ativos e limpos: o CSV é registro forense do evento e a coluna
+        # `cleared` diz o estado. Só o painel filtra.
         raw_headers = [
             "csn", "event_id", "alarm_id", "alarm_group_id", "alarm_name", "severity",
             "source", "ip", "location", "occur_time", "arrive_time", "additional_info",
-            "collected_at",
+            "collected_at", "cleared", "clear_time", "acked",
         ]
         headers = raw_headers + ["collected_at_utc", "collected_at_brasilia", "data_brasilia"]
         sinks.ensure("dados/alarmes.csv", headers)
@@ -943,6 +945,8 @@ class EventExportService:
             self._check_cancel(job_id)
             for source in batch:
                 row = dict(source)
+                row["cleared"] = bool(row.get("cleared"))
+                row["acked"] = bool(row.get("acked"))
                 times = _time_fields(source["collected_at"])
                 invalid += int(not times["valid"])
                 row.update({"collected_at_utc": times["utc"],

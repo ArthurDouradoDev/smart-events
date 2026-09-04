@@ -2403,3 +2403,112 @@ nesta máquina).
 este build-base sem rodar o PyInstaller de novo.
 
 ---
+
+---
+
+## 2026-09-04 — Fase 1 do plano de alarmes: o alarme limpo sai do painel
+
+Implementa a Fase 1 de `plano-alarmes-e-refresh-kpis.md`. O app guardava todo alarme que ja viu e
+nunca tirava nenhum: `_flatten_alarm` descartava `cleared`/`clearUtc`, a tabela nao tinha coluna
+para eles e a gravacao era `INSERT OR IGNORE` por `csn` — um alarme que voltasse ja limpo ficava
+congelado como estava. Agora o app **guarda** o estado de limpeza, **atualiza** o alarme que ja
+conhece e **conclui** que o que sumiu da coleta foi limpo.
+
+**Decisoes travadas:**
+
+- **`collected_at` e a PRIMEIRA vez que o app viu o alarme, nao a ultima.** O plano previa
+  `collected_at = excluded.collected_at` no upsert, mas isso conflita com o proprio modo historico
+  do plano (`collected_at <= ? AND (clear_time IS NULL OR clear_time > ?)`): se cada recoleta
+  empurrasse o carimbo para frente, um alarme ativo desapareceria do proprio passado na timeline.
+  O upsert atualiza `severity`, `cleared`, `clear_time`, `acked` e `additional_info` — nunca
+  `collected_at`. Coberto por `test_upsert_preserva_o_primeiro_collected_at`.
+- **Reconciliar exige ciclo integro E saudavel.** `_collect_alarm_pages` devolve `(rows, complete)`
+  e `collect_alarms` propaga em `coverage["complete"]`; o `finalize` do `_apply_result` so roda com
+  `state in {"data","empty"}`. Sao duas guardas independentes: um lote parcial (pagina vazia no
+  meio) ou um erro de sessao jamais limpam o painel.
+- **Reconciliar roda tambem com `measurements` vazio.** "Nenhum alarme ativo" e justamente o caso
+  em que a reconciliacao mais importa — sem isso, limpar o ultimo alarme deixaria a lista antiga na
+  tela para sempre. Por isso o `finalize` fica FORA do `if measurements:` do `_apply_result`.
+- **`reconcile_alarms` usa tabela temporaria, nunca `NOT IN (?, ?, ...)`.** O filtro real devolve
+  milhares de linhas e a lista inline estoura o limite de variaveis do SQLite. Provado com 5.000
+  csn em `test_reconcile_com_lote_grande`.
+- **Tipo desmarcado no filtro e APAGADO, nao marcado como limpo.** Ele nao foi limpo na rede, foi
+  desselecionado; marca-lo sujaria o `clear_time` com um evento que nunca aconteceu.
+  `set_alarm_filter` calcula `previous - names` e chama `db.delete_alarms_by_names`.
+- **Severidade 5/6 corrigidas para o catalogo real do FM** (`5:Event, 6:Alarm Name`). Nao existe
+  severidade "Cleared" — limpeza e o campo `cleared`. O mapa antigo dizia `6:"Cleared"`, que era
+  exatamente o que dava a impressao falsa de que o clear ja estava tratado.
+- **O CSV do export leva ativos e limpos**, com a coluna `cleared` dizendo o estado (`true`/`false`,
+  minusculo — `_safe_csv_value` normaliza booleanos). O arquivo e registro forense; so o painel
+  filtra.
+- **Migracao aditiva e preguicosa, por banco de evento.** Tres `ALTER TABLE` idempotentes em
+  `init_event_db`, sem bump de `_EVENT_DB_SCHEMA_VERSION`. O `CREATE INDEX idx_alarms_cleared` vem
+  **depois** dos ALTER: num banco legado a coluna ainda nao existe quando o `executescript` roda.
+- **MockCollector declara `coverage={"complete": True}`.** Ele gera csn novo a cada volta; sem
+  reconciliar, o `--mock` acumularia para sempre — reproduzindo em dev o proprio defeito corrigido.
+
+**Verificacao:** suite completa **950 passed, 10 skipped** (baseline era 916/10; +34 testes novos
+em `test_alarms.py`, `test_scheduler.py` e `test_event_export.py`). Script e2e com Scheduler real +
+MockCollector sobre banco de verdade: 13/13 (ciclo com dados, recoleta idempotente, alarme ausente,
+ciclo vazio, lote parcial, timeline nos tres instantes, banco legado migrado em disco). Boot real
+em `--mock` por 30 s: zero ERROR/Traceback, migracao rodou em todos os bancos abertos e o primeiro
+ciclo marcou **2.123 alarmes acumulados** como limpos em `testesantoamaro` — a lista que so crescia,
+medida na pratica. Bancos reais com backlog semelhante: `roadshow-salvador` 9.853,
+`rock-in-rio-2026` 6.151 (limpam no primeiro ciclo integro apos a ativacao).
+
+**Nao entregue nesta sessao:** Fase 3 (refresh da visao geral de KPIs) do mesmo plano, independente
+desta. A Fase 2 foi entregue logo em seguida (entrada abaixo).
+
+---
+
+## 2026-09-04 - Fase 2 do plano de alarmes: tabela zerada ao fechar o app
+
+Implementa a Fase 2 de `plano-alarmes-e-refresh-kpis.md`. Decisao de produto do chefe: ao fechar o
+aplicativo a tabela de alarmes e esvaziada, para que a proxima sessao comece do zero e colete os
+mais recentes. Cobre a **fronteira entre sessoes**; a Fase 1 cobre o evento em andamento.
+
+**O que mudou:**
+
+- `core/database.py`: `clear_alarms(event_id)` (DELETE + commit, devolve rowcount) e
+  `clear_all_alarms()` (varre `get_events()` somando).
+- `main.py`: `_ShutdownCoordinator` recebe `purge_alarms` no construtor (injetado como
+  `db.clear_all_alarms` na linha de construcao) e o invoca em `shutdown()`.
+- `api/api.py`: `activate_event` chama `db.clear_alarms(event_id)` antes de `scheduler.start`.
+
+**Decisoes travadas:**
+
+- **A limpeza roda DEPOIS de `scheduler.stop()`, nunca antes.** `stop()` sinaliza o `stop_event` dos
+  workers e os aguarda; invertida a ordem, um ciclo em voo regravaria a tabela logo apos o DELETE.
+  Provado por `test_shutdown_limpa_alarmes_depois_de_parar_o_scheduler`, que compara o `stop_count`
+  do scheduler no instante da chamada em vez de inspecionar a ordem do codigo.
+- **A limpeza e injetada, nao importada dentro do coordenador.** Mantem o padrao dos fakes de
+  `tests/test_main_shutdown.py` (`_FakeScheduler`, `_FakeChrome`) e evita I/O de banco em teste
+  unitario. A injecao e opcional: sem ela o coordenador continua funcionando.
+- **Falha na limpeza nao impede o fechamento da janela.** `try/except` com `logger.exception`, no
+  mesmo estilo dos blocos vizinhos. A idempotencia vem de graca do flag `_complete`, que cobre as
+  duas chamadas (`_on_closing` e o `finally` do `webview.start`).
+- **`activate_event` tambem zera** — rede de seguranca para o encerramento anormal. Se o app for
+  morto, o `shutdown()` nunca roda e a tabela sobrevive; como o objetivo declarado e "obter os mais
+  recentes", limpar na ativacao e o que torna a garantia real em vez de otimista. Falha aqui vira
+  `logger.warning` e nao bloqueia a ativacao.
+- **`clear_all_alarms` pula evento sem arquivo de banco.** `get_event_conn` CRIA o banco (com schema
+  completo) quando ele nao existe; sem a guarda de `get_event_db_path(...).exists()`, o encerramento
+  criaria arquivos so para apagar zero linhas. Nao e hipotetico ao contrario do que parece:
+  `save_event` cria o banco, mas uma linha em `events` pode sobreviver ao arquivo apagado da pasta
+  `data/`.
+- **Uma excecao por evento nao interrompe a varredura dos demais** — banco corrompido ou em uso vira
+  `logger.exception` e o laco segue.
+- **Nao e um `clear_event_history` disfarcado:** so a tabela `alarms` sai. KPIs e alertas ficam,
+  coberto por `test_clear_alarms_preserva_kpis_e_alertas`.
+
+**Verificacao:** suite completa **962 passed, 10 skipped** (baseline apos a Fase 1 era 950/10; +12
+testes novos em `test_alarms.py`, `test_main_shutdown.py` e `test_api.py`). Smoke com wiring real
+(`db.clear_all_alarms` injetado num `_ShutdownCoordinator` de verdade, sobre banco em disco com dois
+eventos): alarmes ativos e ja limpos zerados nos dois, KPIs intactos, segunda chamada de `shutdown()`
+sem efeito.
+
+**Ponto conhecido, nao tratado (fora do escopo do plano):** com a barra de titulo customizada, o
+botao de fechar chama `request_close()` numa thread da bridge JS, entao a limpeza abre conexoes
+thread-local que o `db.close_conn()` do `finally` (thread principal) nao fecha. E o mesmo padrao ja
+existente nos workers do scheduler — o commit e duravel e o WAL e reproduzido na proxima abertura,
+mas o `wal_checkpoint(TRUNCATE)` nao roda para essas conexoes.

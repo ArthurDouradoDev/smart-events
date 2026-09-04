@@ -84,10 +84,12 @@ WINDOW_CLOSE_BRIDGE_DELAY = 0.10
 class _ShutdownCoordinator:
     """Interrompe callbacks de fundo antes de destruir a janela WinForms."""
 
-    def __init__(self, scheduler_obj, chrome_controller, timer_factory=threading.Timer):
+    def __init__(self, scheduler_obj, chrome_controller, timer_factory=threading.Timer,
+                 purge_alarms=None):
         self._scheduler = scheduler_obj
         self._chrome = chrome_controller
         self._timer_factory = timer_factory
+        self._purge_alarms = purge_alarms
         self._lock = threading.Lock()
         self._complete = False
         self._close_scheduled = False
@@ -120,6 +122,15 @@ class _ShutdownCoordinator:
                 self._scheduler.stop()
             except Exception:
                 logger.exception("Falha ao encerrar o scheduler")
+            # Depois do stop(), nunca antes: um ciclo de coleta em voo regravaria
+            # a tabela logo apos o DELETE. stop() sinaliza o stop_event dos
+            # workers e os aguarda antes de retornar.
+            if self._purge_alarms is not None:
+                try:
+                    removed = self._purge_alarms()
+                    logger.info("Alarmes zerados no encerramento (%s linhas)", removed)
+                except Exception:
+                    logger.exception("Falha ao zerar os alarmes no encerramento")
             self._complete = True
 
     def request_close(self) -> bool:
@@ -536,7 +547,9 @@ def main():
     os.environ.setdefault("WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS", "--disk-cache-size=1")
 
     chrome_controller = WindowChromeController(log=logger)
-    shutdown = _ShutdownCoordinator(scheduler, chrome_controller)
+    shutdown = _ShutdownCoordinator(
+        scheduler, chrome_controller, purge_alarms=db.clear_all_alarms
+    )
     # A query informa o modo já na primeira pintura. Sem ela a barra só apareceria
     # depois do primeiro ``window_get_state``, empurrando todo o layout 36 px para
     # baixo com o WebView2 ainda carregando. O fragmento continua sendo exatamente

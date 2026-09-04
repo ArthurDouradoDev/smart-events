@@ -1271,3 +1271,39 @@ medir a partir de um ponto onde o incremento é impossível, não do produto.
 entregues. Correção sugerida: fixar o zoom inicial no `_loaded_editor()`.
 
 ---
+
+## 2026-09-04 — Dois enganos na Fase 1 dos alarmes (migracao e verificacao)
+
+### 1. `CREATE INDEX` sobre coluna que a migracao ainda nao criou
+
+**O que quase quebrou:** o indice novo `idx_alarms_cleared ON alarms(event_id, cleared)` foi
+escrito dentro do `conn.executescript(...)` de `init_event_db`, junto dos outros dois indices de
+`alarms`. Num banco de evento **legado** o `executescript` roda ANTES dos `ALTER TABLE`, entao a
+coluna `cleared` ainda nao existe e o `CREATE INDEX` levanta `no such column: cleared` — o banco
+nao abre. Como o `CREATE TABLE IF NOT EXISTS` acima nao faz nada num banco que ja tem a tabela, o
+erro so apareceria em quem ja usa o app, nunca num banco novo (nem na maioria dos testes).
+
+**Causa raiz:** tratar `executescript` (schema desejado) e os `ALTER TABLE` (migracao) como um bloco
+so. Sao duas fases com pre-condicoes diferentes: a primeira assume o schema novo, a segunda existe
+justamente porque ele pode nao estar la.
+
+**Regra:** todo indice que menciona coluna adicionada por migracao vai **depois** dos `ALTER TABLE`,
+como `conn.execute` avulso — nunca no `executescript` do schema. Coberto por
+`test_migracao_aditiva_em_banco_legado`, que monta em disco um `alarms` sem as tres colunas.
+
+### 2. Verificacao e2e que falhou por comprimir o tempo num segundo
+
+**O que aconteceu:** o script e2e afirmava "na timeline, antes da limpeza o alarme aparece" usando
+`timestamp = collected_at` da propria linha. Deu FALHA. O codigo estava certo: o script inteiro roda
+em menos de 1 s, entao `clear_time` caiu no **mesmo segundo** que `collected_at`, e a condicao
+`clear_time > ?` (ativo = limpo estritamente depois do instante consultado) e falsa na igualdade.
+
+**Causa raiz:** verificar uma propriedade temporal com dados cuja escala de tempo o proprio teste
+colapsou. Um evento real separa a chegada da limpeza por horas; o script separava por 0 ms.
+
+**Regra:** teste de janela temporal fixa os instantes explicitamente (chegou 10h, limpou 12h,
+consulta 11h) em vez de reaproveitar o relogio da execucao. E antes de "corrigir" o produto por
+causa de uma verificacao vermelha, conferir se a assercao e alcancavel com os dados que ela mesma
+gerou — aqui, o consertado foi o script.
+
+---

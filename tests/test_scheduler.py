@@ -319,3 +319,122 @@ class TestKpiAlertThresholdObjectFormat:
         scheduler._evaluate_vip_alerts([measurement], self._context(thresholds))
         assert len(alerts) == 1
         assert alerts[0]["severity"] == "CRITICAL"
+
+
+class TestAlarmReconciliation:
+    """O alarme limpo no iManager some da coleta; sumir e a unica evidencia.
+    Reconciliar so pode acontecer num ciclo integro e saudavel."""
+
+    @staticmethod
+    def _install(scheduler, result):
+        class Collector:
+            def collect_alarms(self):
+                return result
+
+        event = {"id": "event", "oss": {"region": "SP"}, "thresholds": {}}
+        context = CollectionContext(
+            generation=1, event_id="event", oss="SP", collector=Collector(),
+            event_config=event, stop_event=threading.Event(),
+        )
+        scheduler._generation = 1
+        scheduler._active_context = context
+        scheduler._collector = context.collector
+        scheduler._event_config = event
+        scheduler._recording = True
+        return context
+
+    @staticmethod
+    def _spy(monkeypatch):
+        calls = []
+        monkeypatch.setattr(db, "insert_alarms_batch", lambda rows: None)
+        monkeypatch.setattr(db, "reconcile_alarms",
+                            lambda event_id, active, cleared_at: calls.append(
+                                (event_id, set(active), cleared_at)) or len(active))
+        return calls
+
+    @staticmethod
+    def _alarm(csn):
+        return {"csn": csn, "event_id": "event", "alarm_name": "Cell Unavailable",
+                "severity": "Major", "arrive_time": "2026-06-30T10:00:00Z",
+                "collected_at": "2026-06-30T10:00:00Z"}
+
+    def test_ciclo_completo_reconcilia(self, scheduler, monkeypatch):
+        calls = self._spy(monkeypatch)
+        self._install(scheduler, CollectionResult.data(
+            [self._alarm(1), self._alarm(2)], coverage={"complete": True}))
+
+        scheduler._collect_alarms()
+
+        assert len(calls) == 1
+        assert calls[0][0] == "event"
+        assert calls[0][1] == {1, 2}
+        assert calls[0][2]  # carimbo de limpeza preenchido
+
+    def test_ciclo_vazio_reconcilia(self, scheduler, monkeypatch):
+        """Rede sem nenhum alarme ativo: sem isso, limpar o ultimo deixaria a
+        lista antiga na tela para sempre."""
+        calls = self._spy(monkeypatch)
+        self._install(scheduler, CollectionResult.empty(
+            "sem alarmes", coverage={"complete": True}))
+
+        scheduler._collect_alarms()
+
+        assert len(calls) == 1
+        assert calls[0][1] == set()
+
+    def test_ciclo_incompleto_nao_reconcilia(self, scheduler, monkeypatch):
+        """Paginacao interrompida nao pode limpar o painel inteiro."""
+        calls = self._spy(monkeypatch)
+        self._install(scheduler, CollectionResult.data(
+            [self._alarm(1)], coverage={"complete": False}))
+
+        scheduler._collect_alarms()
+
+        assert calls == []
+
+    def test_ciclo_sem_sinal_de_integridade_nao_reconcilia(self, scheduler, monkeypatch):
+        """Coletor sem nocao do estado da rede (CSV/Null) nunca limpa a tela."""
+        calls = self._spy(monkeypatch)
+        self._install(scheduler, CollectionResult.empty("sem fonte"))
+
+        scheduler._collect_alarms()
+
+        assert calls == []
+
+    @pytest.mark.parametrize("result_state", ["error", "auth_required"])
+    def test_ciclo_com_erro_nao_reconcilia(self, scheduler, monkeypatch, result_state):
+        calls = self._spy(monkeypatch)
+        result = (CollectionResult.error("HTTP 500", coverage={"complete": True})
+                  if result_state == "error"
+                  else CollectionResult.auth_required("401", coverage={"complete": True}))
+        self._install(scheduler, result)
+
+        scheduler._collect_alarms()
+
+        assert calls == []
+        assert scheduler.get_status()["alarms"]["state"] == result_state
+
+    def test_reconcilia_depois_de_persistir(self, scheduler, monkeypatch):
+        """A ordem importa: reconciliar antes do upsert marcaria como limpo
+        justamente o alarme que acabou de chegar."""
+        ordem = []
+        monkeypatch.setattr(db, "insert_alarms_batch", lambda rows: ordem.append("persist"))
+        monkeypatch.setattr(db, "reconcile_alarms",
+                            lambda *a, **k: ordem.append("reconcile") or 0)
+        self._install(scheduler, CollectionResult.data(
+            [self._alarm(1)], coverage={"complete": True}))
+
+        scheduler._collect_alarms()
+
+        assert ordem == ["persist", "reconcile"]
+
+    def test_resultado_obsoleto_nao_reconcilia(self, scheduler, monkeypatch):
+        """Troca de evento no meio do ciclo: o lote inteiro e descartado."""
+        calls = self._spy(monkeypatch)
+        context = self._install(scheduler, CollectionResult.data(
+            [self._alarm(1)], coverage={"complete": True}))
+        context.stop_event.set()
+
+        scheduler._collect_alarms()
+
+        assert calls == []

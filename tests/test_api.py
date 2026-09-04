@@ -67,6 +67,36 @@ class TestApiEvents:
             first["id"], second["id"]
         }
 
+    def test_activate_event_zera_alarmes_residuais(self, api_with_event):
+        """Encerramento anormal (app morto) deixa a tabela para trás: o
+        shutdown() nunca rodou. A ativação limpa antes de começar a coletar."""
+        api, ev = api_with_event
+        eid = ev["id"]
+        database.insert_alarms_batch([{
+            "csn": 1, "event_id": eid, "alarm_id": "6486", "alarm_group_id": "8193",
+            "alarm_name": "Cell Unavailable", "severity": "Major", "source": "SR-X",
+            "ip": "", "location": "", "occur_time": "2026-06-30T10:00:00Z",
+            "arrive_time": "2026-06-30T10:00:00Z", "additional_info": "",
+            "collected_at": "2026-06-30T10:00:00Z",
+        }])
+        conn = database.get_event_conn(eid)
+        assert conn.execute("SELECT COUNT(*) FROM alarms").fetchone()[0] == 1
+
+        assert api.activate_event(eid, mock=True)["ok"] is True
+
+        assert conn.execute("SELECT COUNT(*) FROM alarms").fetchone()[0] == 0
+
+    def test_activate_event_ok_mesmo_se_a_limpeza_falhar(self, api_with_event, monkeypatch):
+        """Falha ao zerar não pode impedir a ativação do evento."""
+        api, ev = api_with_event
+
+        def explode(*_args, **_kwargs):
+            raise RuntimeError("database is locked")
+
+        monkeypatch.setattr(database, "clear_alarms", explode)
+
+        assert api.activate_event(ev["id"], mock=True)["ok"] is True
+
     def test_end_event(self, api_with_event):
         api, ev = api_with_event
         result = api.end_event(ev["id"])

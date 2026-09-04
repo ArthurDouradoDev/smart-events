@@ -315,3 +315,35 @@ def test_latest_export_ignores_removed_artifact(tmp_db, sample_event, tmp_path):
     path = Path(job["result"]["path"])
     path.unlink()
     assert service.latest_for_event(sample_event["id"]) is None
+
+
+def test_export_alarmes_inclui_colunas_de_clear(tmp_db, sample_event, tmp_path):
+    """O CSV e registro forense: sai o ativo e tambem o ja limpo, com a coluna
+    `cleared` dizendo o estado. So o painel filtra."""
+    db.save_event(sample_event)
+    db.insert_alarms_batch([
+        {"csn": 1, "event_id": sample_event["id"], "alarm_id": "A", "alarm_group_id": "G",
+         "alarm_name": "Ativo", "severity": "Major", "source": "SITE", "ip": "", "location": "",
+         "occur_time": "2026-08-21T03:00:00Z", "arrive_time": "2026-08-21T03:00:00Z",
+         "additional_info": "", "collected_at": "2026-08-21T03:00:01Z"},
+        {"csn": 2, "event_id": sample_event["id"], "alarm_id": "A", "alarm_group_id": "G",
+         "alarm_name": "Limpo", "severity": "Major", "source": "SITE", "ip": "", "location": "",
+         "occur_time": "2026-08-21T03:00:00Z", "arrive_time": "2026-08-21T03:00:00Z",
+         "additional_info": "", "collected_at": "2026-08-21T03:00:01Z",
+         "cleared": 1, "clear_time": "2026-08-21T04:00:00Z", "acked": 1},
+    ])
+
+    archive, _ = _export(tmp_path, sample_event, {})
+    with archive:
+        rows = list(csv.DictReader(io.StringIO(
+            archive.read("dados/alarmes.csv").decode("utf-8-sig")
+        )))
+
+    assert {"cleared", "clear_time", "acked"} <= set(rows[0].keys())
+    by_csn = {row["csn"]: row for row in rows}
+    assert len(by_csn) == 2  # o limpo tambem e exportado
+    assert by_csn["1"]["cleared"] == "false"
+    assert by_csn["1"]["clear_time"] == ""
+    assert by_csn["2"]["cleared"] == "true"
+    assert by_csn["2"]["clear_time"] == "2026-08-21T04:00:00Z"
+    assert by_csn["2"]["acked"] == "true"

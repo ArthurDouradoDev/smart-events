@@ -156,12 +156,26 @@ def init_event_db(conn: sqlite3.Connection):
             occur_time      TEXT,
             arrive_time     TEXT,
             additional_info TEXT,
-            collected_at    TEXT NOT NULL             -- quando o app coletou (p/ timeline)
+            collected_at    TEXT NOT NULL,            -- 1ª vez que o app viu (p/ timeline)
+            cleared         INTEGER NOT NULL DEFAULT 0,
+            clear_time      TEXT,
+            acked           INTEGER NOT NULL DEFAULT 0
         );
 
         CREATE INDEX IF NOT EXISTS idx_alarms_arrive ON alarms(arrive_time);
         CREATE INDEX IF NOT EXISTS idx_alarms_name ON alarms(alarm_name);
     """)
+    # Bancos anteriores ao estado de limpeza não têm as três colunas. Migração
+    # aditiva e idempotente — não exige bump de _EVENT_DB_SCHEMA_VERSION. O índice
+    # de leitura vem depois do ALTER: num banco legado a coluna ainda não existe.
+    alarm_columns = {row["name"] for row in conn.execute("PRAGMA table_info(alarms)")}
+    if "cleared" not in alarm_columns:
+        conn.execute("ALTER TABLE alarms ADD COLUMN cleared INTEGER NOT NULL DEFAULT 0")
+    if "clear_time" not in alarm_columns:
+        conn.execute("ALTER TABLE alarms ADD COLUMN clear_time TEXT")
+    if "acked" not in alarm_columns:
+        conn.execute("ALTER TABLE alarms ADD COLUMN acked INTEGER NOT NULL DEFAULT 0")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_alarms_cleared ON alarms(event_id, cleared)")
     # Bancos de eventos criados antes da Fase 2 não possuem ``scope``. A
     # migração é aditiva e mantém os históricos como linhas de célula.
     columns = {row["name"] for row in conn.execute("PRAGMA table_info(kpi_measurements)")}
@@ -1063,46 +1077,146 @@ def get_vip_series(event_id: str, vip_name: str, minutes: int = 60) -> List[dict
 # ── Alarms (iMaster FM website, filtrados por tipo) ─────────────────
 
 def insert_alarms_batch(measurements: List[dict]):
-    """Insere lote de alarmes no banco do evento. INSERT OR IGNORE por csn (dedup)."""
+    """Grava lote de alarmes no banco do evento (upsert por csn).
+
+    O mesmo csn recoletado atualiza o estado da linha — é assim que um alarme que
+    volta já limpo deixa de ficar congelado como estava na primeira coleta.
+    `collected_at` NÃO é atualizado: ele guarda a primeira vez que o app viu o
+    alarme, que é a semântica de que a timeline depende."""
     if not measurements:
         return
     event_id = measurements[0]["event_id"]
     conn = get_event_conn(event_id)
     try:
         conn.executemany("""
-            INSERT OR IGNORE INTO alarms
+            INSERT INTO alarms
                 (csn, event_id, alarm_id, alarm_group_id, alarm_name, severity,
-                 source, ip, location, occur_time, arrive_time, additional_info, collected_at)
+                 source, ip, location, occur_time, arrive_time, additional_info,
+                 collected_at, cleared, clear_time, acked)
             VALUES (:csn, :event_id, :alarm_id, :alarm_group_id, :alarm_name, :severity,
-                    :source, :ip, :location, :occur_time, :arrive_time, :additional_info, :collected_at)
-        """, measurements)
+                    :source, :ip, :location, :occur_time, :arrive_time, :additional_info,
+                    :collected_at, :cleared, :clear_time, :acked)
+            ON CONFLICT(csn) DO UPDATE SET
+                severity        = excluded.severity,
+                cleared         = excluded.cleared,
+                clear_time      = excluded.clear_time,
+                acked           = excluded.acked,
+                additional_info = excluded.additional_info
+        """, [{"cleared": 0, "clear_time": None, "acked": 0, **row} for row in measurements])
         conn.commit()
     except Exception:
         conn.rollback()
         raise
 
 
-def get_alarms(event_id: str, timestamp: Optional[str] = None, limit: int = 500) -> List[dict]:
-    """Lista alarmes do evento ordenados por arrive_time DESC.
+def reconcile_alarms(event_id: str, active_csns, cleared_at: str) -> int:
+    """Marca como limpo todo alarme ativo do evento ausente do ciclo corrente.
 
-    Com `timestamp` (modo histórico/timeline) filtra collected_at <= timestamp,
-    coerente com get_sites/get_vips."""
+    O iManager deixa de devolver o alarme quando ele é limpo; sumir da coleta é a
+    única evidência disponível. Só deve ser chamado com um ciclo íntegro (ver
+    `coverage["complete"]`), senão uma paginação interrompida limparia o painel.
+    Devolve quantas linhas foram marcadas."""
+    conn = get_event_conn(event_id)
+    try:
+        # Lote grande (milhares de csn) não cabe em NOT IN (?, ?, ...) — o limite de
+        # variáveis do SQLite estoura. Tabela temporária resolve sem limite prático.
+        conn.execute("CREATE TEMP TABLE IF NOT EXISTS active_csn (csn INTEGER PRIMARY KEY)")
+        conn.execute("DELETE FROM active_csn")
+        conn.executemany("INSERT OR IGNORE INTO active_csn (csn) VALUES (?)",
+                         [(csn,) for csn in active_csns if csn is not None])
+        cur = conn.execute("""
+            UPDATE alarms
+            SET cleared = 1, clear_time = COALESCE(clear_time, ?)
+            WHERE event_id = ? AND cleared = 0
+              AND csn NOT IN (SELECT csn FROM active_csn)
+        """, (cleared_at, event_id))
+        conn.execute("DELETE FROM active_csn")
+        conn.commit()
+        return cur.rowcount or 0
+    except Exception:
+        conn.rollback()
+        raise
+
+
+def get_alarms(event_id: str, timestamp: Optional[str] = None, limit: int = 500) -> List[dict]:
+    """Lista os alarmes ATIVOS do evento, ordenados por arrive_time DESC.
+
+    Com `timestamp` (modo histórico/timeline) devolve o que estava ativo naquele
+    instante: já coletado até ali e ainda não limpo — coerente com get_sites/get_vips."""
     conn = get_event_conn(event_id)
     if timestamp:
         rows = conn.execute("""
             SELECT * FROM alarms
             WHERE event_id = ? AND collected_at <= ?
+              AND (clear_time IS NULL OR clear_time > ?)
             ORDER BY arrive_time DESC
             LIMIT ?
-        """, (event_id, timestamp, limit)).fetchall()
+        """, (event_id, timestamp, timestamp, limit)).fetchall()
     else:
         rows = conn.execute("""
             SELECT * FROM alarms
-            WHERE event_id = ?
+            WHERE event_id = ? AND cleared = 0
             ORDER BY arrive_time DESC
             LIMIT ?
         """, (event_id, limit)).fetchall()
     return [dict(r) for r in rows]
+
+
+def delete_alarms_by_names(event_id: str, names: List[str]) -> int:
+    """Apaga os alarmes do evento cujos tipos saíram do filtro. Devolve o nº de linhas.
+
+    Desselecionar um tipo não é o mesmo que limpá-lo: marcá-lo como `cleared`
+    sujaria o `clear_time` com um evento que nunca aconteceu na rede."""
+    if not names:
+        return 0
+    conn = get_event_conn(event_id)
+    try:
+        placeholders = ",".join("?" for _ in names)
+        cur = conn.execute(
+            f"DELETE FROM alarms WHERE event_id = ? AND alarm_name IN ({placeholders})",
+            (event_id, *names),
+        )
+        conn.commit()
+        return cur.rowcount or 0
+    except Exception:
+        conn.rollback()
+        raise
+
+
+def clear_alarms(event_id: str) -> int:
+    """Esvazia a tabela de alarmes do evento. Devolve o nº de linhas removidas.
+
+    Chamada no encerramento do app e na ativação do evento: a próxima sessão
+    recomeça do zero em vez de arrastar alarmes que podem já ter sido limpos
+    no iManager enquanto o app estava fechado."""
+    conn = get_event_conn(event_id)
+    try:
+        cur = conn.execute("DELETE FROM alarms WHERE event_id = ?", (event_id,))
+        conn.commit()
+        return cur.rowcount or 0
+    except Exception:
+        conn.rollback()
+        raise
+
+
+def clear_all_alarms() -> int:
+    """Esvazia os alarmes de todos os eventos locais. Devolve o total removido.
+
+    Varre todos os eventos, não só o ativo, para que um evento antigo cujo
+    encerramento falhou também saia limpo. Eventos cujo banco ainda não existe
+    são pulados — abri-los só para apagar nada criaria o arquivo à toa."""
+    total = 0
+    for event in get_events():
+        event_id = event.get("id")
+        if not event_id or not get_event_db_path(event_id).exists():
+            continue
+        try:
+            total += clear_alarms(event_id)
+        except Exception:
+            # Um banco corrompido ou em uso não pode interromper a varredura
+            # dos demais — nem, no encerramento, o fechamento da janela.
+            _db_logger.exception("Falha ao limpar alarmes do evento %s", event_id)
+    return total
 
 
 # ── Alerts ──────────────────────────────────────────────────────────

@@ -101,8 +101,10 @@ _ALARM_PAGE = 148            # tamanho da janela (igual ao navegador)
 _ALARM_SLEEP = 0.3           # pausa entre páginas, para não martelar o servidor
 _DEFAULT_ALARM_NAMES = ["RF Unit VSWR Threshold Crossed", "Cell Unavailable"]
 
+# Catálogo do FM (alarmSeverityInt do app_main.js). Não existe severidade "Cleared":
+# limpeza é o campo `cleared` da linha, não um nível.
 _ALARM_SEVERITY = {1: "Critical", 2: "Major", 3: "Minor", 4: "Warning",
-                   5: "Indeterminate", 6: "Cleared"}
+                   5: "Event", 6: "Alarm Name"}
 
 # condition fixa: níveis/status/eventType que a tela "Current Alarms" sempre envia.
 _ALARM_BASE_CONDITION = {
@@ -229,6 +231,11 @@ def _flatten_alarm(a: dict, event_id: str, collected_at: str) -> dict:
         "arrive_time":     a.get("arriveUtc"),
         "additional_info": a.get("additionalInformation"),
         "collected_at":    collected_at,
+        # A resposta do 1103 já traz o estado de limpeza — a consulta pede
+        # alarmStatus [12, 10, 11, 13], as quatro combinações acked/cleared.
+        "cleared":         int(bool(a.get("cleared"))),
+        "clear_time":      a.get("clearUtc"),
+        "acked":           int(bool(a.get("acked"))),
     }
 
 
@@ -2776,12 +2783,14 @@ class HttpCollector(BaseCollector):
         for attempt in range(retries):
             try:
                 model_id = self._create_alarm_model(condition)
-                raw = self._collect_alarm_pages(model_id)
+                raw, complete = self._collect_alarm_pages(model_id)
                 measurements = self._flatten_alarms(raw)
                 if measurements:
                     return CollectionResult.data(measurements,
+                                                 coverage={"complete": complete},
                                                  latest_data_at=max((m.get("arrive_time") for m in measurements), default=None))
-                return CollectionResult.empty("Nenhum alarme novo retornado pelo iManager.")
+                return CollectionResult.empty("Nenhum alarme novo retornado pelo iManager.",
+                                              coverage={"complete": complete})
             except SessionExpiredError as e:
                 logger.warning(f"Erro de sessão no collect_alarms: {e}")
                 if renewed_this_call:
@@ -2870,8 +2879,12 @@ class HttpCollector(BaseCollector):
         payload = self._alarm_post(body, 1103)
         return payload.get("parameters", payload)
 
-    def _collect_alarm_pages(self, model_id: str) -> List[dict]:
-        """Pagina o cmd 1103 até esgotar o total informado na primeira resposta."""
+    def _collect_alarm_pages(self, model_id: str) -> tuple:
+        """Pagina o cmd 1103 até esgotar o total informado na primeira resposta.
+
+        Devolve `(rows, complete)`. O `break` numa página vazia produz um lote
+        parcial que, sem esse sinal, seria indistinguível de um completo — e um
+        lote parcial nunca pode reconciliar (limparia o painel inteiro)."""
         first = self._fetch_alarm_page(model_id, 1, _ALARM_PAGE)
         total = int(first.get("total", 0))
         rows = list(first.get("data", []))
@@ -2885,8 +2898,10 @@ class HttpCollector(BaseCollector):
             rows.extend(batch)
             frm += _ALARM_PAGE
             time.sleep(_ALARM_SLEEP)
-        logger.info(f"Alarmes: {len(rows)}/{total} coletados (filtro por tipo).")
-        return rows
+        complete = len(rows) >= total
+        logger.info(f"Alarmes: {len(rows)}/{total} coletados (filtro por tipo)"
+                    f"{'' if complete else ' — lote PARCIAL'}.")
+        return rows, complete
 
     def _flatten_alarms(self, raw: List[dict]) -> List[dict]:
         """Achata + injeta event_id/collected_at e deduplica por csn (lista viva).
@@ -2906,6 +2921,8 @@ class HttpCollector(BaseCollector):
                 row["arrive_time"] = self._parse_trace_timestamp(row["arrive_time"])
             if row.get("occur_time"):
                 row["occur_time"] = self._parse_trace_timestamp(row["occur_time"])
+            if row.get("clear_time"):
+                row["clear_time"] = self._parse_trace_timestamp(row["clear_time"])
             out[csn] = row
         return list(out.values())
 
@@ -3007,8 +3024,14 @@ class MockCollector(BaseCollector):
                 "arrive_time":     ts,
                 "additional_info": "mock",
                 "collected_at":    collected_at,
+                "cleared":         0,
+                "clear_time":      None,
+                "acked":           0,
             })
-        return CollectionResult.data(rows, latest_data_at=collected_at)
+        # Ciclo íntegro: o mock gera csn novo a cada volta, e sem reconciliar a
+        # lista cresceria para sempre — justamente o defeito que esta fase corrige.
+        return CollectionResult.data(rows, coverage={"complete": True},
+                                     latest_data_at=collected_at)
 
 
 # ── NullCollector (produção sem fonte configurada) ───────────────────
