@@ -172,6 +172,33 @@ def test_build_package_contains_selected_events_only(tmp_path):
     assert "events/fora.json" not in entries
 
 
+def test_ep_metadata_survives_package_build_and_import(tmp_path):
+    event = _event("alvo", "Alvo", "TIM")
+    event["sites"][0]["ep"] = {
+        "source_row": 2, "enodebid": "00111", "nename": "SITE EP",
+        "latitude": -23.5, "longitude": -46.6,
+    }
+    event["sites"][0]["cells"][0]["ep"] = {
+        "source_row": 2, "cellid": "0007", "cellname": "CELL-1",
+        "band": "1800", "dlearfcn": "01276",
+    }
+    source = _source(
+        tmp_path, events=[event], clientes=[_client("tim", "TIM")]
+    )
+    package = _build(tmp_path, source, ["alvo"])
+    target = tmp_path / "target"
+
+    result = ep.import_package(package, target)
+    imported = json.loads(
+        (target / "server_data" / "events" / "alvo.json").read_text(encoding="utf-8")
+    )
+
+    assert result.ok
+    assert imported["sites"][0]["ep"]["enodebid"] == "00111"
+    assert imported["sites"][0]["cells"][0]["ep"]["cellid"] == "0007"
+    assert imported["sites"][0]["cells"][0]["ep"]["dlearfcn"] == "01276"
+
+
 def test_package_includes_every_referenced_client_and_region(tmp_path):
     source = _source(
         tmp_path,

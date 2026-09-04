@@ -50,9 +50,43 @@ def test_coluna_cluster_ausente_nao_quebra_importacao():
     assert result["ok"] is True
     assert len(result["sites"]) == 1
     assert result["clusters"] == []
-    assert result["sites"][0]["cells"] == [{
+    cell = result["sites"][0]["cells"][0]
+    assert {key: cell[key] for key in ("id", "azimuth", "beamwidth")} == {
         "id": "SITE1-A", "azimuth": 0.0, "beamwidth": 120.0,
-    }]
+    }
+    assert cell["ep"] == {
+        "source_row": 2, "cellid": "SITE1-A", "cellname": "SITE1-A", "azimuth": 0.0,
+    }
+
+
+def test_ep_preserva_identificadores_source_row_e_ignora_coluna_desconhecida():
+    csv_text = (
+        f"{_BASE_COLUMNS},band,dlearfcn,coluna_secreta\n"
+        "SITE ORIGINAL,CELL NAME,0007,-23.5,-46.6,120,00111,1800,01276,nao-copiar\n"
+    )
+
+    site = _parse(csv_text)["sites"][0]
+    cell = site["cells"][0]
+
+    assert site["id"] == "00111"
+    assert site["ep"] == {
+        "source_row": 2,
+        "enodebid": "00111",
+        "nename": "SITE ORIGINAL",
+        "latitude": -23.5,
+        "longitude": -46.6,
+    }
+    assert cell["id"] == "CELL NAME"
+    assert cell["ep"] == {
+        "source_row": 2,
+        "cellid": "0007",
+        "cellname": "CELL NAME",
+        "azimuth": 120.0,
+        "technology": "4G",
+        "band": "1800",
+        "dlearfcn": "01276",
+    }
+    assert "coluna_secreta" not in site and "coluna_secreta" not in cell
 
 
 def test_valores_de_cluster_repetidos_nao_duplicam_o_site():
@@ -75,12 +109,15 @@ def test_band_da_ep_vivo_vira_frequencia_e_tecnologia_sem_ler_coluna_auxiliar():
 
     cells = _parse(csv_text)["sites"][0]["cells"]
 
-    assert cells == [
+    assert [{key: cell[key] for key in ("id", "azimuth", "beamwidth", "tech", "frequency")}
+            for cell in cells] == [
         {"id": "VIVO-4G", "azimuth": 0.0, "beamwidth": 120.0,
          "tech": "4G", "frequency": "1800"},
         {"id": "VIVO-5G", "azimuth": 120.0, "beamwidth": 120.0,
          "tech": "5G", "frequency": "3500"},
     ]
+    assert cells[0]["ep"]["band"] == "1800"
+    assert cells[1]["ep"]["technology"] == "5G"
 
 
 @pytest.mark.parametrize("header", ["band", "banda", "frequency", "frequencia", "frequência", "freq"])

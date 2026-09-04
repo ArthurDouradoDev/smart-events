@@ -310,6 +310,7 @@ def init_db():
 
         CREATE TABLE IF NOT EXISTS vip_measurements (
             id           INTEGER PRIMARY KEY AUTOINCREMENT,
+            vip_id       TEXT,
             vip_name     TEXT NOT NULL,
             event_id     TEXT NOT NULL,
             task_id      INTEGER,
@@ -393,6 +394,8 @@ def init_db():
             conn.execute("ALTER TABLE vip_measurements ADD COLUMN task_id INTEGER")
         if "serial_no" not in columns:
             conn.execute("ALTER TABLE vip_measurements ADD COLUMN serial_no INTEGER")
+        if "vip_id" not in columns:
+            conn.execute("ALTER TABLE vip_measurements ADD COLUMN vip_id TEXT")
         conn.execute("DROP INDEX IF EXISTS idx_vip_dedup")
         conn.execute(
             "CREATE UNIQUE INDEX IF NOT EXISTS idx_vip_task_serial "
@@ -942,14 +945,48 @@ def insert_vip_batch(measurements: List[dict]):
     if not measurements:
         return {"inserted": 0, "duplicate": 0}
     conn = get_conn()  # banco global — VIP measurements são independentes de evento
-    rows = [{**item, "task_id": item.get("task_id"), "serial_no": item.get("serial_no")}
-            for item in measurements]
+    resolved_ids = {}
+    global_vips = {
+        row["id"]: row for row in conn.execute("SELECT id, name FROM vips").fetchall()
+    }
+    for event_id in {item.get("event_id") for item in measurements if item.get("event_id")}:
+        try:
+            associations = get_event_conn(event_id).execute(
+                "SELECT vip_id, task_id FROM event_vips WHERE event_id = ?",
+                (event_id,),
+            ).fetchall()
+            candidates = {}
+            for association in associations:
+                vip = global_vips.get(association["vip_id"])
+                if not vip:
+                    continue
+                candidates.setdefault((association["task_id"], vip["name"]), set()).add(vip["id"])
+                candidates.setdefault((None, vip["name"]), set()).add(vip["id"])
+            for key, vip_ids in candidates.items():
+                if len(vip_ids) == 1:
+                    resolved_ids[(event_id, *key)] = next(iter(vip_ids))
+        except Exception:
+            continue
+    rows = []
+    for item in measurements:
+        task_id = item.get("task_id")
+        vip_name = item.get("vip_name")
+        rows.append({
+            **item,
+            "vip_id": item.get("vip_id")
+                      or resolved_ids.get((item.get("event_id"), task_id, vip_name))
+                      or resolved_ids.get((item.get("event_id"), None, vip_name)),
+            "task_id": task_id,
+            "serial_no": item.get("serial_no"),
+        })
     before = conn.total_changes
     try:
         conn.executemany("""
             INSERT OR IGNORE INTO vip_measurements
-                (vip_name, event_id, task_id, serial_no, timestamp, serving_cell, rsrp, rsrq, in_event)
-            VALUES (:vip_name, :event_id, :task_id, :serial_no, :timestamp, :serving_cell, :rsrp, :rsrq, :in_event)
+                (vip_id, vip_name, event_id, task_id, serial_no, timestamp,
+                 serving_cell, rsrp, rsrq, in_event)
+            VALUES (:vip_id, :vip_name, :event_id, :task_id, :serial_no, :timestamp,
+                    :serving_cell, :rsrp, :rsrq, :in_event)
         """, rows)
         conn.commit()
     except Exception:
@@ -1177,6 +1214,20 @@ def get_db_size_mb() -> float:
         if DB_PATH.exists():
             total_size = DB_PATH.stat().st_size
     return round(total_size / (1024 * 1024), 1)
+
+
+def get_event_db_size_mb(event_id: str) -> float:
+    """Tamanho físico do banco e WAL do evento selecionado."""
+    try:
+        path = get_event_db_path(event_id)
+        total = sum(
+            candidate.stat().st_size
+            for candidate in (path, Path(str(path) + "-wal"), Path(str(path) + "-shm"))
+            if candidate.exists()
+        )
+        return round(total / (1024 * 1024), 1)
+    except Exception:
+        return 0.0
 
 
 def get_event_timestamps(event_id: str) -> List[str]:

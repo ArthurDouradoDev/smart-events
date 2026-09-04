@@ -493,13 +493,26 @@ def _zip_bytes(entries: dict[str, bytes]) -> bytes:
     return buffer.getvalue()
 
 
+def _replace_with_retry(source: Path, destination: Path) -> None:
+    """Repete bloqueios breves de arquivo observados no Windows."""
+    last_error = None
+    for attempt in range(8):
+        try:
+            os.replace(source, destination)
+            return
+        except PermissionError as exc:
+            last_error = exc
+            time.sleep(0.01 * (attempt + 1))
+    raise last_error
+
+
 def _write_atomic(path: Path, data: bytes) -> None:
     """Grava por arquivo temporario + ``os.replace`` na mesma pasta."""
     path.parent.mkdir(parents=True, exist_ok=True)
     temporary = path.parent / f".{path.name}.{uuid.uuid4().hex}.tmp"
     try:
         temporary.write_bytes(data)
-        os.replace(temporary, path)
+        _replace_with_retry(temporary, path)
     finally:
         if temporary.exists():
             temporary.unlink(missing_ok=True)
@@ -879,7 +892,7 @@ def build_package(
     try:
         staged = staging / destination.name
         staged.write_bytes(package)
-        os.replace(staged, destination)
+        _replace_with_retry(staged, destination)
     finally:
         for leftover in staging.iterdir():
             leftover.unlink(missing_ok=True)

@@ -14,7 +14,7 @@
   <script src="lib/chart.umd.min.js"></script>
   <script src="lib/chartjs-plugin-annotation.min.js"></script>
 
-  <link rel="stylesheet" href="css/main.css?v=20260903-kpi-family-r1">
+  <link rel="stylesheet" href="css/main.css?v=20260903-export-r1">
 </head>
 
 <body>
@@ -439,16 +439,85 @@
     </div>
   </div>
 
+  <!-- ── MODAL DADOS DO EVENTO / EXPORTAÇÃO ────────────────────── -->
+  <div id="event-data-modal" class="modal hidden">
+    <div class="modal-box event-data-box" role="dialog" aria-modal="true"
+         aria-labelledby="event-data-title" tabindex="-1">
+      <div class="event-data-heading">
+        <div>
+          <h3 id="event-data-title" class="modal-title">Dados do evento</h3>
+          <div id="event-data-name" class="event-data-name"></div>
+        </div>
+        <button id="event-data-close" class="icon-btn" aria-label="Fechar">&times;</button>
+      </div>
+      <p id="event-data-mode" class="event-data-muted"></p>
+      <p id="event-export-latest" class="event-data-muted">Consultando última exportação…</p>
+
+      <div class="event-data-actions">
+        <button id="event-data-export" class="btn btn-primary">Exportar dados</button>
+        <button id="event-data-clear" class="btn btn-ghost btn-danger">Limpar dados</button>
+      </div>
+
+      <section id="event-export-options" class="event-export-section hidden" aria-label="Opções de exportação">
+        <h4>Conteúdo</h4>
+        <div class="event-export-fixed-content">
+          KPIs, alarmes, alertas, configuração do evento e informações da EP
+        </div>
+        <label class="event-export-check">
+          <input id="export-include-vips" type="checkbox" checked>
+          <span><strong>Incluir VIPs</strong><small>Contém nomes e medições pessoais.</small></span>
+        </label>
+
+        <fieldset>
+          <legend>Organização dos KPIs</legend>
+          <label><input type="radio" name="export-time" value="consolidated" checked> Consolidado</label>
+          <label><input type="radio" name="export-time" value="daily"> Separar por dia</label>
+        </fieldset>
+
+        <fieldset>
+          <legend>Tecnologia</legend>
+          <label><input type="radio" name="export-tech" value="combined" checked> Manter juntas</label>
+          <label><input type="radio" name="export-tech" value="family"> Separar em 4G e 5G</label>
+          <label><input type="radio" name="export-tech" value="collector"> Separar por tecnologia de coleta</label>
+        </fieldset>
+
+        <div id="event-export-preview" class="event-export-preview" aria-live="polite"></div>
+        <div id="event-export-warning" class="event-export-warning hidden" role="status"></div>
+        <div class="modal-footer event-export-footer">
+          <button id="event-export-back" class="btn btn-ghost">Voltar</button>
+          <button id="event-export-start" class="btn btn-primary">Gerar arquivo ZIP</button>
+        </div>
+      </section>
+
+      <section id="event-export-result" class="event-export-section hidden" aria-live="polite">
+        <div id="event-export-progress-label" class="event-export-progress-label">Preparando exportação…</div>
+        <div class="event-export-progress-track">
+          <div id="event-export-progress-bar" class="event-export-progress-bar"
+               role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"></div>
+        </div>
+        <div id="event-export-progress-detail" class="event-data-muted"></div>
+        <div id="event-export-result-error" class="event-export-error hidden"></div>
+        <div class="modal-footer event-export-footer">
+          <button id="event-export-cancel" class="btn btn-ghost btn-danger">Cancelar exportação</button>
+          <button id="event-export-retry" class="btn btn-ghost hidden">Tentar novamente</button>
+          <button id="event-export-open-folder" class="btn btn-primary hidden">Abrir pasta</button>
+        </div>
+      </section>
+    </div>
+  </div>
+
   <!-- ── MODAL LIMPAR HISTÓRICO ─────────────────────────────────── -->
   <div id="clear-history-modal" class="modal hidden">
     <div class="modal-box">
       <h3 class="modal-title">Limpar Histórico do Evento</h3>
       <div class="modal-body" style="text-align: left; margin: 15px 0; color: var(--text-secondary); line-height: 1.5;">
-        <p>Você deseja limpar todo o histórico de medições de KPIs, VIPs e alertas gravados para o evento ativo?</p>
+        <p>Você deseja limpar todo o histórico de medições de KPIs, alarmes e alertas gravados para o evento ativo?</p>
         <p style="margin-top: 10px; font-size: 12px; color: var(--warning);">Esta ação não removerá as configurações do evento (sites, coordenadas ou VIPs atribuídos).</p>
+        <p id="clear-export-warning" style="margin-top: 10px; font-size: 12px; color: var(--warning);"></p>
       </div>
       <div class="modal-footer" style="display: flex; gap: 10px; justify-content: flex-end; margin-top: 16px;">
         <button id="btn-close-clear-history" class="btn btn-ghost">Cancelar</button>
+        <button id="clear-export-first" class="btn btn-ghost">Exportar antes</button>
         <button id="btn-confirm-clear-history-trigger" class="btn btn-primary" style="background-color: var(--danger);">Limpar</button>
       </div>
     </div>
@@ -653,7 +722,7 @@
   </div>
 
   <!-- Scripts (ES Modules) -->
-  <script type="module" src="js/app.js?v=20260903-kpi-family-r1"></script>
+  <script type="module" src="js/app.js?v=20260903-export-r1"></script>
 </body>
 
 </html>

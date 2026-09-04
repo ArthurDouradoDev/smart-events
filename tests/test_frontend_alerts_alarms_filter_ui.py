@@ -53,6 +53,8 @@ def test_filtro_de_alarmes_e_alertas_respeita_o_site_selecionado():
             try:
                 page.goto(f"{url}/index.html", wait_until="domcontentloaded")
                 page.locator(".site-item").first.wait_for(state="visible", timeout=8000)
+                page.locator(".site-item.selected").wait_for(state="visible", timeout=5000)
+                selected_site = page.locator(".site-item.selected").get_attribute("data-id")
 
                 page.locator("#alarms-btn").click()
                 page.locator("#alarms-list .alarm-item").first.wait_for(
@@ -65,7 +67,7 @@ def test_filtro_de_alarmes_e_alertas_respeita_o_site_selecionado():
                     "() => document.querySelectorAll('#alarms-list .alarm-item').length === 1",
                     timeout=5000,
                 )
-                assert "ERB-07" in page.locator("#alarms-list .alarm-item").inner_text()
+                assert selected_site in page.locator("#alarms-list .alarm-item").inner_text()
 
                 page.locator("#alarms-drawer-close").click()
                 page.locator(".site-item[data-id='ERB-03']").click()

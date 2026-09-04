@@ -413,6 +413,72 @@ class TestVipMeasurements:
         series = database.get_vip_series(sample_event["id"], "Ana Lima", minutes=120)
         assert len(series) >= 1
 
+    def test_schema_novo_e_gravacao_resolvem_vip_id(self, event_in_db, sample_event):
+        vip = database.save_vip({"id": "vip-carlos", "name": "Carlos Menezes"})
+        database.assign_vip_to_event(sample_event["id"], vip["id"], task_id=77)
+        measurement = self._make_vip(
+            sample_event["id"], "Carlos Menezes", -95.0, -10.0,
+            ts="2026-06-01T10:06:00Z",
+        )
+        measurement["task_id"] = 77
+
+        database.insert_vip_batch([measurement])
+
+        row = database.get_conn().execute(
+            "SELECT vip_id, vip_name FROM vip_measurements WHERE task_id = 77"
+        ).fetchone()
+        assert row["vip_id"] == "vip-carlos"
+        assert row["vip_name"] == "Carlos Menezes"
+
+    def test_nome_ambiguo_sem_task_nao_inventa_vip_id(self, event_in_db, sample_event):
+        for vip_id in ("vip-a", "vip-b"):
+            database.save_vip({"id": vip_id, "name": "Mesmo Nome"})
+            database.assign_vip_to_event(sample_event["id"], vip_id)
+
+        database.insert_vip_batch([
+            self._make_vip(
+                sample_event["id"], "Mesmo Nome", -100.0, -12.0,
+                ts="2026-06-01T10:07:00Z",
+            )
+        ])
+
+        row = database.get_conn().execute(
+            "SELECT vip_id FROM vip_measurements WHERE vip_name = 'Mesmo Nome'"
+        ).fetchone()
+        assert row["vip_id"] is None
+
+
+def test_banco_global_legado_recebe_vip_id_sem_perder_linhas(tmp_path, monkeypatch):
+    data_dir = tmp_path / "legacy-data"
+    data_dir.mkdir()
+    legacy_path = data_dir / "smart_events.db"
+    conn = sqlite3.connect(legacy_path)
+    conn.execute("""
+        CREATE TABLE vip_measurements (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            vip_name TEXT NOT NULL,
+            event_id TEXT NOT NULL,
+            timestamp TEXT NOT NULL
+        )
+    """)
+    conn.execute(
+        "INSERT INTO vip_measurements (vip_name, event_id, timestamp) VALUES (?, ?, ?)",
+        ("Legado", "evento-antigo", "2026-01-01T00:00:00Z"),
+    )
+    conn.commit()
+    conn.close()
+
+    monkeypatch.setattr(database, "DB_PATH", legacy_path)
+    database._local.__dict__.clear()
+    database._initialized_global_dbs.discard(str(legacy_path.resolve()))
+    database.init_db()
+
+    migrated = database.get_conn()
+    columns = {row["name"] for row in migrated.execute("PRAGMA table_info(vip_measurements)")}
+    assert "vip_id" in columns
+    assert migrated.execute("SELECT vip_name FROM vip_measurements").fetchone()[0] == "Legado"
+    database.close_conn()
+
 
 # ── Alertas ───────────────────────────────────────────────────────────
 

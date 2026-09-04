@@ -120,6 +120,7 @@ def _titlebar_assets() -> str:
     required = [
         frontend / "assets" / "logoSmartEvents-32.png",
         frontend / "js" / "window_chrome.js",
+        frontend / "js" / "event_export.js",
     ]
     missing = [str(path) for path in required if not path.is_file()]
     if missing:

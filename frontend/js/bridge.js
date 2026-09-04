@@ -77,7 +77,9 @@ const _kpiTechnologyScenario = new URLSearchParams(window.location.search).get("
 // distinção do B6 entre "sem dados" e "sem tráfego".
 const _kpiOverviewScenario = new URLSearchParams(window.location.search).get("kpiOverview") || "default";
 const _kpiChartScenario = new URLSearchParams(window.location.search).get("kpiChart") || "default";
+const _eventExportScenario = new URLSearchParams(window.location.search).get("exportScenario") || "success";
 const _vipErrorOnceSeen = new Set(); // nomes de VIP já vistos pelo cenário error_once
+let _eventExportPollCount = 0;
 let _vpnProbeCount = 0;
 let _eventActivated = false;
 let _eventSyncAfterActivation = false;
@@ -660,6 +662,42 @@ const _mock = {
   },
   clear_collection_logs: () => ({ ok: true }),
   download_collection_logs: () => ({ ok: true, path: "C:\\Users\\Mock\\Downloads\\smart_events_coleta.log" }),
+  preview_event_export: (eventId, options) => ({
+    ok: true, event_id: eventId, event_name: "Evento Mock", event_status: "ACTIVE",
+    counts: _eventExportScenario === "empty"
+      ? { kpis: 0, vips: 0, alarms: 0, alerts: 0 }
+      : { kpis: 8420531, vips: 42721, alarms: 1284, alerts: 317 },
+    technologies: ["4G", "5G_NRCELL", "5G_NRDUCELL"],
+    period: { min_brasilia: "2026-09-01T09:00:00-03:00", max_brasilia: "2026-09-03T18:00:00-03:00", covered_days: 3 },
+    estimated_bytes: _eventExportScenario === "empty" ? 0 : 650000000,
+    excel_row_warning: _eventExportScenario === "large" && options?.time_partition === "consolidated",
+    ep_source_quality: "preserved", timezone: "America/Sao_Paulo",
+  }),
+  start_event_export: (eventId, options) => ({
+    ok: _eventExportScenario !== "start-error",
+    error: _eventExportScenario === "start-error" ? "Falha simulada ao iniciar a exportação." : undefined,
+    job: { job_id: "mock-export-1", event_id: eventId, status: "queued",
+      message: "Exportação na fila", current: 0, total: 8464853, percent: 0, options },
+  }),
+  get_event_export_status: (jobId) => {
+    _eventExportPollCount += 1;
+    if (_eventExportScenario === "failure") return {
+      ok: true, job: { job_id: jobId, status: "failed", percent: 34,
+        message: "Não foi possível exportar os dados", error: "Falha simulada na exportação." },
+    };
+    if (_eventExportScenario === "progress" && _eventExportPollCount < 4) return {
+      ok: true, job: { job_id: jobId, status: "exporting_kpis",
+        message: "Exportando KPIs", current: _eventExportPollCount * 2000000,
+        total: 8464853, percent: _eventExportPollCount * 23 },
+    };
+    return { ok: true, job: { job_id: jobId, status: "ready", message: "Exportação concluída",
+        current: 8464853, total: 8464853, percent: 100,
+        result: { filename: "smart-events_evento-mock.zip", size_bytes: 650000000,
+          records: 8464853, path: "C:\\Users\\Mock\\Downloads\\smart-events_evento-mock.zip" } } };
+  },
+  cancel_event_export: (jobId) => ({ ok: true, job: { job_id: jobId, status: "cancelled", percent: 0 } }),
+  get_latest_event_export: () => ({ ok: true, job: null }),
+  open_event_export_folder: () => ({ ok: true }),
   capture_diagnostics: () => ({ ok: true, path: "C:\\Users\\Mock\\data\\diagnostics\\monitoring_10.220.50.9_20260813-120000.json" }),
 
   get_vip_series: (event_id, vip_name, minutes) => {
@@ -879,7 +917,7 @@ const API = {
   deleteAllAlerts: (eventId)                => API.call("delete_all_alerts", eventId),
   downloadAlertsLog: (eventId)              => API.call("download_alerts_log", eventId),
   silenceAlert:     (key)                   => API.call("silence_alert", key),
-  getAppStatus:     ()                      => API.call("get_app_status"),
+  getAppStatus:     (eventId=null)          => API.call("get_app_status", eventId),
   getCollectionStatus: ()                   => API.call("get_collection_status"),
   openFileDialog:   ()                      => API.call("open_file_dialog"),
   getEventTimestamps: (eventId)             => API.call("get_event_timestamps", eventId),
@@ -891,6 +929,12 @@ const API = {
   getCollectionLogs: (limit=800)             => API.call("get_collection_logs", limit),
   clearCollectionLogs: ()                    => API.call("clear_collection_logs"),
   downloadCollectionLogs: ()                 => API.call("download_collection_logs"),
+  previewEventExport: (eventId, options)      => API.call("preview_event_export", eventId, options),
+  startEventExport: (eventId, options)        => API.call("start_event_export", eventId, options),
+  getEventExportStatus: (jobId)               => API.call("get_event_export_status", jobId),
+  cancelEventExport: (jobId)                  => API.call("cancel_event_export", jobId),
+  getLatestEventExport: (eventId)             => API.call("get_latest_event_export", eventId),
+  openEventExportFolder: (jobId)              => API.call("open_event_export_folder", jobId),
   captureDiagnostics: ()                     => API.call("capture_diagnostics"),
 
   getVipSeries:     (eventId, vipName, minutes)  => API.call("get_vip_series", eventId, vipName, minutes),

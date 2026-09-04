@@ -15,6 +15,7 @@ import { initAlerts, injectAlerts } from "./alerts.js?v=20260826-site-filter";
 import { initAlarms, injectAlarms } from "./alarms.js?v=20260826-site-filter";
 import { initLogs } from "./logs.js";
 import { initCredentials, promptCredentials } from "./credentials.js";
+import { initEventExport, notifyEventExportEventChanged } from "./event_export.js?v=20260903-export-r1";
 
 const POLL_INTERVAL_MS = 120_000; // acompanha o ciclo padrão da coleta de KPI
 const VPN_CHECK_INTERVAL_MS = 15 * 60 * 1000; // 15min: verifica conexão com a VPN
@@ -69,6 +70,7 @@ async function boot() {
   initAlarms();
   initLogs();
   initCredentials();
+  initEventExport();
   _setupResponsiveResize();
 
   _setupHeaderClock();
@@ -147,6 +149,7 @@ function _enterStandbyMode() {
   document.getElementById("event-badge").classList.add("hidden");
   document.getElementById("event-timer").classList.add("hidden");
   document.getElementById("rec-indicator").classList.add("hidden");
+  notifyEventExportEventChanged();
   _stopSyncPolling();
   _hideVpnModal();
   document.getElementById("vpn-status-icon")?.classList.add("hidden");
@@ -196,6 +199,8 @@ async function _enterActiveMode(event) {
   }
 
   document.getElementById("rec-indicator").classList.remove("hidden");
+  document.getElementById("rec-indicator").classList.remove("rec-historical");
+  notifyEventExportEventChanged();
 
   _startTimer(event.start_time);
 
@@ -254,7 +259,15 @@ async function _enterHistoricalMode(event) {
   document.getElementById("historical-badge").classList.remove("hidden");
   document.getElementById("event-badge").classList.add("hidden");
   document.getElementById("event-timer").classList.add("hidden");
-  document.getElementById("rec-indicator").classList.add("hidden");
+  document.getElementById("rec-indicator").classList.remove("hidden");
+  document.getElementById("rec-indicator").classList.add("rec-historical");
+  document.getElementById("rec-size").textContent = "DADOS";
+  const storageStatus = await API.getAppStatus(event.id);
+  if (storageStatus?.db_size_mb != null) {
+    State.set("dbSizeMb", storageStatus.db_size_mb);
+    document.getElementById("rec-size").textContent = `DADOS ${storageStatus.db_size_mb} MB`;
+  }
+  notifyEventExportEventChanged();
 
   // Header name
   document.getElementById("event-name").textContent = event.name;
@@ -458,7 +471,7 @@ async function _updateHistoricalView(index) {
   const elTime = document.getElementById("hist-timestamp");
   if (elTime) {
     const dt = new Date(timestamp);
-    elTime.textContent = dt.toLocaleString("pt-BR");
+    elTime.textContent = dt.toLocaleString("pt-BR", { timeZone: "America/Sao_Paulo" });
   }
 
   const slider = document.getElementById("hist-slider");
@@ -543,7 +556,6 @@ function _setupServerButton() {
 // ── Configurações de Limpeza de Histórico ──────────────────────────
 
 function _setupClearHistoryModal() {
-  const recIndicator = document.getElementById("rec-indicator");
   const clearModal = document.getElementById("clear-history-modal");
   const confirmModal = document.getElementById("confirm-delete-modal");
   
@@ -553,13 +565,7 @@ function _setupClearHistoryModal() {
   const btnCloseConfirm = document.getElementById("btn-close-confirm-delete");
   const btnExecuteClear = document.getElementById("btn-execute-clear-history");
 
-  if (!recIndicator || !clearModal || !confirmModal) return;
-
-  // Clicar no REC abre o primeiro modal
-  recIndicator.addEventListener("click", () => {
-    if (State.mode !== "active" || !State.eventId) return;
-    clearModal.classList.remove("hidden");
-  });
+  if (!clearModal || !confirmModal) return;
 
   // Fechar o primeiro modal
   btnCloseClear.addEventListener("click", () => {

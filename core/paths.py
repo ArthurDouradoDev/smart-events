@@ -88,6 +88,35 @@ def distributions_dir() -> Path:
     return data_dir() / "distributions"
 
 
+def event_exports_dir() -> Path:
+    """Registros e staging das exportações de dados dos eventos."""
+    return data_dir() / "exports"
+
+
+def event_export_staging_dir() -> Path:
+    return event_exports_dir() / ".staging"
+
+
+def downloads_dir() -> Path:
+    """Resolve a pasta Downloads do perfil, inclusive quando movida no Windows."""
+    directory = Path.home() / "Downloads"
+    if sys.platform == "win32":
+        try:
+            import winreg
+            with winreg.OpenKey(
+                winreg.HKEY_CURRENT_USER,
+                r"Software\Microsoft\Windows\CurrentVersion\Explorer\User Shell Folders",
+            ) as key:
+                directory = Path(winreg.QueryValueEx(
+                    key, "{374DE290-123F-4565-9164-39C4925E467B}"
+                )[0])
+        except Exception:
+            pass
+    directory = Path(os.path.expandvars(str(directory))).expanduser()
+    directory.mkdir(parents=True, exist_ok=True)
+    return directory
+
+
 def distribution_jobs_dir() -> Path:
     """Registro persistente dos jobs de distribuicao, fora das pastas de saida."""
     return distributions_dir() / "jobs"

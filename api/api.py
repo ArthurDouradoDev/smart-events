@@ -19,6 +19,8 @@ from urllib.parse import urlparse
 
 from core import database as db
 from core import credentials
+from core.event_export import get_event_export_service
+from core.paths import downloads_dir as resolve_downloads_dir
 from core.scheduler import scheduler
 from core.log_buffer import log_buffer
 from core.kpi_formulas import catalog_for_api, threshold_value, threshold_object
@@ -2692,21 +2694,9 @@ class Api:
             if not alerts:
                 return {"ok": False, "error": "Nenhum alerta disponível para download neste evento."}
 
-            import os
-            from pathlib import Path
-            downloads_dir = Path.home() / "Downloads"
-            if os.name == 'nt':
-                try:
-                    import winreg
-                    sub_key = r'SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer\Shell Folders'
-                    with winreg.OpenKey(winreg.HKEY_CURRENT_USER, sub_key) as key:
-                        downloads_dir = Path(winreg.QueryValueEx(key, '{374DE290-123F-4565-9164-39C4925E467B}')[0])
-                except Exception:
-                    pass
-
-            downloads_dir.mkdir(parents=True, exist_ok=True)
+            target_dir = resolve_downloads_dir()
             filename = f"smart_events_alerts_{event_id}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.log"
-            file_path = downloads_dir / filename
+            file_path = target_dir / filename
 
             with open(file_path, "w", encoding="utf-8") as f:
                 for a in alerts:
@@ -2735,19 +2725,7 @@ class Api:
     @staticmethod
     def _resolve_downloads_dir():
         """Resolve a pasta Downloads do usuário (com fallback no Windows via registro)."""
-        import os
-        from pathlib import Path
-        downloads_dir = Path.home() / "Downloads"
-        if os.name == "nt":
-            try:
-                import winreg
-                sub_key = r"SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer\Shell Folders"
-                with winreg.OpenKey(winreg.HKEY_CURRENT_USER, sub_key) as key:
-                    downloads_dir = Path(winreg.QueryValueEx(key, "{374DE290-123F-4565-9164-39C4925E467B}")[0])
-            except Exception:
-                pass
-        downloads_dir.mkdir(parents=True, exist_ok=True)
-        return downloads_dir
+        return resolve_downloads_dir()
 
     def get_collection_logs(self, limit: int = 800) -> dict:
         """Retorna os logs de coleta capturados em memória (collector, scheduler, renovação)."""
@@ -2782,6 +2760,76 @@ class Api:
             logger.error(f"download_collection_logs error: {e}")
             return {"ok": False, "error": str(e)}
 
+    # ── Exportação dos dados do evento ──────────────────────────────
+
+    def preview_event_export(self, event_id: str, options: dict = None) -> dict:
+        try:
+            preview = get_event_export_service().preview(event_id, options)
+            return {"ok": True, **preview}
+        except ValueError as e:
+            logger.error("preview_event_export error: %s", e)
+            return {"ok": False, "error": str(e)}
+        except Exception:
+            logger.exception("preview_event_export internal error")
+            return {"ok": False, "error": "Não foi possível preparar a exportação."}
+
+    def start_event_export(self, event_id: str, options: dict = None) -> dict:
+        try:
+            job = get_event_export_service().start(event_id, options)
+            return {"ok": True, "job": job}
+        except ValueError as e:
+            logger.error("start_event_export error: %s", e)
+            return {"ok": False, "error": str(e)}
+        except Exception:
+            logger.exception("start_event_export internal error")
+            return {"ok": False, "error": "Não foi possível iniciar a exportação."}
+
+    def get_event_export_status(self, job_id: str) -> dict:
+        try:
+            return {"ok": True, "job": get_event_export_service().status(job_id)}
+        except ValueError as e:
+            return {"ok": False, "error": str(e)}
+        except Exception:
+            logger.exception("get_event_export_status internal error")
+            return {"ok": False, "error": "Não foi possível consultar a exportação."}
+
+    def cancel_event_export(self, job_id: str) -> dict:
+        try:
+            return {"ok": True, "job": get_event_export_service().cancel(job_id)}
+        except ValueError as e:
+            return {"ok": False, "error": str(e)}
+        except Exception:
+            logger.exception("cancel_event_export internal error")
+            return {"ok": False, "error": "Não foi possível cancelar a exportação."}
+
+    def get_latest_event_export(self, event_id: str) -> dict:
+        try:
+            job = get_event_export_service().latest_for_event(event_id)
+            return {"ok": True, "job": job}
+        except ValueError as e:
+            return {"ok": False, "error": str(e)}
+        except Exception:
+            logger.exception("get_latest_event_export internal error")
+            return {"ok": False, "error": "Não foi possível consultar a última exportação."}
+
+    def open_event_export_folder(self, job_id: str) -> dict:
+        try:
+            job = get_event_export_service().status(job_id)
+            result = job.get("result") or {}
+            path = Path(result.get("path") or "")
+            if job.get("status") != "ready" or not path.is_file():
+                return {"ok": False, "error": "Arquivo exportado não está disponível."}
+            if os.name == "nt":
+                os.startfile(str(path.parent))
+            else:
+                subprocess.Popen(["xdg-open", str(path.parent)])
+            return {"ok": True, "path": str(path)}
+        except ValueError as e:
+            return {"ok": False, "error": str(e)}
+        except Exception:
+            logger.exception("open_event_export_folder internal error")
+            return {"ok": False, "error": "Não foi possível abrir a pasta da exportação."}
+
     def capture_diagnostics(self) -> dict:
         """Captura a próxima resposta de Monitoring e devolve o arquivo gerado.
 
@@ -2812,10 +2860,11 @@ class Api:
 
     # ── Estado da aplicação ──────────────────────────────────────────
 
-    def get_app_status(self) -> dict:
+    def get_app_status(self, event_id: str = None) -> dict:
+        event_id = event_id or ((_active_event or {}).get("id") if _active_event else None)
         return {
             "recording":  scheduler.is_recording,
-            "db_size_mb": db.get_db_size_mb(),
+            "db_size_mb": db.get_event_db_size_mb(event_id) if event_id else db.get_db_size_mb(),
             "now":        datetime.utcnow().isoformat(),
         }
 

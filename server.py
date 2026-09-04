@@ -214,7 +214,9 @@ async def parse_sites(file: UploadFile = File(...)):
         import pandas as pd
 
         if filename.endswith(('.xlsx', '.xls')):
-            df = pd.read_excel(io.BytesIO(contents))
+            # Identificadores da EP podem conter zeros à esquerda; ler como texto
+            # evita que o pandas os transforme em números antes da normalização.
+            df = pd.read_excel(io.BytesIO(contents), dtype=str)
         else:
             # CSV/TSV
             decoded = None
@@ -235,7 +237,7 @@ async def parse_sites(file: UploadFile = File(...)):
             elif ';' in first_line:
                 sep = ';'
 
-            df = pd.read_csv(io.StringIO(decoded), sep=sep)
+            df = pd.read_csv(io.StringIO(decoded), sep=sep, dtype=str)
 
         # Normalize column names by removing spaces and lowercasing
         df.columns = [c.strip().lower() for c in df.columns]
@@ -276,7 +278,7 @@ async def parse_sites(file: UploadFile = File(...)):
         sites_dict = {}
         clusters_dict = {}  # nome do cluster -> set de site_ids (coluna opcional; §1 do plano)
         event_site_flags = {}  # site_id -> bool, só para linhas com a coluna preenchida
-        for _, row in df.iterrows():
+        for row_index, row in df.iterrows():
             # Skip rows with missing required columns
             if pd.isna(row['enodebid']) or pd.isna(row['latitude']) or pd.isna(row['longitude']):
                 continue
@@ -315,6 +317,13 @@ async def parse_sites(file: UploadFile = File(...)):
                     "lat": lat,
                     "lng": lng,
                     "is_event_site": True,
+                    "ep": {
+                        "source_row": int(row_index) + 2,
+                        "enodebid": str(row.get('enodebid')).strip(),
+                        "nename": str(row.get('nename')).strip(),
+                        "latitude": lat,
+                        "longitude": lng,
+                    },
                     "cells": []
                 }
 
@@ -324,17 +333,31 @@ async def parse_sites(file: UploadFile = File(...)):
                 frequency = _normalize_frequency(row.get('frequency'))
                 technology = _normalize_technology(row.get('tech'), frequency)
                 earfcn = _normalize_earfcn(row.get('earfcn')) if 'earfcn' in df.columns else None
+                ep_earfcn = (
+                    str(row.get('earfcn')).strip()
+                    if 'earfcn' in df.columns and not pd.isna(row.get('earfcn'))
+                    else None
+                )
                 cell = {
                     "id": cell_id,
                     "azimuth": azimuth,
-                    "beamwidth": 120.0
+                    "beamwidth": 120.0,
+                    "ep": {
+                        "source_row": int(row_index) + 2,
+                        "cellid": "" if pd.isna(row.get('cellid')) else str(row.get('cellid')).strip(),
+                        "cellname": "" if pd.isna(row.get('cellname')) else str(row.get('cellname')).strip(),
+                        "azimuth": azimuth,
+                    },
                 }
                 if technology:
                     cell["tech"] = technology
+                    cell["ep"]["technology"] = technology
                 if frequency:
                     cell["frequency"] = frequency
+                    cell["ep"]["band"] = frequency
                 if earfcn is not None:
                     cell["earfcn"] = earfcn
+                    cell["ep"]["dlearfcn"] = ep_earfcn
                 sites_dict[site_id]["cells"].append(cell)
 
             # Coluna opcional que marca o site como dentro ou fora do polígono.

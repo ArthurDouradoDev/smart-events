@@ -128,6 +128,7 @@ SmartEvents/
 - **Valores Contextuais e Participação (Share) na Lista de Sites**: A listagem de sites adapta sua coluna de valores e cabeçalho dependendo da métrica escolhida. Para métricas de volume (como usuários ou tráfego), os sites são automaticamente ordenados pela sua participação percentual (share %) em relação ao total do evento. Para métricas de cobertura (RSRP/RSRQ) ou throughput, exibe as médias ou piores valores de células de forma contextualizada.
 - **Tratamento de Alertas**: Painel lateral de alertas (sem notificações toast intrusivas) com suporte para confirmação individual, marcação em lote como lido (acknowledge), exclusão permanente do banco de dados (lixeira) e download consolidado dos logs em formato `.log` diretamente na pasta Downloads.
 - **Exclusão Segura de Histórico**: O indicador interativo de gravação ("REC X MB") ativa um fluxo com modal de dupla confirmação para apagar medições locais antigas do evento ativo, seguido por uma rotina de `VACUUM` para reclamar espaço físico no SQLite.
+- **Exportação completa do evento**: O mesmo indicador `REC`/`DADOS` permite gerar um pacote ZIP auditável com KPIs, VIPs opcionais, alarmes, alertas, checkpoints, configuração e informações normalizadas da EP. Os KPIs podem ficar consolidados ou separados por dia de Brasília e por tecnologia. Consulte o [contrato da exportação](docs/exportacao-de-dados.md).
 
 ### 🌐 Servidor Central de Sincronização
 - **FastAPI Core**: Provê sincronização REST centralizada para múltiplos terminais de monitoramento na mesma rede local.
