@@ -401,6 +401,35 @@ async function _onTechFilterChanged() {
 
 // ── Lista de sites ────────────────────────────────────────────────
 
+const TECHNOLOGY_REASON_LABELS = {
+  no_data: "sem dado nesta métrica",
+  no_traffic: "sem tráfego no período",
+};
+
+function _siteTechnologyTag(site) {
+  if (State.techFilter !== "all") return "";
+  const order = { "4G": 0, "5G": 1 };
+  const families = [...new Set(site.tech_families || [])]
+    .filter(family => family === "4G" || family === "5G")
+    .sort((left, right) => order[left] - order[right]);
+  if (families.length <= 1) return "";
+
+  const reasons = site.technology_reasons || {};
+  const parts = families.map(family => {
+    const reason = reasons[family];
+    const reasonLabel = TECHNOLOGY_REASON_LABELS[reason];
+    const stateClass = reason === "no_data" ? " is-no-data"
+      : reason === "no_traffic" ? " is-no-traffic"
+      : "";
+    const accessibleLabel = reasonLabel ? `${family}: ${reasonLabel}` : family;
+    const title = reasonLabel ? ` title="${_esc(accessibleLabel)}"` : "";
+    return `<span class="site-tech-family${stateClass}" aria-label="${_esc(accessibleLabel)}"${title}>${family}</span>`;
+  });
+  return ` <span class="site-tech" role="group" aria-label="Tecnologias do site">${parts.join(
+    '<span class="site-tech-separator" aria-hidden="true"> · </span>'
+  )}</span>`;
+}
+
 function _renderSiteList(sites) {
   const el = document.getElementById("site-list");
   const summary = document.getElementById("site-summary");
@@ -507,10 +536,7 @@ function _renderSiteList(sites) {
     const alarmTag = siteAlarms.length
       ? ` <span class="site-alarm${hasCritical ? " critical" : ""}" title="${siteAlarms.length} alarme(s)">⚠</span>`
       : "";
-    const families = site.tech_families || [];
-    const familyTag = (State.techFilter === "all" && families.length > 1)
-      ? ` <span class="site-tech">${_esc(families.join(" · "))}</span>`
-      : "";
+    const familyTag = _siteTechnologyTag(site);
 
     item.innerHTML = `
       <span class="site-dot" style="background:${STATUS_COLORS[site.status]}"></span>

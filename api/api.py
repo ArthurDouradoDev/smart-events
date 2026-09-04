@@ -1085,6 +1085,59 @@ class Api:
                 remapped[(original_id, None)] = value
         return remapped
 
+    @classmethod
+    def _site_family_presence(cls, rows: list[dict], index: dict,
+                              configured_family: str | None = None,
+                              metric: str | None = None) -> set[tuple[str, str]]:
+        """Sites/famílias com pelo menos uma medição válida na janela atual.
+
+        A lista de sites já lê todas as medições recentes em lote. Reaproveitar
+        essas linhas evita uma consulta por site só para montar os indicadores
+        4G/5G. A tecnologia persistida pela task tem precedência; membro e
+        configuração cobrem os formatos legados sem essa coluna.
+        """
+        present: set[tuple[str, str]] = set()
+        for row in rows or []:
+            if row.get("value") is None or (metric and row.get("metric") != metric):
+                continue
+            original_id = str(row.get("site_id") or "")
+            if not original_id:
+                continue
+            merged_id, member_family = index.get(
+                original_id,
+                index.get(row.get("site_id"), (original_id, None)),
+            )
+            family = (
+                cls._row_technology_family(row)
+                or member_family
+                or configured_family
+            )
+            if family in ("4G", "5G"):
+                present.add((merged_id, family))
+        return present
+
+    @staticmethod
+    def _technology_reasons(expected_families: list[str],
+                            collected_families: set[str],
+                            metric_families: set[str],
+                            series_by_family: dict | None = None) -> dict[str, str]:
+        """Classifica presença de métrica com a mesma semântica em lista e gráfico."""
+        series_by_family = series_by_family or {}
+        expected = list(dict.fromkeys(
+            family for family in (expected_families or [])
+            if family in ("4G", "5G")
+        ))
+        return {
+            family: (
+                "ok" if family in metric_families or any(
+                    value is not None
+                    for value in (series_by_family.get(family) or {}).get("values", []))
+                else "no_traffic" if family in collected_families
+                else "no_data"
+            )
+            for family in expected
+        }
+
     def _metric_value_for_merged(
             self, metric_by_key: dict, merged_id: str, families: list,
             display_family: str | None, metric: str):
@@ -1180,6 +1233,17 @@ class Api:
             util_by_key[(merged_id, family)] = row["value"]
 
         configured_family = self._single_configured_family(config)
+        collected_presence = self._site_family_presence(
+            latest, original_index, configured_family)
+        metric_presence = self._site_family_presence(
+            list(latest_metric or []) + list(persisted_metric or []),
+            original_index, configured_family, metric)
+        collected_by_site: dict[str, set[str]] = {}
+        metric_by_site: dict[str, set[str]] = {}
+        for merged_id, family in collected_presence:
+            collected_by_site.setdefault(merged_id, set()).add(family)
+        for merged_id, family in metric_presence:
+            metric_by_site.setdefault(merged_id, set()).add(family)
         user_family = technology_family if technology_family in ("4G", "5G") else None
         cell_family = user_family or configured_family
         thresholds = config.get("thresholds", {})
@@ -1209,6 +1273,11 @@ class Api:
                     metric_by_key, site["id"], site.get("tech_families") or [],
                     user_family, metric),
                 "metric_is_share": False,
+                "technology_reasons": self._technology_reasons(
+                    [user_family] if user_family else (site.get("tech_families") or []),
+                    collected_by_site.get(site["id"], set()),
+                    metric_by_site.get(site["id"], set()),
+                ),
             })
         return status_rows
 
@@ -1688,19 +1757,10 @@ class Api:
             if (family := cls._row_technology_family(row)) in ("4G", "5G")
         }
         expected = list(dict.fromkeys(
-            [family for family in (expected_families or []) if family in ("4G", "5G")]
-            + [family for family in series_by_family if family in ("4G", "5G")]
+            list(expected_families or []) + list(series_by_family)
         ))
-        result["reasons"] = {
-            family: (
-                "ok" if family in metric_families or any(
-                    value is not None
-                    for value in (series_by_family.get(family) or {}).get("values", []))
-                else "no_traffic" if family in collected_families
-                else "no_data"
-            )
-            for family in expected
-        }
+        result["reasons"] = cls._technology_reasons(
+            expected, collected_families, metric_families, series_by_family)
         return result
 
     def _kpi_series_for_one_site(self, event_id: str, site_id: str, metric: str,
@@ -3092,4 +3152,3 @@ class Api:
         except Exception as e:
             logger.error(f"clear_event_history error: {e}")
             return {"ok": False, "error": str(e)}
-

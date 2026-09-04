@@ -991,6 +991,21 @@ html[data-window-active="false"] .window-control:not(:hover):not(:focus-visible)
   color: var(--text-secondary);
   letter-spacing: 0.02em;
 }
+.site-tech-family {
+  display: inline-block;
+  transition: opacity var(--transition);
+}
+.site-tech-family.is-no-traffic {
+  opacity: 0.62;
+  cursor: help;
+}
+.site-tech-family.is-no-data {
+  opacity: 0.38;
+  text-decoration: line-through;
+  text-decoration-thickness: 1px;
+  cursor: help;
+}
+.site-tech-separator { opacity: 0.72; }
 #time-tabs {
   display: flex;
   gap: 3px;

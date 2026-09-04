@@ -133,7 +133,8 @@ class TestApiEvents:
 
         assert status
         assert all(set(row) == {
-            "id", "status", "utilization", "metric_value", "metric_is_share"
+            "id", "status", "utilization", "metric_value", "metric_is_share",
+            "technology_reasons",
         } for row in status)
         assert all("cells" not in row and "carriers" not in row for row in status)
 
@@ -517,6 +518,88 @@ def _insert_cell_kpi(event_id, site_id, cell_id, technology, value,
         "scope": "CELL",
         "technology": technology,
     }])
+
+
+class TestSiteTechnologyReasons:
+    def test_site_misto_distingue_metrica_presente_de_familia_sem_coleta(
+            self, api, sample_event):
+        event = _twin_sites_event(sample_event, "site-technology-no-data")
+        database.save_event(event)
+        _insert_cell_kpi(
+            event["id"], "725483", "4G-SPSMG7-0", "4G", 0.0,
+            metric="accessibility")
+
+        status = {row["id"]: row for row in api.get_site_status(
+            event["id"], "accessibility")}
+
+        assert status["SPSMG7"]["technology_reasons"] == {
+            "4G": "ok", "5G": "no_data",
+        }
+
+    def test_site_misto_distingue_sem_trafego_de_sem_coleta(
+            self, api, sample_event):
+        event = _twin_sites_event(sample_event, "site-technology-no-traffic")
+        database.save_event(event)
+        _insert_cell_kpi(
+            event["id"], "725483", "4G-SPSMG7-0", "4G", 98.0,
+            metric="accessibility")
+        _insert_site_kpi(
+            event["id"], "1774059", "5G_NRDUCELL", 12.0,
+            metric="user_count")
+
+        status = {row["id"]: row for row in api.get_site_status(
+            event["id"], "accessibility")}
+
+        assert status["SPSMG7"]["technology_reasons"] == {
+            "4G": "ok", "5G": "no_traffic",
+        }
+
+    def test_utilizacao_nao_confunde_outra_metrica_com_dado_valido(
+            self, api, sample_event):
+        event = _twin_sites_event(sample_event, "site-technology-utilization-filter")
+        database.save_event(event)
+        _insert_cell_kpi(
+            event["id"], "725483", "4G-SPSMG7-0", "4G", 44.0)
+        _insert_site_kpi(
+            event["id"], "1774059", "5G_NRDUCELL", 8.0,
+            metric="user_count")
+
+        status = {row["id"]: row for row in api.get_site_status(
+            event["id"], "utilization_dl")}
+
+        assert status["SPSMG7"]["technology_reasons"] == {
+            "4G": "ok", "5G": "no_traffic",
+        }
+
+    def test_agregados_de_site_da_mesma_metrica_preservam_as_duas_familias(
+            self, api, sample_event):
+        event = _twin_sites_event(sample_event, "site-technology-site-aggregates")
+        database.save_event(event)
+        _insert_site_kpi(
+            event["id"], "725483", "4G", 97.0,
+            ts="2026-08-19T12:00:00Z", metric="accessibility")
+        _insert_site_kpi(
+            event["id"], "1774059", "5G_NRDUCELL", 96.0,
+            ts="2026-08-19T12:05:00Z", metric="accessibility")
+
+        status = {row["id"]: row for row in api.get_site_status(
+            event["id"], "accessibility")}
+
+        assert status["SPSMG7"]["technology_reasons"] == {
+            "4G": "ok", "5G": "ok",
+        }
+
+    def test_filtro_de_familia_devolve_apenas_o_estado_solicitado(
+            self, api, sample_event):
+        event = _twin_sites_event(sample_event, "site-technology-filter")
+        database.save_event(event)
+        _insert_cell_kpi(
+            event["id"], "725483", "4G-SPSMG7-0", "4G", 31.0)
+
+        status = {row["id"]: row for row in api.get_site_status(
+            event["id"], "utilization_dl", technology_family="5G")}
+
+        assert status["SPSMG7"]["technology_reasons"] == {"5G": "no_data"}
 
 
 class TestEventViewIndex:

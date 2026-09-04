@@ -281,6 +281,14 @@ function _mockSites(metric=null, technology_family=null) {
     const cells = family
       ? (s.cells || []).filter(c => !c.family || c.family === family)
       : (s.cells || []);
+    const visibleFamilies = (s.tech_families || [])
+      .filter(item => !family || item === family);
+    const technologyReasons = Object.fromEntries(
+      visibleFamilies.map(item => [item, "ok"])
+    );
+    if (_kpiChartScenario === "missing" && s.id === "SPSMG7" && !family) {
+      technologyReasons["5G"] = "no_data";
+    }
     // Participação é percentual e não escala; o valor cru da métrica, sim.
     const isShare = ["user_count","traffic_volume_dl","traffic_volume_ul"].includes(metric);
     return {
@@ -291,6 +299,7 @@ function _mockSites(metric=null, technology_family=null) {
       metric_value: metric === "user_count" ? Math.round(100 / arr.length)
         : isShare ? s.utilization : s.utilization * _mockMagnitude(metric),
       metric_is_share: isShare,
+      technology_reasons: technologyReasons,
       cluster_ids: _clusterIdsFor(s.id),
       carriers: _mockSiteCarriers(s),
     };
@@ -298,7 +307,7 @@ function _mockSites(metric=null, technology_family=null) {
 }
 
 const _SITE_DYNAMIC_FIELDS = new Set([
-  "status", "utilization", "metric_value", "metric_is_share",
+  "status", "utilization", "metric_value", "metric_is_share", "technology_reasons",
 ]);
 
 function _mockSiteLayout(technology_family=null) {
@@ -314,6 +323,7 @@ function _mockSiteStatus(metric=null, technology_family=null) {
     utilization: site.utilization,
     metric_value: site.metric_value,
     metric_is_share: site.metric_is_share,
+    technology_reasons: site.technology_reasons,
   }));
 }
 
