@@ -1,4 +1,4 @@
-# ERRORS.md — Log de falhas e lições
+﻿# ERRORS.md — Log de falhas e lições
 
 Cada entrada: o que quebrou, causa raiz, correção e a regra que evita a repetição.
 
@@ -1307,3 +1307,72 @@ causa de uma verificacao vermelha, conferir se a assercao e alcancavel com os da
 gerou — aqui, o consertado foi o script.
 
 ---
+
+---
+
+## 2026-09-04 — Dois achados da validação da Fase 3 (nenhum causado por ela)
+
+Ambos foram reproduzidos em **árvore limpa** (`git stash`) antes de serem atribuídos, justamente
+para não "consertar" o produto por causa de sintoma alheio. Ambos foram **corrigidos a pedido**, em
+seguida à Fase 3 — o registro abaixo descreve o que estava errado e o que passou a valer.
+
+### 1. Listener de `mousemove` acumulado sobre `Chart` destruído (PRÉ-EXISTENTE, CORRIGIDO)
+
+**O que acontece:** abrir a visão geral, trocar a janela de tempo (ou a família, ou a seleção) e
+passar o mouse sobre um card lança
+`TypeError: Cannot read properties of null (reading 'ownerDocument')` em
+`getElementsAtEventForMode`.
+
+**Causa raiz:** `_renderCharts` registra `canvas.addEventListener("mousemove", ...)` a cada carga
+não-silenciosa, mas `_destroyCharts()` só destrói as instâncias de `Chart` — o `<canvas>` continua
+no DOM (`grid.innerHTML` só é limpo em `_renderPanelShells`). Os listeners antigos sobrevivem e a
+closure deles ainda aponta para o `chartRef` **destruído**, cujo canvas/ctx já foram anulados pelo
+Chart.js. Cada troca de janela/família/seleção adiciona mais um.
+
+**Reprodução (determinística):** abrir "Ver KPIs" → clicar em "15 min" → passar o mouse sobre um
+card. Sem a troca de janela, não acontece.
+
+**Por que a Fase 3 não piorou nem melhorou:** o refresh silencioso usa o caminho `reuse`, que não
+destrói nada nem registra listener novo — é imune. O bug continua exatamente onde estava, nas
+quatro ações do usuário.
+
+**Correção aplicada:** os dois listeners passaram para `_renderPanelShells`, onde os canvases são
+criados, e o handler (`_onPanelHover`) lê o gráfico corrente de `_charts.get(panelId)` em vez de
+capturar `chartRef`. Um listener por canvas, pela vida do canvas.
+
+**Regra:** listener de DOM vive no ciclo de vida do **elemento**, não no do objeto que ele consulta.
+Se o elemento sobrevive ao objeto — canvas sobrevive ao `Chart`, `<tr>` sobrevive ao modelo da
+linha — registrar junto do objeto acumula pares órfãos apontando para estado morto. Coberto por
+`test_hover_depois_de_recarregar_nao_usa_grafico_destruido`, que conta os listeners de `mousemove`
+com `capture` nos canvases (só a visão geral usa `capture`; o Chart.js registra sem) e exige
+nove antes e depois de uma recarga completa.
+
+### 2. Testes de render incremental mediam antes de o mapa assentar (CORRIGIDO)
+
+**O que acontece:** na suíte completa, `test_mudanca_de_status_repinta_somente_o_site_afetado`
+falhou com `assert 5 == 1` — os cinco marcadores repintados em vez de só o site alterado. Sozinho,
+passava sempre.
+
+**Causa raiz (medida, não deduzida):** `_markerVisualKey(site)` inclui `_map.getZoom()`, e o
+arranque faz as duas coisas em ordem errada para quem observa de fora — `_poll(true)` (`app.js:216`)
+cria os marcadores com o zoom inicial 13, e só depois `fitToEvent` (`app.js:219`) muda o zoom. Quem
+reescreve `_markerVisualKeys` com o zoom novo é o `zoomend` de `map.js:139`, ao fim da animação. O
+helper dos testes esperava apenas "marcador anexado ao DOM", que acontece no meio desse intervalo:
+ali as chaves ainda dizem 13, e QUALQUER render repinta os cinco.
+
+**Como foi provado:** com a CPU estrangulada em 4x via CDP (`Emulation.setCPUThrottlingRate`), um
+`renderSites` no-op no ponto de prontidão antigo repintou 5 marcadores em **10 de 12** execuções;
+com a espera nova, **0 de 12**. Na medição também dá para ver a vista ainda andando no ponto antigo
+(`481:598 -> 472:607`) e parada no novo.
+
+**Correção aplicada:** `_wait_map_settled(page)` no `_loaded_page()`, esperando a posição do
+marcador na tela ficar estável por cinco quadros. Protege os três testes do arquivo, incluindo
+`test_poll_de_status_nao_recria_marcadores_sem_mudanca`, que estava exposto ao mesmo problema.
+
+**Regra:** a pré-condição de um teste de render incremental é "o estado que alimenta a chave de
+cache já assentou" — e o sinal de espera tem de ser **independente do código sob teste**. Aqui é a
+posição do marcador (DOM puro), não "o `renderSites` parou de repintar", que tornaria
+`test_poll_de_status_nao_recria_marcadores_sem_mudanca` tautológico. Mesma família do
+`test_zoom_programatico_tambem_permanece` registrado acima. E: **antes de atribuir uma falha da
+suíte completa a uma mudança em curso, reproduzi-la com `git stash`** — aqui a falha era idêntica
+sem nenhuma linha da Fase 3.

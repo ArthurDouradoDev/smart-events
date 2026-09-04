@@ -188,6 +188,7 @@ function _open() {
   _syncTimeTabs();
   _renderPickers();
   _renderPanelShells();
+  _setUpdatedStamp(null);
   void _load();
   void _refreshScopeData();
 }
@@ -1005,8 +1006,29 @@ function _renderPanelShells() {
         <div class="kpi-overview-no-data hidden">Sem dados no período</div>
         <div class="kpi-overview-tooltip hidden"></div>
       </div>`;
+    // O par de listeners acompanha o canvas, que só nasce aqui. Registrá-los
+    // junto do gráfico criaria um par novo a cada recarga (o canvas sobrevive a
+    // `_destroyCharts`), e o par antigo continuaria apontando para um Chart já
+    // destruído — cujo canvas o Chart.js anulou, fazendo
+    // `getElementsAtEventForMode` estourar no primeiro hover seguinte.
+    const canvas = article.querySelector("canvas");
+    canvas.addEventListener(
+      "mousemove", event => _onPanelHover(panel.id, event), { capture: true });
+    canvas.addEventListener("mouseleave", _clearHover);
     grid.appendChild(article);
   });
+}
+
+/** Lê o gráfico corrente do painel — nunca o que a closure viu ao nascer. */
+function _onPanelHover(panelId, event) {
+  const chart = _charts.get(panelId);
+  if (!chart) return;
+  const elements = chart.getElementsAtEventForMode(
+    event, "index", { intersect: false }, false);
+  if (!elements.length) return;
+  _hoveredPanelId = panelId;
+  _hideTooltips(panelId);
+  _syncCrosshairs(elements[0].index);
 }
 
 function _showState(state, message="") {
@@ -1016,16 +1038,22 @@ function _showState(state, message="") {
   if (error && state === "error") error.textContent = message || "Não foi possível carregar os KPIs.";
 }
 
-async function _load() {
+/**
+ * `silent` é a carga de fundo do poll: sem o overlay de carregamento (que é
+ * opaco e cobre os nove cards) e sem trocar o painel por tela de erro quando a
+ * requisição falha — dado dois minutos velho é melhor que grade vazia.
+ */
+async function _load({ silent = false } = {}) {
   if (!_isOpen()) return;
   const scopes = _selectedScopes();
   if (!State.eventId || !scopes.length) {
     _renderPanelShells();
+    _setUpdatedStamp(null);
     _showState("error", "Selecione ao menos um cluster, site ou célula para visualizar os KPIs.");
     return;
   }
   const requestId = ++_requestId;
-  _showState("loading");
+  if (!silent) _showState("loading");
   try {
     const response = await API.getKpiOverviewMulti(
       State.eventId,
@@ -1037,19 +1065,65 @@ async function _load() {
     if (!response?.ok) throw new Error(response?.error || "Resposta inválida da API");
     _showState("ready");
     _scopeMeta = new Map(scopes.map(scope => [scope.key, scope]));
-    _renderCharts(response);
+    _renderCharts(response, { reuse: silent });
+    _setUpdatedStamp(new Date());
   } catch (error) {
     if (requestId !== _requestId) return;
     console.error("Erro ao carregar visão geral de KPIs:", error);
-    _showState("error", error?.message || "Não foi possível carregar os KPIs.");
+    if (!silent) _showState("error", error?.message || "Não foi possível carregar os KPIs.");
   }
 }
 
-function _renderCharts(response) {
-  _destroyCharts();
+/**
+ * Atualização de fundo da visão geral, chamada pelo poll de 120 s do dashboard
+ * — não há timer próprio aqui, para as duas telas andarem em fase.
+ *
+ * Sai sem fazer nada quando atualizar seria errado (modo histórico é congelado
+ * por definição) ou atrapalharia o que o usuário está fazendo agora: um seletor
+ * aberto seria repintado no meio da escolha, e o card sob o mouse perderia
+ * tooltip e crosshair.
+ */
+export function refreshKpiOverview() {
+  if (!_isOpen()) return;
+  if (State.mode !== "active") return;
+  if (document.querySelector("#kpi-overview-modal .scope-picker.open")) return;
+  if (_hoveredPanelId != null) return;
+  void _load({ silent: true });
+}
+
+/**
+ * Carimbo do cabeçalho: sem ele não há como saber se o que está na tela tem 1
+ * ou 40 minutos. O `data-updated-at` guarda o instante completo — o texto só
+ * cabe em HH:MM.
+ */
+function _setUpdatedStamp(date) {
+  const stamp = document.getElementById("kpi-overview-updated");
+  if (!stamp) return;
+  if (!date) {
+    stamp.textContent = "";
+    stamp.removeAttribute("title");
+    delete stamp.dataset.updatedAt;
+    return;
+  }
+  stamp.textContent = `atualizado às ${_formatTime(date)}`;
+  stamp.title = _formatDateTime(date);
+  stamp.dataset.updatedAt = date.toISOString();
+}
+
+/**
+ * `reuse` atualiza os gráficos que já estão na tela em vez de recriá-los.
+ * `_destroyCharts` zera `_activeIndex` e `_hoveredPanelId`: numa atualização de
+ * fundo isso apagaria o crosshair e o tooltip debaixo do mouse do usuário. Só
+ * vale quando os nove painéis da família ainda existem — depois de trocar de
+ * aba, por exemplo, não há o que reaproveitar.
+ */
+function _renderCharts(response, { reuse = false } = {}) {
+  const panels = PANELS[_family];
+  const canReuse = reuse && panels.every(panel => _charts.has(panel.id));
+  if (!canReuse) _destroyCharts();
   const labels = response.labels || [];
   const scopeCount = (response.series || []).length;
-  PANELS[_family].forEach(panel => {
+  panels.forEach(panel => {
     const card = document.querySelector(`.kpi-overview-card[data-panel-id="${panel.id}"]`);
     const canvas = card?.querySelector("canvas");
     if (!card || !canvas) return;
@@ -1073,24 +1147,24 @@ function _renderCharts(response) {
     card.querySelector(".kpi-overview-card-unit").textContent =
       units.length === 1 ? scale.rotulo : units.join(" / ");
 
-    let chartRef = null;
-    canvas.addEventListener("mousemove", event => {
-      if (!chartRef) return;
-      const elements = chartRef.getElementsAtEventForMode(event, "index", { intersect: false }, false);
-      if (!elements.length) return;
-      _hoveredPanelId = panel.id;
-      _hideTooltips(panel.id);
-      _syncCrosshairs(elements[0].index);
-    }, { capture: true });
-    canvas.addEventListener("mouseleave", _clearHover);
+    const existing = canReuse ? _charts.get(panel.id) : null;
+    if (existing) {
+      existing.data.labels = labels;
+      existing.data.datasets = datasets;
+      // As opções carregam `response` e `scale` dentro dos callbacks de tick e
+      // nas linhas de threshold: trocar só os dados deixaria o eixo X preso aos
+      // rótulos do ciclo anterior.
+      existing.options = _chartOptions(panel, response, scale);
+      existing.update("none");
+      return;
+    }
 
-    chartRef = new Chart(canvas, {
+    _charts.set(panel.id, new Chart(canvas, {
       type: "line",
       plugins: [_crosshairPlugin],
       data: { labels, datasets },
       options: _chartOptions(panel, response, scale),
-    });
-    _charts.set(panel.id, chartRef);
+    }));
   });
 }
 

@@ -3,7 +3,9 @@
 Mesmo padrão de tests/test_frontend_cluster_filter_ui.py: serve frontend/ estático
 e dirige com Playwright contra os mocks reproduzíveis de bridge.js.
 """
+import re
 from contextlib import contextmanager
+from datetime import datetime, timedelta
 from functools import partial
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -14,6 +16,7 @@ import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
 OVERVIEW_JS = ROOT / "frontend" / "js" / "kpi_overview.js"
+APP_JS = ROOT / "frontend" / "js" / "app.js"
 
 
 @contextmanager
@@ -762,5 +765,385 @@ def test_interface_permite_selecionar_mais_de_oito_escopos():
                 )
                 assert page.locator(".scope-picker-option input:disabled").count() == 0
                 assert page.locator("#kpi-overview-error").is_hidden()
+    except Exception as exc:  # pragma: no cover
+        _skip_if_no_browser(exc)
+
+
+# ── Atualização automática a cada ciclo de coleta ──────────────────────
+
+
+def _overview_module_specifier():
+    """URL do módulo tal como `app.js` o importa.
+
+    Um `?v=` diferente carregaria uma SEGUNDA instância do módulo, com estado
+    próprio: `refreshKpiOverview()` olharia para um `_charts` vazio e não faria
+    nada. Ler de `app.js` mantém o teste correto depois de cada bump de cache.
+    """
+    match = re.search(r'from\s+"\./(kpi_overview\.js[^"]*)"',
+                      APP_JS.read_text(encoding="utf-8"))
+    assert match, "import de kpi_overview.js não encontrado em app.js"
+    return f"./js/{match.group(1)}"
+
+
+_INSTALL_PROBE = """async (specifier) => {
+  const bridge = await import('./js/bridge.js');
+  const api = bridge.default;
+  window.__kpiProbe = { calls: 0, gate: false, release: null, shiftHour: false };
+  if (!api.__overviewProbe) {
+    api.__overviewProbe = true;
+    const original = api.getKpiOverviewMulti;
+    api.getKpiOverviewMulti = async (...args) => {
+      const probe = window.__kpiProbe;
+      probe.calls += 1;
+      const response = await original(...args);
+      if (probe.gate) {
+        await new Promise(resolve => { probe.release = resolve; });
+        probe.release = null;
+      }
+      if (probe.shiftHour) {
+        response.labels = (response.labels || []).map(
+          ts => new Date(new Date(ts).getTime() + 3600000).toISOString());
+      }
+      return response;
+    };
+  }
+  const mod = await import(specifier);
+  window.__kpiRefresh = () => mod.refreshKpiOverview();
+}"""
+
+_CHART_IDS = """() => [...document.querySelectorAll('.kpi-overview-card canvas')]
+  .map(canvas => Chart.getChart(canvas)?.id ?? null)"""
+
+_DROP_RATE_AXIS = """() => {
+  const canvas = document.querySelector(
+    '.kpi-overview-card[data-panel-id="drop_rate"] canvas');
+  const chart = Chart.getChart(canvas);
+  const label = chart.data.labels[0];
+  return {
+    label,
+    valor: chart.data.datasets[0].data[0],
+    tick: chart.options.scales.x.ticks.callback(null, 0),
+    esperado: new Date(label).toLocaleTimeString(
+      'pt-BR', { hour: '2-digit', minute: '2-digit' }),
+  };
+}"""
+
+
+def _ready_overview(page, url):
+    """Visão geral aberta numa comparação estável, com a sonda instalada."""
+    _open_overview(page, url)
+    _clear_selection(page)
+    _pick(page, "kpi-overview-cluster-picker", "Todos os clusters")
+    page.wait_for_function(
+        """() => {
+          const canvas = document.querySelector(
+            '.kpi-overview-card[data-panel-id="drop_rate"] canvas');
+          const chart = Chart.getChart(canvas);
+          return !!chart && chart.data.datasets.length === 2
+            && !!document.getElementById('kpi-overview-updated').dataset.updatedAt;
+        }""",
+        timeout=8000,
+    )
+    page.evaluate(_INSTALL_PROBE, _overview_module_specifier())
+
+
+def _stamp(page):
+    return page.get_attribute("#kpi-overview-updated", "data-updated-at")
+
+
+def _refresh_and_wait(page, previous):
+    assert previous, "o carimbo precisa estar preenchido antes do refresh"
+    page.evaluate("() => window.__kpiRefresh()")
+    page.wait_for_function(
+        """previous => document.getElementById(
+             'kpi-overview-updated').dataset.updatedAt !== previous""",
+        arg=previous,
+        timeout=8000,
+    )
+
+
+def _iso(value):
+    return datetime.fromisoformat(value.replace("Z", "+00:00"))
+
+
+def test_poll_do_dashboard_chama_o_refresh_da_visao_geral():
+    """A visão geral anda no poll de 120 s do dashboard, sem timer próprio."""
+    source = APP_JS.read_text(encoding="utf-8")
+
+    assert re.search(
+        r'import \{[^}]*\brefreshKpiOverview\b[^}]*\} from "\./kpi_overview\.js',
+        source), "app.js não importa refreshKpiOverview"
+    poll = re.search(r"async function _poll\(.*?\n\}\n", source, re.S)
+    assert poll, "_poll não encontrado em app.js"
+    assert "refreshChart();" in poll.group(0)
+    assert "refreshKpiOverview();" in poll.group(0)
+
+
+def test_refresh_silencioso_nao_mostra_overlay_de_carregamento():
+    """O `.kpi-overview-state` é opaco e cobre os nove cards: num refresh de
+    fundo ele piscaria sobre a grade a cada dois minutos."""
+    sync_api = pytest.importorskip("playwright.sync_api")
+    try:
+        with _frontend_server() as url, sync_api.sync_playwright() as playwright:
+            with _overview(playwright) as (page, _browser):
+                _ready_overview(page, url)
+                antes = _stamp(page)
+
+                # Segura a resposta para observar a tela COM a carga em voo.
+                page.evaluate("() => { window.__kpiProbe.gate = true; }")
+                page.evaluate("() => window.__kpiRefresh()")
+                page.wait_for_function(
+                    "() => typeof window.__kpiProbe.release === 'function'",
+                    timeout=8000)
+
+                assert page.locator("#kpi-overview-loading").is_hidden()
+                assert page.locator("#kpi-overview-error").is_hidden()
+                assert page.locator(".kpi-overview-card canvas").count() == 9
+
+                page.evaluate("""() => {
+                  window.__kpiProbe.gate = false;
+                  window.__kpiProbe.release();
+                }""")
+                page.wait_for_function(
+                    """previous => document.getElementById(
+                         'kpi-overview-updated').dataset.updatedAt !== previous""",
+                    arg=antes, timeout=8000)
+                assert page.locator("#kpi-overview-loading").is_hidden()
+    except Exception as exc:  # pragma: no cover
+        _skip_if_no_browser(exc)
+
+
+def test_refresh_preserva_crosshair_e_selecao():
+    sync_api = pytest.importorskip("playwright.sync_api")
+    try:
+        with _frontend_server() as url, sync_api.sync_playwright() as playwright:
+            with _overview(playwright) as (page, _browser):
+                _ready_overview(page, url)
+                # Escopo ocultado pela legenda é escolha do usuário: tem de
+                # sobreviver à atualização de fundo.
+                page.locator('#kpi-overview-context .kpi-overview-chip',
+                             has_text="Campo (5G)").click()
+                page.wait_for_function(
+                    """() => {
+                      const canvas = document.querySelector(
+                        '.kpi-overview-card[data-panel-id="drop_rate"] canvas');
+                      const chart = Chart.getChart(canvas);
+                      return chart && !chart.isDatasetVisible(1);
+                    }""", timeout=5000)
+                ids_antes = page.evaluate(_CHART_IDS)
+                antes = _stamp(page)
+
+                _refresh_and_wait(page, antes)
+
+                # Os gráficos foram atualizados, não recriados — recriar zera
+                # `_activeIndex` e `_hoveredPanelId`.
+                assert page.evaluate(_CHART_IDS) == ids_antes
+                assert page.locator(
+                    '#kpi-overview-context .kpi-overview-chip.is-off').count() == 1
+                assert page.evaluate(
+                    """() => Chart.getChart(document.querySelector(
+                         '.kpi-overview-card[data-panel-id="drop_rate"] canvas'
+                       )).isDatasetVisible(1)""") is False
+
+                # Com o mouse lendo um card, a atualização espera o próximo
+                # ciclo: é isso que preserva o crosshair e o tooltip sob o cursor.
+                page.locator(
+                    '.kpi-overview-card[data-panel-id="drop_rate"] canvas').hover()
+                page.wait_for_function(
+                    """() => document.querySelector(
+                         '.kpi-overview-card[data-panel-id="drop_rate"]'
+                       ).dataset.crosshairIndex !== ''""", timeout=5000)
+                crosshair = page.get_attribute(
+                    '.kpi-overview-card[data-panel-id="drop_rate"]',
+                    "data-crosshair-index")
+                chamadas = page.evaluate("() => window.__kpiProbe.calls")
+
+                page.evaluate("() => window.__kpiRefresh()")
+                page.wait_for_timeout(250)
+
+                assert page.evaluate("() => window.__kpiProbe.calls") == chamadas
+                assert page.get_attribute(
+                    '.kpi-overview-card[data-panel-id="drop_rate"]',
+                    "data-crosshair-index") == crosshair
+    except Exception as exc:  # pragma: no cover
+        _skip_if_no_browser(exc)
+
+
+def test_refresh_nao_roda_com_seletor_aberto():
+    """Repintar a lista no meio da escolha atropelaria o usuário."""
+    sync_api = pytest.importorskip("playwright.sync_api")
+    try:
+        with _frontend_server() as url, sync_api.sync_playwright() as playwright:
+            with _overview(playwright) as (page, _browser):
+                _ready_overview(page, url)
+                antes = _stamp(page)
+                chamadas = page.evaluate("() => window.__kpiProbe.calls")
+                _open_picker(page, "kpi-overview-site-picker")
+                assert page.locator("#kpi-overview-site-picker.open").count() == 1
+
+                page.evaluate("() => window.__kpiRefresh()")
+                page.wait_for_timeout(250)
+
+                assert page.evaluate("() => window.__kpiProbe.calls") == chamadas
+                assert _stamp(page) == antes
+
+                # Fechado o seletor, o ciclo seguinte volta a atualizar.
+                page.locator(
+                    "#kpi-overview-site-picker .scope-picker-trigger").click()
+                _refresh_and_wait(page, antes)
+    except Exception as exc:  # pragma: no cover
+        _skip_if_no_browser(exc)
+
+
+def test_refresh_ignorado_com_painel_fechado():
+    sync_api = pytest.importorskip("playwright.sync_api")
+    try:
+        with _frontend_server() as url, sync_api.sync_playwright() as playwright:
+            with _overview(playwright) as (page, _browser):
+                falhas = []
+                page.on("pageerror", lambda exc: falhas.append(str(exc)))
+                _ready_overview(page, url)
+                chamadas = page.evaluate("() => window.__kpiProbe.calls")
+
+                page.locator("#kpi-overview-close").click()
+                assert page.locator("#kpi-overview-modal.hidden").count() == 1
+
+                page.evaluate("() => window.__kpiRefresh()")
+                page.evaluate("() => window.__kpiRefresh()")
+                page.wait_for_timeout(250)
+
+                assert page.evaluate("() => window.__kpiProbe.calls") == chamadas
+                assert falhas == []
+    except Exception as exc:  # pragma: no cover
+        _skip_if_no_browser(exc)
+
+
+# Só o listener da visão geral usa `capture: true` num canvas; os do próprio
+# Chart.js são registrados sem capture. Contar por aí isola os nossos.
+_COUNT_HOVER_LISTENERS = """
+window.__hoverListeners = 0;
+const _add = EventTarget.prototype.addEventListener;
+EventTarget.prototype.addEventListener = function (type, fn, options) {
+  if (type === 'mousemove' && this instanceof HTMLCanvasElement
+      && (options === true || (options && options.capture))) {
+    window.__hoverListeners += 1;
+  }
+  return _add.call(this, type, fn, options);
+};
+"""
+
+
+def test_hover_depois_de_recarregar_nao_usa_grafico_destruido():
+    """Recarga completa destrói os nove gráficos, mas os canvases sobrevivem.
+
+    Com o listener registrado junto do gráfico, cada recarga somava um par novo
+    e o antigo seguia apontando para um `Chart` destruído — o hover seguinte
+    estourava em `getElementsAtEventForMode` (canvas já anulado pelo Chart.js).
+    """
+    sync_api = pytest.importorskip("playwright.sync_api")
+    try:
+        with _frontend_server() as url, sync_api.sync_playwright() as playwright:
+            with _overview(playwright) as (page, _browser):
+                falhas = []
+                page.on("pageerror", lambda exc: falhas.append(str(exc)))
+                page.add_init_script(_COUNT_HOVER_LISTENERS)
+                _open_overview(page, url)
+                # Um por card, e nenhum a mais: os nove nascem com os canvases.
+                assert page.evaluate("() => window.__hoverListeners") == 9
+
+                # Troca a janela de tempo: `_load()` não-silencioso, que destrói
+                # e recria as nove instâncias sobre os MESMOS canvases.
+                page.locator('#kpi-overview-time-tabs [data-window="15"]').click()
+                page.wait_for_function(
+                    """() => {
+                      const canvas = document.querySelector(
+                        '.kpi-overview-card[data-panel-id="drop_rate"] canvas');
+                      const chart = Chart.getChart(canvas);
+                      return !!chart && chart.data.labels.length === 16;
+                    }""", timeout=8000)
+                assert page.evaluate("() => window.__hoverListeners") == 9
+
+                page.locator(
+                    '.kpi-overview-card[data-panel-id="drop_rate"] canvas').hover()
+                page.wait_for_timeout(250)
+
+                assert falhas == []
+                # E o listener sobrevivente é o útil: aponta para o gráfico novo.
+                assert page.get_attribute(
+                    '.kpi-overview-card[data-panel-id="drop_rate"]',
+                    "data-crosshair-index") not in (None, "")
+    except Exception as exc:  # pragma: no cover
+        _skip_if_no_browser(exc)
+
+
+def test_refresh_ignorado_no_modo_historico():
+    """A timeline é congelada por definição: o instante é o do slider."""
+    sync_api = pytest.importorskip("playwright.sync_api")
+    try:
+        with _frontend_server() as url, sync_api.sync_playwright() as playwright:
+            with _overview(playwright) as (page, _browser):
+                _ready_overview(page, url)
+                antes = _stamp(page)
+                chamadas = page.evaluate("() => window.__kpiProbe.calls")
+                page.evaluate("""async () => {
+                  const state = await import('./js/state.js');
+                  state.default.mode = 'historical';
+                }""")
+
+                page.evaluate("() => window.__kpiRefresh()")
+                page.wait_for_timeout(250)
+
+                assert page.evaluate("() => window.__kpiProbe.calls") == chamadas
+                assert _stamp(page) == antes
+
+                page.evaluate("""async () => {
+                  const state = await import('./js/state.js');
+                  state.default.mode = 'active';
+                }""")
+                _refresh_and_wait(page, antes)
+    except Exception as exc:  # pragma: no cover
+        _skip_if_no_browser(exc)
+
+
+def test_carimbo_de_atualizacao_muda_apos_refresh():
+    """Hoje não há como saber se o painel tem 1 ou 40 minutos."""
+    sync_api = pytest.importorskip("playwright.sync_api")
+    try:
+        with _frontend_server() as url, sync_api.sync_playwright() as playwright:
+            with _overview(playwright) as (page, _browser):
+                _ready_overview(page, url)
+                texto = page.locator("#kpi-overview-updated").inner_text()
+                assert re.fullmatch(r"atualizado às \d{2}:\d{2}", texto), texto
+                antes = _stamp(page)
+
+                _refresh_and_wait(page, antes)
+
+                assert _iso(_stamp(page)) > _iso(antes)
+    except Exception as exc:  # pragma: no cover
+        _skip_if_no_browser(exc)
+
+
+def test_refresh_silencioso_traz_dado_e_eixo_x_novos():
+    """Reaproveitar o gráfico não pode deixar o eixo X preso ao ciclo anterior.
+
+    O callback do tick fecha sobre a `response` da carga que o criou; trocar só
+    `chart.data` mostraria os horários antigos sob os dados novos.
+    """
+    sync_api = pytest.importorskip("playwright.sync_api")
+    try:
+        with _frontend_server() as url, sync_api.sync_playwright() as playwright:
+            with _overview(playwright) as (page, _browser):
+                _ready_overview(page, url)
+                antes = page.evaluate(_DROP_RATE_AXIS)
+                carimbo = _stamp(page)
+
+                # O mock é estável dentro do mesmo minuto: a sonda desloca a
+                # grade em 1 h para o "ciclo seguinte" ser distinguível.
+                page.evaluate("() => { window.__kpiProbe.shiftHour = true; }")
+                _refresh_and_wait(page, carimbo)
+
+                depois = page.evaluate(_DROP_RATE_AXIS)
+                assert _iso(depois["label"]) - _iso(antes["label"]) == timedelta(hours=1)
+                assert depois["tick"] == depois["esperado"] != antes["tick"]
     except Exception as exc:  # pragma: no cover
         _skip_if_no_browser(exc)

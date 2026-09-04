@@ -1,4 +1,4 @@
-# MEMORY.md — Log de decisões e fatos permanentes
+﻿# MEMORY.md — Log de decisões e fatos permanentes
 
 Registro vivo do projeto. Nunca apagar histórico; sempre acrescentar com data e motivo.
 
@@ -2512,3 +2512,66 @@ botao de fechar chama `request_close()` numa thread da bridge JS, entao a limpez
 thread-local que o `db.close_conn()` do `finally` (thread principal) nao fecha. E o mesmo padrao ja
 existente nos workers do scheduler — o commit e duravel e o WAL e reproduzido na proxima abertura,
 mas o `wal_checkpoint(TRUNCATE)` nao roda para essas conexoes.
+
+---
+
+## 2026-09-04 — Fase 3 do plano: a visão geral de KPIs se atualiza sozinha
+
+Implementa a Fase 3 de `plano-alarmes-e-refresh-kpis.md`. O painel de nove gráficos não tinha
+refresh nenhum: `_load()` só disparava em quatro ações do usuário (abrir, trocar 4G/5G, trocar a
+janela, mudar a seleção) — por isso alternar 4G↔5G ou fechar e reabrir "resolvia". Fase só de
+frontend, independente das Fases 1 e 2.
+
+**O que mudou:**
+
+- `frontend/js/kpi_overview.js`: `_load({ silent })`; `_renderCharts(response, { reuse })`;
+  `export function refreshKpiOverview()`; `_setUpdatedStamp(date)`.
+- `frontend/js/app.js`: importa `refreshKpiOverview` e a chama em `_poll`, ao lado de
+  `refreshChart()`.
+- `frontend/index.html`: `<span id="kpi-overview-updated">` na `.kpi-overview-heading`; bump de
+  `?v=` em `js/app.js` **e** em `css/main.css`.
+- `frontend/css/main.css`: estilo discreto do carimbo, com `:empty { display: none }`.
+
+**Decisões travadas:**
+
+- **Sem timer próprio.** A visão geral pendura no poll de 120 s do dashboard, para as duas telas
+  andarem em fase e sem carga extra fora de ciclo. `_poll` já retorna cedo fora do modo `active`.
+- **O refresh de fundo é silencioso.** Nada de `_showState("loading")`: o `.kpi-overview-state` é
+  um overlay opaco (`rgba(13,17,23,0.88)`) sobre os nove cards e piscaria a cada dois minutos.
+  Falha em refresh silencioso mantém os gráficos e só faz `console.error` — dado dois minutos
+  velho é melhor que grade de erro.
+- **Reaproveitar os gráficos, não recriá-los.** `_destroyCharts()` zera `_activeIndex` e
+  `_hoveredPanelId`; recriar num ciclo automático mataria crosshair e tooltip. O caminho `reuse`
+  só vale quando os nove painéis da família ainda estão no `_charts` (depois de trocar de aba não
+  há o que reaproveitar).
+- **No reuse, as OPÇÕES também são trocadas, não só `chart.data`.** Os callbacks de tick fecham
+  sobre a `response` e a `scale` da carga que criou o gráfico: atualizar só os dados deixaria o
+  eixo X mostrando os horários do ciclo anterior sob os dados novos. `chart.options = ...` +
+  `chart.update("none")` funciona no Chart.js 4.4.0 porque `Config.update()` faz
+  `clearCache()` e renormaliza. Coberto por `test_refresh_silencioso_traz_dado_e_eixo_x_novos`,
+  que desloca a grade em 1 h pela sonda e compara o rótulo do tick.
+- **Quatro guardas em `refreshKpiOverview()`:** painel fechado, `State.mode !== "active"`
+  (a timeline é congelada por definição), `.scope-picker.open` (não atropela a escolha em curso) e
+  `_hoveredPanelId != null` (o card sob o mouse não perde tooltip/crosshair). Cada guarda tem teste
+  e todas foram validadas por mutação — remover qualquer uma derruba o teste correspondente.
+- **Carimbo com `data-updated-at`.** O texto é `atualizado às HH:MM`, mas o instante completo em ISO
+  fica no `dataset` — HH:MM não muda dentro do mesmo minuto e não serviria para o teste provar que
+  o horário avança. Zerado ao abrir o painel e quando não há escopo selecionado.
+
+**Verificação:** suíte completa **970 passed, 10 skipped** (baseline após a Fase 2 era 962/10; +8
+testes em `test_frontend_kpi_overview_ui.py`). Smoke e2e fora da suíte, com o `_poll` REAL de
+`app.js` e o intervalo de 120 s comprimido para 1,5 s por init script: carimbo avança sozinho,
+os nove `Chart.id` permanecem os mesmos (reuso confirmado), overlay de carregamento nunca aparece
+(MutationObserver contou 0), crosshair e tooltip intactos com o mouse parado durante os ciclos,
+e nenhum erro de página com o painel aberto.
+
+**Correções pedidas em seguida (mesmo dia, ver ERRORS.md):**
+
+- **Listener de hover saiu de `_renderCharts` para `_renderPanelShells`.** Bug pré-existente: o
+  canvas sobrevive a `_destroyCharts`, então cada recarga não-silenciosa somava um par de listeners
+  e o antigo seguia apontando para um `Chart` destruído — `getElementsAtEventForMode` estourava no
+  hover seguinte. Agora um listener por canvas, e `_onPanelHover` lê o gráfico de `_charts`. Bump
+  para `?v=20260904-overview-refresh-r2`.
+- **`_wait_map_settled` em `tests/test_frontend_site_render.py`.** Os marcadores nascem antes do
+  `fitToEvent`, e é o `zoomend` que reescreve as chaves com o zoom novo; o helper media no meio.
+  Sob CPU estrangulada em 4x: 10 falhas em 12 antes, 0 em 12 depois.

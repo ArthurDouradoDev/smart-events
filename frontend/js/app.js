@@ -9,7 +9,7 @@ import { initWindowChrome } from "./window_chrome.js?v=20260831-window-chrome-r5
 import { initMap, renderEventPolygon, fitToEvent, resizeMap } from "./map.js?v=20260903-site-poll-r1";
 import { initVip, resizeVipChart }    from "./vip.js?v=20260830-window-chrome-r1";
 import { initKpi, refreshChart, resizeKpiCharts }    from "./kpi.js?v=20260903-kpi-family-r1";
-import { initKpiOverview, resizeKpiOverviewCharts } from "./kpi_overview.js?v=20260901-polygon-filter-r1";
+import { initKpiOverview, refreshKpiOverview, resizeKpiOverviewCharts } from "./kpi_overview.js?v=20260904-overview-refresh-r2";
 import { siteInsidePolygon } from "./geometry.js?v=20260901-polygon-filter-r1";
 import { initAlerts, injectAlerts } from "./alerts.js?v=20260826-site-filter";
 import { initAlarms, injectAlarms } from "./alarms.js?v=20260826-site-filter";
@@ -324,6 +324,8 @@ async function _poll(reloadLayout = false) {
 
     // Atualiza o gráfico de KPIs automaticamente a cada ciclo (sem reabrir popup fechado).
     refreshChart();
+    // A visão geral de nove painéis anda no mesmo ciclo, sem timer próprio.
+    refreshKpiOverview();
   } catch (err) {
     console.error("Erro no poll:", err);
   }

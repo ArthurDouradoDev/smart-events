@@ -23,6 +23,37 @@ def _frontend_server():
         thread.join(timeout=2)
 
 
+def _wait_map_settled(page, timeout=8000):
+    """Espera o `fitToEvent` do arranque terminar de mexer na vista.
+
+    Os marcadores nascem em `_poll(true)` com o zoom inicial (13) e só depois o
+    `fitToEvent` muda o zoom; é o `zoomend` de map.js que reescreve as chaves de
+    `_markerVisualKeys` com o zoom novo. Medir repintura entre essas duas etapas
+    conta os cinco marcadores em vez de um — não porque o render incremental
+    falhou, mas porque a chave de TODOS mudou junto.
+
+    O sinal é a posição do marcador na tela — muda a cada quadro enquanto a
+    vista se move. Como o `zoomend` dispara ao fim da animação, posição parada
+    por vários quadros implica que ele já correu. Com a CPU estrangulada em 4x
+    (CDP `Emulation.setCPUThrottlingRate`), medir sem esta espera pega as chaves
+    defasadas em 10 de 12 execuções; com ela, 0 de 12.
+    """
+    page.wait_for_function(
+        """() => {
+          const marker = document.querySelector('.leaflet-marker-icon');
+          if (!marker) return false;
+          const box = marker.getBoundingClientRect();
+          const key = `${Math.round(box.x)}:${Math.round(box.y)}`;
+          const previous = window.__mapSettle;
+          window.__mapSettle = previous && previous.key === key
+            ? { key, hits: previous.hits + 1 }
+            : { key, hits: 0 };
+          return window.__mapSettle.hits >= 5;
+        }""",
+        timeout=timeout,
+    )
+
+
 @contextmanager
 def _loaded_page():
     sync_api = pytest.importorskip("playwright.sync_api")
@@ -33,6 +64,7 @@ def _loaded_page():
             page.goto(f"{url}/index.html", wait_until="domcontentloaded")
             page.locator(".site-item").first.wait_for(state="visible", timeout=8000)
             page.locator(".leaflet-marker-icon").first.wait_for(state="attached", timeout=8000)
+            _wait_map_settled(page)
             try:
                 yield page
             finally:

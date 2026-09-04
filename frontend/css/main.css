@@ -1162,6 +1162,18 @@ html[data-window-active="false"] .window-control:not(:hover):not(:focus-visible)
   overflow: hidden;
 }
 
+/* Carimbo do último ciclo — secundário, some enquanto não há carga bem-sucedida. */
+#kpi-overview-updated {
+  display: block;
+  margin-top: 2px;
+  color: var(--text-muted);
+  font-size: 10px;
+  line-height: 1.4;
+  white-space: nowrap;
+}
+
+#kpi-overview-updated:empty { display: none; }
+
 .kpi-overview-chip {
   display: inline-flex;
   align-items: center;
