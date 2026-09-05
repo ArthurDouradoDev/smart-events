@@ -416,26 +416,28 @@ function _updateMarkerDecorations(site) {
 }
 
 function _resolveTechAndFreq(cell) {
-  let tech = cell.tech;
+  let tech = cell.family || cell.tech || cell.ep?.technology;
   let freq = cell.frequency;
 
   if (!tech || !freq) {
     const id = (cell.id || "").toUpperCase();
     
-    if (id.includes("5G") || id.includes("_5G") || id.startsWith("5G") || id.includes("-Y") || id.includes("_Y")) {
-      tech = "5G";
-    } else if (id.includes("4G") || id.includes("LTE") || id.includes("_4G") || id.startsWith("4G") || id.includes("-L") || id.includes("_L")) {
-      tech = "4G";
-    } else if (id.includes("3G") || id.includes("WCDMA") || id.includes("_3G") || id.startsWith("3G") || id.includes("-W") || id.includes("_W")) {
-      tech = "3G";
-    } else if (id.includes("2G") || id.includes("GSM") || id.includes("_2G") || id.startsWith("2G") || id.includes("-G") || id.includes("_G")) {
-      tech = "2G";
-    }
+    if (!tech) {
+      if (id.includes("5G") || id.includes("_5G") || id.startsWith("5G") || id.includes("-Y") || id.includes("_Y")) {
+        tech = "5G";
+      } else if (id.includes("4G") || id.includes("LTE") || id.includes("_4G") || id.startsWith("4G") || id.includes("-L") || id.includes("_L")) {
+        tech = "4G";
+      } else if (id.includes("3G") || id.includes("WCDMA") || id.includes("_3G") || id.startsWith("3G") || id.includes("-W") || id.includes("_W")) {
+        tech = "3G";
+      } else if (id.includes("2G") || id.includes("GSM") || id.includes("_2G") || id.startsWith("2G") || id.includes("-G") || id.includes("_G")) {
+        tech = "2G";
+      }
 
+    }
     const freqMatch = id.match(/(3500|2600|2300|2100|1800|850|700)/);
-    if (freqMatch) {
+    if (!freq && freqMatch) {
       freq = freqMatch[1];
-    } else {
+    } else if (!freq) {
       // Tenta mapear os shortcodes de frequência
       const tokens = id.split(/[-_]/);
       const shortcodeMap = {
@@ -509,8 +511,9 @@ function _getCellColor(cell) {
 }
 
 function _cellFamily(cell) {
-  if (cell?.family) return cell.family;
-  const id = String(cell?.id || cell?.tech || "").toUpperCase();
+  // Declaração explícita decide sozinha; o nome só entra sem nenhuma delas.
+  if (cell?.family || cell?.tech || cell?.ep?.technology) return _resolveTechAndFreq(cell).tech;
+  const id = String(cell?.id || "").toUpperCase();
   const has4g = /(^|[^A-Z0-9])(?:4G|LTE)([^A-Z0-9]|$)/.test(id);
   const has5g = /(^|[^A-Z0-9])(?:5G|NR|NCI)([^A-Z0-9]|$)/.test(id);
   if (has4g === has5g) return null;

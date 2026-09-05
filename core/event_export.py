@@ -33,6 +33,7 @@ from zoneinfo import ZoneInfo
 from core import database as db
 from core.kpi_formulas import definition, to_canonical
 from core.paths import downloads_dir, event_exports_dir
+from core.technology import resolve_cell_family, task_family
 
 
 logger = logging.getLogger(__name__)
@@ -146,12 +147,7 @@ def _time_fields(value) -> dict:
 
 
 def _technology_family(value) -> str:
-    token = str(value or "").upper().replace("-", "_").replace(" ", "_")
-    if token in {"4G", "LTE"}:
-        return "4G"
-    if token in {"5G", "NR", "NRCELL", "NRDUCELL", "5G_NRCELL", "5G_NRDUCELL"}:
-        return "5G"
-    return "unknown"
+    return task_family(value) or "unknown"
 
 
 def _collector_technology(value) -> str:
@@ -693,7 +689,7 @@ class EventExportService:
                     **row,
                     "site_name": site.get("name"),
                     "cell_id": cell.get("id"),
-                    "technology_ep": cell.get("tech"),
+                    "technology_ep": cell.get("tech") or (cell.get("ep") or {}).get("technology"),
                 }
         return rows, lookup
 
@@ -848,7 +844,10 @@ class EventExportService:
                     "oss_unit": item.unit if item else "",
                     "conversion_applied": bool(item and item.to_base != 1.0),
                     "scope": source["scope"], "technology": source["technology"],
-                    "technology_family": _technology_family(source["technology"]),
+                    "technology_family": resolve_cell_family(
+                        {"tech": ep.get("technology_ep"), "id": source["cell_id"],
+                         "frequency": ep.get("frequency_mhz")},
+                        source["technology"]).family or "unknown",
                     "technology_ep": ep.get("technology_ep"),
                     "frequency_mhz": ep.get("frequency_mhz"),
                     "earfcn": ep.get("dlearfcn"),

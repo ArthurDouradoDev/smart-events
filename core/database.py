@@ -867,7 +867,7 @@ def get_kpi_collection_rows(event_id: str, site_ids: List[str],
             "timestamp >= strftime('%Y-%m-%dT%H:%M:%SZ', 'now', ? || ' minutes')")
         params.append(f"-{minutes}")
     rows = get_event_conn(event_id).execute(
-        "SELECT DISTINCT cell_id, technology FROM kpi_measurements WHERE "
+        "SELECT DISTINCT site_id, cell_id, technology FROM kpi_measurements WHERE "
         + " AND ".join(conditions),
         params,
     ).fetchall()

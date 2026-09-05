@@ -4,9 +4,17 @@ from contextlib import contextmanager
 from functools import partial
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+import re
 from threading import Thread
 
 import pytest
+
+# Especificador exato usado por app.js. Importar map.js com outra query cria um
+# segundo módulo ESM, cujo mapa interno ainda é nulo.
+MAP_MODULE = "/js/" + re.search(
+    r'from "\./(map\.js[^"]*)"',
+    (Path(__file__).resolve().parents[1] / "frontend" / "js" / "app.js").read_text(encoding="utf-8"),
+).group(1)
 
 
 @contextmanager
@@ -78,9 +86,9 @@ def _loaded_page(query=""):
 def test_poll_de_status_nao_recria_marcadores_sem_mudanca():
     with _loaded_page() as page:
         calls = page.evaluate(
-            """async () => {
+            """async (mapModule) => {
               const State = (await import('/js/state.js')).default;
-              const { renderSites } = await import('/js/map.js?v=20260903-site-poll-r1');
+              const { renderSites } = await import(mapModule);
               let calls = 0;
               const original = L.Marker.prototype.setIcon;
               L.Marker.prototype.setIcon = function(icon) {
@@ -90,7 +98,8 @@ def test_poll_de_status_nao_recria_marcadores_sem_mudanca():
               renderSites(State.sites);
               L.Marker.prototype.setIcon = original;
               return calls;
-            }"""
+            }""",
+            MAP_MODULE,
         )
 
         assert calls == 0

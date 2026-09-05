@@ -970,3 +970,23 @@ def test_site_throughput_is_recalculated_not_summed(tmp_db, monkeypatch):
             if row["metric"] == "throughput_dl" and row["scope"] == "SITE"]
     assert len(cell) == 2 and len(site) == 1
     assert site[0]["value"] == pytest.approx(cell[0]["value"])
+
+
+def test_ep_autoritativa_rejeita_task_incompativel_e_preserva_subtipo(caplog):
+    event = _event()
+    event['sites'][0]['cells'] = [{'id':'5G-X','tech':'4G','frequency':'3500','obj_no':1}, {'id':'neutral','ep':{'technology':'5G'},'obj_no':2}]
+    collector = HttpCollector(event,'https://example.test','cookie')
+    assert collector._cell_metadata['5G-X']['family_source'] == 'ep'
+    assert collector._resolve_monitoring_cell(20,1,'Cell Name=5G-X','5G_NRCELL') is None
+    assert 'Conflito task × EP' in caplog.text
+    assert collector._resolve_monitoring_cell(10,1,'Cell Name=5G-X','4G')['technology'] == '4G'
+    for task, technology in [(20,'5G_NRCELL'),(30,'5G_NRDUCELL')]:
+        assert collector._resolve_monitoring_cell(task,2,'Cell Name=neutral',technology)['technology'] == technology
+
+
+def test_legado_tem_origem_observavel(caplog):
+    event = _event()
+    event['sites'][0]['cells'] = [{'id':'5G-X'}]
+    collector = HttpCollector(event,'https://example.test','cookie')
+    assert collector._cell_metadata['5G-X']['family_source'] == 'legacy_id'
+    assert 'Tecnologia legado' in caplog.text

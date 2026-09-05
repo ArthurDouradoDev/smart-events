@@ -4,9 +4,17 @@ from contextlib import contextmanager
 from functools import partial
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+import re
 from threading import Thread
 
 import pytest
+
+# Especificador exato usado por app.js. Importar map.js com outra query cria um
+# segundo módulo ESM, cujo mapa interno ainda é nulo.
+MAP_MODULE = "/js/" + re.search(
+    r'from "\./(map\.js[^"]*)"',
+    (Path(__file__).resolve().parents[1] / "frontend" / "js" / "app.js").read_text(encoding="utf-8"),
+).group(1)
 
 
 @contextmanager
@@ -34,7 +42,7 @@ def test_evento_com_menos_de_cem_sites_abre_enquadrado_no_poligono():
                 state="attached", timeout=8000)
 
             fitted = page.evaluate(
-                """async () => {
+                """async (mapModule) => {
                   const original = L.Map.prototype.fitBounds;
                   L.Map.prototype.fitBounds = function(bounds, options) {
                     const normalized = L.latLngBounds(bounds);
@@ -44,7 +52,7 @@ def test_evento_com_menos_de_cem_sites_abre_enquadrado_no_poligono():
                     };
                     return original.call(this, bounds, options);
                   };
-                  const { fitToEvent } = await import('/js/map.js?v=20260903-site-poll-r1');
+                  const { fitToEvent } = await import(mapModule);
                   const polygon = [
                     [-23.71, -46.71], [-23.71, -46.69],
                     [-23.69, -46.69], [-23.69, -46.71],
@@ -54,7 +62,8 @@ def test_evento_com_menos_de_cem_sites_abre_enquadrado_no_poligono():
                     { id: 'neighbor', lat: -10.0, lng: -35.0, is_event_site: false },
                   ], polygon);
                   return window.__lastFitBounds;
-                }"""
+                }""",
+                MAP_MODULE,
             )
 
             assert fitted == {
@@ -79,7 +88,7 @@ def test_evento_com_cem_sites_mantem_enquadramento_de_todos_os_sites():
                 state="attached", timeout=8000)
 
             fitted = page.evaluate(
-                """async () => {
+                """async (mapModule) => {
                   const original = L.Map.prototype.fitBounds;
                   L.Map.prototype.fitBounds = function(bounds, options) {
                     const normalized = L.latLngBounds(bounds);
@@ -89,7 +98,7 @@ def test_evento_com_cem_sites_mantem_enquadramento_de_todos_os_sites():
                     };
                     return original.call(this, bounds, options);
                   };
-                  const { fitToEvent } = await import('/js/map.js?v=20260903-site-poll-r1');
+                  const { fitToEvent } = await import(mapModule);
                   const sites = Array.from({ length: 100 }, (_, index) => ({
                     id: `site-${index}`,
                     lat: index === 99 ? -10.0 : -23.70,
@@ -101,7 +110,8 @@ def test_evento_com_cem_sites_mantem_enquadramento_de_todos_os_sites():
                     [-23.69, -46.69], [-23.69, -46.71],
                   ]);
                   return window.__lastFitBounds;
-                }"""
+                }""",
+                MAP_MODULE,
             )
 
             assert fitted["north"] == -10.0

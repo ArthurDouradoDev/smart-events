@@ -2575,3 +2575,48 @@ e nenhum erro de página com o painel aberto.
 - **`_wait_map_settled` em `tests/test_frontend_site_render.py`.** Os marcadores nascem antes do
   `fitToEvent`, e é o `zoomend` que reescreve as chaves com o zoom novo; o helper media no meio.
   Sob CPU estrangulada em 4x: 10 falhas em 12 antes, 0 em 12 depois.
+
+## 2026-09-05 — Implementação 2: a coluna `tecnologia` da EP como fonte da família
+
+Fecha a implementação 2 do plano `docs/plans/2026-09-04-002-feat-tecnologia-ep-e-disponibilidade-site-plan.md`.
+A base veio de uma sessão anterior (GPT); esta sessão auditou contra o plano, corrigiu o que
+faltava e validou a suíte inteira.
+
+**A regra de domínio mora em `core/technology.py`.** `resolve_cell_family(cell, measurement)`
+devolve família **e origem** (`ep`, `measurement`, `legacy_id`, `legacy_frequency`, `unknown`),
+nessa precedência. `server.py`, `api/api.py`, `core/collector.py` e `core/event_export.py` usam
+só ela — não há mais regex de família espalhado por módulo, nem no JS quando a API manda `family`.
+
+**Inventário ≠ disponibilidade.** `tech_families` responde "o que o site tem segundo a EP";
+`technology_reasons` (implementação 1, já existente) responde "como está a métrica em cada
+família". A implementação 2 não mexeu na 1.
+
+**A EP nunca é sobreposta.** Nome de célula, banda, DLEARFCN e tecnologia da task não derrubam
+uma declaração válida. O caminho inverso continua valendo: `kpi_measurements.technology` guarda a
+tecnologia da **task** (`4G`, `5G_NRCELL`, `5G_NRDUCELL`), porque NR Cell e NR DU Cell têm
+contadores disjuntos e escolhem fórmulas diferentes. Família é da EP; fórmula é da task.
+
+**Novas EPs exigem a coluna; eventos antigos não são tocados.** A validação roda dentro do mesmo
+laço que monta os sites e só cobra tecnologia das linhas **que viram célula** — linha sem
+coordenada ou sem id o parser já descartava e continua descartando, sem derrubar o arquivo. Os
+erros são acumulados e o arquivo é rejeitado inteiro antes de devolver qualquer site (amostra de
+20 linhas + total). Evento já salvo abre pelo fallback legado, com `family_source` nos metadados
+e aviso `Tecnologia legado` no log.
+
+**Desempenho é parte do contrato, não detalhe.** Duas armadilhas (ver ERRORS.md) fizeram a
+resolução por EP custar caro; ambas são do mesmo formato — **função O(inventário) chamada dentro
+de laço**. As defesas são:
+
+- `build_family_index(config)` monta o índice do evento **uma vez por chamada de API** e é passado
+  adiante (`index=`); `annotate_rows(rows, index)` não remonta nada. Coberto por
+  `test_serie_de_cluster_resolve_o_inventario_uma_vez_por_chamada`, que conta as construções.
+- `_single_configured_family(config)` varre o inventário inteiro; toda chamada foi içada para
+  fora dos laços, e `_site_carriers` passou a **receber** a família já resolvida em vez do
+  `config`.
+- O teste de orçamento de `get_sites` agora é parametrizado por nome de célula
+  (`4G-SITE...` e `ABC...`): só o nome neutro exercita o caminho da família indeterminada, que
+  era exatamente o que passava despercebido.
+
+**Verificação:** suíte completa **1.004 passed, 10 skipped**, exit code 0. Medições em evento de 1.500 sites (fora da suíte):
+série de cluster com 140 membros 4,1 s → 0,05 s; `get_sites` em evento legado (células sem
+`tech` e com nome neutro) 51,7 s → 0,49 s.

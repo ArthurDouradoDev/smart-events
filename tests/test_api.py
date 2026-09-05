@@ -757,8 +757,12 @@ class TestEventViewIndex:
             assert api._resolve_site_for_source(
                 sites, source) == self._linear_alarm_site(sites, source)
 
+    # O nome com "4G" resolve a família na hora; o neutro deixa a célula
+    # indeterminada e leva ao caminho que consulta a família configurada do
+    # evento — o mesmo orçamento vale para os dois.
+    @pytest.mark.parametrize("cell_id_template", ["4G-SITE{:04d}-A", "ABC{:04d}A"])
     def test_get_sites_em_evento_grande_fica_abaixo_do_orcamento(
-            self, api, sample_event, monkeypatch):
+            self, api, sample_event, monkeypatch, cell_id_template):
         site_count = 1500
         sites = [
             {
@@ -767,7 +771,7 @@ class TestEventViewIndex:
                 "lat": -23.0 + index / 100000,
                 "lng": -46.0 + index / 100000,
                 "cells": [{
-                    "id": f"4G-SITE{index:04d}-A",
+                    "id": cell_id_template.format(index),
                     "earfcn": index % 50,
                 }],
             }
@@ -804,6 +808,51 @@ class TestEventViewIndex:
 
         assert len(result) == site_count
         assert elapsed < 5.0, f"get_sites levou {elapsed:.2f}s"
+
+    def test_serie_de_cluster_resolve_o_inventario_uma_vez_por_chamada(
+            self, api, sample_event, monkeypatch):
+        """O índice da EP é montado por evento, não por membro do cluster.
+
+        Refazê-lo dentro do laço custa O(células do evento) a cada volta: com
+        1.500 sites e um cluster de 140 membros o gráfico levava segundos.
+        """
+        import core.technology as technology
+
+        site_count = 1500
+        member_ids = [f"SITE-{index:04d}" for index in range(140)]
+        event = {
+            **sample_event,
+            "id": "large-event-cluster-budget",
+            "integration": {"pm_tasks": [{"task_id": 1, "tech": "4G"}]},
+            "sites": [
+                {
+                    "id": f"SITE-{index:04d}", "name": f"SITE{index:04d}",
+                    "lat": -23.0 + index / 100000, "lng": -46.0 + index / 100000,
+                    "cells": [{"id": f"SITE{index:04d}-{suffix}", "tech": "4G"}
+                              for suffix in "ABC"],
+                }
+                for index in range(site_count)
+            ],
+            "clusters": [{"id": "big", "name": "Big", "site_ids": member_ids}],
+        }
+        database.save_event(event)
+        for site_id in member_ids[:5]:
+            _insert_cell_kpi(event["id"], site_id, f"{site_id[5:]}-A", "4G", 7.0)
+
+        builds = []
+        original = technology.build_family_index
+        monkeypatch.setattr(
+            technology, "build_family_index",
+            lambda config: (builds.append(1), original(config))[1])
+        monkeypatch.setattr(
+            api_module, "build_family_index", technology.build_family_index)
+
+        result = api.get_kpi_series(
+            event["id"], member_ids[0], "utilization_dl", minutes=0,
+            scope="cluster", scope_id="big")
+
+        assert result["ok"] is True
+        assert len(builds) == 1, f"inventário remontado {len(builds)}x"
 
 
 class TestSiteMerge:
@@ -993,6 +1042,8 @@ class TestKpiSeriesFamilySemantics:
         rows = api._collect_cell_rows(
             event["id"], ["1774059"], "utilization", minutes=0)
 
+        assert rows[0].pop("family") == "5G"
+        assert rows[0].pop("family_source") == "measurement"
         assert rows == [{
             "cell_id": "18NLRJPE41A",
             "timestamp": "2026-08-19T12:00:00Z",
@@ -2094,3 +2145,32 @@ class TestKpiOverviewMulti:
 
         assert result["ok"] is False
         assert result["series"] == []
+
+
+def test_ep_vence_nome_task_e_banda_em_todos_os_escopos(api, sample_event):
+    event = {**sample_event, 'id':'ep-authority',
+        'integration':{'pm_tasks':[{'task_id':1,'tech':'4G'}]},
+        'sites':[{'id':'A','name':'EP','lat':-23.,'lng':-46.,'cells':[
+            {'id':'5G-X','tech':'4G','frequency':'3500','earfcn':'123'},
+            {'id':'neutral','tech':'5G','frequency':'2100','earfcn':'124'}]}],
+        'clusters':[{'id':'ep-cluster','name':'EP','site_ids':['A']}]}
+    database.save_event(event)
+    _insert_cell_kpi(event['id'],'A','5G-X','5G_NRDUCELL',17.)
+    _insert_cell_kpi(event['id'],'A','neutral','4G',42.)
+    layout = api.get_site_layout(event['id'])
+    assert layout[0]['tech_families'] == ['4G','5G']
+    assert {c['id']:c['family'] for c in layout[0]['cells']} == {'5G-X':'4G','neutral':'5G'}
+    assert [c['id'] for c in api.get_site_cells(event['id'],'A','5G')] == ['neutral']
+    assert [c['id'] for c in api.get_event_cells(event['id'],'4G')] == ['5G-X']
+    for family, value, cid in [('4G',17.,'5G-X'),('5G',42.,'neutral')]:
+        status = api.get_site_status(event['id'],technology_family=family)
+        assert status[0]['metric_value'] == value
+        result = api.get_kpi_series(event['id'],'A','utilization_dl',minutes=0,technology_family=family)
+        assert result['ok']
+        assert result['cells_data'][cid] == [value]
+        assert result['cell_families'][cid] == family
+        avg = api.get_kpi_series(event['id'],'A','utilization_dl',minutes=0,cell_id='__media__',technology_family=family)
+        assert avg['series'][0]['technology'] == family
+        overview = api.get_kpi_overview(event['id'],'site','A',family,minutes=0)
+        assert overview['ok']
+    assert database.get_kpi_series(event['id'],'A','utilization_dl',0)[0]['technology'] == '5G_NRDUCELL'

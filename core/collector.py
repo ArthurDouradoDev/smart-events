@@ -57,6 +57,7 @@ from core.session_renew import (
     EXIT_GENERIC_FAIL,
     EXIT_NEEDS_INTERACTIVE,
 )
+from core.technology import resolve_cell_family
 
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
@@ -327,19 +328,6 @@ class BaseCollector(ABC):
                 pass
                 
         return False
-
-    @staticmethod
-    def _normalize_cell_technology(value, cell_id: str = "") -> Optional[str]:
-        text = f"{value or ''} {cell_id or ''}".upper()
-        has_4g = bool(re.search(r"(^|[^A-Z0-9])(?:4G|LTE)([^A-Z0-9]|$)", text))
-        has_5g = bool(re.search(r"(^|[^A-Z0-9])(?:5G|NR|NCI)([^A-Z0-9]|$)", text))
-        if has_4g and has_5g:
-            return None
-        if has_4g:
-            return "4G"
-        if has_5g:
-            return "5G"
-        return None
 
     @staticmethod
     def _normalize_task_technology(value) -> Optional[str]:
@@ -979,13 +967,20 @@ class HttpCollector(BaseCollector):
         # Avisos que valem uma vez por sessão — repetidos a cada minuto viram ruído.
         self._prb_avail_warned: set[str] = set()
         self._period_divergence_warned: set = set()
+        legacy_families: dict[str, list[str]] = {}
         for site in event_config.get("sites", []):
             for cell in site.get("cells", []):
                 c_id = cell if isinstance(cell, str) else cell.get("id")
                 if c_id:
                     self._cell_to_site[c_id] = site["id"]
-                    tech = self._normalize_cell_technology(cell.get("tech") if isinstance(cell, dict) else None, c_id)
-                    self._cell_metadata[c_id] = {"site_id": site["id"], "technology": tech}
+                    resolution = resolve_cell_family(cell)
+                    tech = resolution.family
+                    if resolution.source != "ep":
+                        legacy_families.setdefault(resolution.source, []).append(c_id)
+                    self._cell_metadata[c_id] = {
+                        "site_id": site["id"], "technology": tech,
+                        "family": tech, "family_source": resolution.source,
+                    }
                     if isinstance(cell, dict) and "obj_no" in cell:
                         obj_no = int(cell["obj_no"])
                         self._static_obj_nos.add(obj_no)
@@ -994,6 +989,12 @@ class HttpCollector(BaseCollector):
                             "site_id": site["id"],
                             "technology": tech,
                         }
+        # Num evento legado inteiro isto seria uma linha por célula: resume por
+        # origem, com amostra, seguindo a mesma regra dos avisos acima.
+        for source, cell_ids in sorted(legacy_families.items()):
+            logger.warning(
+                "Tecnologia legado: %d célula(s) classificada(s) por %s (ex.: %s)",
+                len(cell_ids), source, ", ".join(cell_ids[:5]))
 
     @staticmethod
     def _normalize_session_host(base_url: str) -> str:
@@ -1674,8 +1675,15 @@ class HttpCollector(BaseCollector):
             task_family = _TECH_FAMILY.get(technology)
             if static and static.get("technology") in (task_family, None):
                 known = static
+            elif static:
+                logger.warning("Conflito task × EP: task=%s célula=%s família_task=%s família_ep=%s", task_id, static["cell_id"], task_family, static.get("technology"))
         if known:
-            return known
+            metadata = self._cell_metadata.get(known["cell_id"], {})
+            family = metadata.get("family")
+            if family and family != _TECH_FAMILY.get(technology):
+                logger.warning("Conflito task × EP: task=%s célula=%s família_task=%s família_ep=%s", task_id, known["cell_id"], _TECH_FAMILY.get(technology), family)
+                return None
+            return {**known, "technology": technology}
         if not technology:
             return None
         # O nome do objeto contém diversos atributos. Consideramos somente o valor
@@ -1683,19 +1691,25 @@ class HttpCollector(BaseCollector):
         # matching amplo por substring de site/célula.
         match = re.search(r"Cell Name\s*=\s*([^,]+)", obj_name or "", re.I)
         candidate = self._normalized_name(match.group(1) if match else obj_name)
-        # A tecnologia da célula é inferida do NOME (``_normalize_cell_technology``) e nem todo
-        # OSS a carrega ali: em SP as células chamam-se ``4G-SPSMG7-18-C`` (token explícito),
-        # no OSS de Curitiba chamam-se ``18NLCTAL01GI`` — sem 4G/5G no nome, a tecnologia sai
-        # ``None`` e o casamento por igualdade com a tecnologia da task nunca acontecia: 100%
-        # dos objetos ficavam não mapeados. Célula de tecnologia DESCONHECIDA é candidata a
-        # qualquer task (quem define a tecnologia do dado é a task consultada); célula de
-        # tecnologia CONHECIDA e diferente continua fora — essa é a troca silenciosa de 4G por
-        # 5G que o gate existe para impedir.
+        # Nem todo OSS carrega a tecnologia no nome: em SP as células chamam-se
+        # ``4G-SPSMG7-18-C`` (token explícito), no OSS de Curitiba ``18NLCTAL01GI`` — sem a
+        # declaração da EP a família sai ``None`` e o casamento por igualdade com a tecnologia
+        # da task nunca acontecia: 100% dos objetos ficavam não mapeados. Célula de família
+        # DESCONHECIDA é candidata a qualquer task (quem define a tecnologia do dado é a task
+        # consultada); família CONHECIDA e diferente fica fora e vira diagnóstico — é a troca
+        # silenciosa de 4G por 5G que o gate existe para impedir.
         task_family = _TECH_FAMILY.get(technology)
-        choices = [cell_id for cell_id, metadata in self._cell_metadata.items()
-                   if (metadata.get("technology") is None
-                       or metadata.get("technology") == task_family)
-                   and self._normalized_name(cell_id) == candidate]
+        choices = []
+        for cell_id, metadata in self._cell_metadata.items():
+            if self._normalized_name(cell_id) != candidate:
+                continue
+            family = metadata.get("technology")
+            if family in (None, task_family):
+                choices.append(cell_id)
+            else:
+                logger.warning(
+                    "Conflito task × EP: task=%s célula=%s família_task=%s família_ep=%s",
+                    task_id, cell_id, task_family, family)
         if len(choices) != 1:
             return None
         cell_id = choices[0]

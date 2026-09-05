@@ -140,3 +140,31 @@ def test_serie_sem_familia_nao_usa_a_cor_do_4g():
         assert unknown["color"] != "#388BFD"
 
     _run_browser("unknown", assertion)
+
+
+def test_grafico_usa_familias_da_ep_em_nomes_contraditorios():
+    def assertion(page):
+        _open_average_chart(page)
+        page.evaluate("""async () => {
+            const {default: API} = await import('/js/bridge.js');
+            const {default: State} = await import('/js/state.js');
+            API.getKpiSeries = async () => ({ok:true, labels:['2026-09-04T12:00:00Z'], values:[], series:[],
+                cells_data:{'5G-X':[10], 'neutral':[20]}, cell_families:{'5G-X':'4G','neutral':'5G'}, gaps:[], reasons:{}});
+            State.set('timeWindow', 0);
+        }""")
+        page.locator('#cell-selector').select_option('__all__')
+        page.wait_for_function("""() => Chart.getChart(document.getElementById('popup-kpi-chart'))?.data.datasets.some(d=>d.label.includes('5G-X'))""")
+        assert set(page.evaluate("() => Chart.getChart(document.getElementById('popup-kpi-chart')).data.datasets.map(d=>d.label)")) == {'4G · 5G-X','5G · neutral'}
+    _run_browser('default', assertion)
+
+
+def test_mapa_preserva_tecnologia_explicita_quando_falta_frequencia():
+    source = (Path(__file__).resolve().parents[1] / 'frontend/js/map.js').read_text(encoding='utf-8')
+    function = source[source.index('function _resolveTechAndFreq('):source.index('function _getZoomScale(')]
+    central = (Path(__file__).resolve().parents[1] / 'server_frontend/index.html').read_text(encoding='utf-8')
+    central = central[central.index('    function resolveTechFreqFromId('):central.index('    // ── Ferramentas de polígono')]
+    def assertion(page):
+        for script, name in [(function, '_resolveTechAndFreq'), (central, 'resolveTechFreqFromId')]:
+            result = page.evaluate('([script,name]) => new Function(script + `; return ${name}({id:"5G-X-3500",tech:"4G"})`)()', [script,name])
+            assert result == {'tech':'4G','freq':'3500'}
+    _run_browser('default', assertion)

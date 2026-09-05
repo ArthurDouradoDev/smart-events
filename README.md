@@ -383,3 +383,23 @@ O SmartEvents plota os setores das antenas celulares (pétalas) no mapa Leaflet 
 ### Regras de Negócio e Segurança
 *   **Sanitização de Dados Pessoais:** Por questões de segurança e privacidade (LGPD), informações críticas como o IMSI (ID de chip do cliente) do VIP cadastrado no JSON nunca são expostos no frontend JavaScript. A higienização é realizada diretamente na API Python ([api.py](api/api.py)) antes que o objeto do evento seja serializado para a interface gráfica.
 *   **Padrões de Estado JS:** O frontend é inteiramente desacoplado. Módulos como [map.js](frontend/js/map.js) e [kpi.js](frontend/js/kpi.js) não importam um ao outro; em vez disso, comunicam-se de forma assíncrona por meio do barramento de eventos em [state.js](frontend/js/state.js).
+
+
+### Tecnologia declarada na EP
+
+Novas importações de EP exigem a coluna `tecnologia` preenchida em todas as linhas.
+Use `4G` ou `LTE` para células 4G e `5G` ou `NR` para células 5G; o sistema salva
+`4G`/`5G` em `cell.tech` e `cell.ep.technology`. Os aliases de cabeçalho `tech`,
+`technology`, `tecnologia móvel` e `rat` continuam aceitos.
+
+Exemplo: `cellname=5G-X, tecnologia=4G` pertence a 4G, mesmo com banda 3500.
+`cellname=CELULA-A, tecnologia=NR` pertence a 5G, mesmo com banda 2100.
+Banda e DLEARFCN descrevem frequência/portadora e não determinam a família nas novas EPs.
+Use o arquivo [ep_default.xlsx](ep_default.xlsx), que já inclui `tecnologia=4G` no exemplo.
+
+Coluna ausente, valor vazio/inválido ou uma célula duplicada com tecnologias diferentes
+rejeitam o arquivo inteiro. A mensagem informa o total de erros e até 20 linhas afetadas.
+Eventos já salvos continuam abrindo por compatibilidade, com origem de classificação nos
+metadados e aviso `Tecnologia legado` no log; nenhuma medição histórica é regravada.
+A tecnologia da task continua selecionando os contadores e fórmulas NR Cell/NR DU Cell.
+Tasks de outra família não são associadas à célula e geram diagnóstico `Conflito task × EP`.

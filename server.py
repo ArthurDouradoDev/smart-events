@@ -15,6 +15,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 import uvicorn
 from core import event_package
+from core.technology import normalize_ep_technology
 from core.paths import data_dir, resource_dir
 from core.seed import seed_operator_data
 
@@ -88,31 +89,6 @@ def _normalize_earfcn(value) -> Optional[str]:
     text = str(value).strip()
     match = re.fullmatch(r"(\d+)(?:[.,]0+)?", text)
     return str(int(match.group(1))) if match else None
-
-
-def _normalize_technology(value, frequency: Optional[str]) -> Optional[str]:
-    """Converte aliases comuns para as famílias visuais do mapa.
-
-    A coluna de tecnologia é opcional. Sem ela, mantém a inferência histórica
-    do frontend: 3500 MHz é 5G e as demais bandas conhecidas são 4G.
-    """
-    if not _is_missing_cell_value(value):
-        token = re.sub(r"[^A-Z0-9]+", "", str(value).upper())
-        aliases = {
-            "2G": "2G", "GSM": "2G",
-            "3G": "3G", "WCDMA": "3G", "UMTS": "3G",
-            "4G": "4G", "LTE": "4G",
-            "5G": "5G", "NR": "5G", "NRCELL": "5G", "NRDUCELL": "5G",
-            "5GNRCELL": "5G", "5GNRDUCELL": "5G",
-        }
-        if token in aliases:
-            return aliases[token]
-
-    if frequency == "3500":
-        return "5G"
-    if frequency in {"700", "850", "1800", "2100", "2300", "2600"}:
-        return "4G"
-    return None
 
 
 def _normalize_event_site_flag(value) -> Optional[bool]:
@@ -274,6 +250,16 @@ async def parse_sites(file: UploadFile = File(...)):
         if missing:
             raise ValueError(f"Colunas obrigatórias ausentes no arquivo: {', '.join(missing)}")
 
+        if 'tech' not in df.columns:
+            raise ValueError("Coluna obrigatória ausente: tecnologia. Valores aceitos: 4G, LTE, 5G, NR.")
+
+        # A tecnologia é exigida apenas das linhas que realmente viram célula: as
+        # que o laço abaixo descarta (sem coordenada, sem id) nunca entraram na EP
+        # e não devem derrubar o arquivo inteiro. Os erros são acumulados e o
+        # arquivo é rejeitado antes de devolver qualquer site.
+        errors = []
+        declarations = {}
+
         # Group by site (enodebid)
         sites_dict = {}
         clusters_dict = {}  # nome do cluster -> set de site_ids (coluna opcional; §1 do plano)
@@ -308,6 +294,18 @@ async def parse_sites(file: UploadFile = File(...)):
             if not cell_id:
                 continue
 
+            raw_technology = row.get('tech')
+            technology = normalize_ep_technology(raw_technology)
+            declared = declarations.setdefault((site_id, cell_id), technology)
+            if not technology:
+                errors.append(
+                    f"linha {int(row_index) + 2}, célula {cell_id}, "
+                    f"valor {raw_technology!r}: tecnologia inválida")
+            elif declared != technology:
+                errors.append(
+                    f"linha {int(row_index) + 2}, célula {cell_id}, "
+                    f"valor {raw_technology!r}: duplicidade com tecnologias divergentes")
+
             site_name = str(row['nename']).strip() if not pd.isna(row.get('nename')) else site_id
 
             if site_id not in sites_dict:
@@ -331,7 +329,6 @@ async def parse_sites(file: UploadFile = File(...)):
             existing_cells = [c["id"] for c in sites_dict[site_id]["cells"]]
             if cell_id not in existing_cells:
                 frequency = _normalize_frequency(row.get('frequency'))
-                technology = _normalize_technology(row.get('tech'), frequency)
                 earfcn = _normalize_earfcn(row.get('earfcn')) if 'earfcn' in df.columns else None
                 ep_earfcn = (
                     str(row.get('earfcn')).strip()
@@ -377,6 +374,11 @@ async def parse_sites(file: UploadFile = File(...)):
                     if not cluster_name:
                         continue
                     clusters_dict.setdefault(cluster_name, set()).add(site_id)
+
+        if errors:
+            raise ValueError(
+                f"EP rejeitada: {len(errors)} erro(s). "
+                f"Valores aceitos: 4G, LTE, 5G, NR. " + "; ".join(errors[:20]))
 
         for site_id, flag in event_site_flags.items():
             if site_id in sites_dict:

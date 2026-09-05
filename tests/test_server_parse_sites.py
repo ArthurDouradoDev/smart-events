@@ -17,8 +17,16 @@ def _upload(csv_text: str) -> UploadFile:
     return UploadFile(file=io.BytesIO(csv_text.encode("utf-8")), filename="sites.csv")
 
 
-def _parse(csv_text: str) -> dict:
+def _parse_raw(csv_text: str) -> dict:
     return asyncio.run(server.parse_sites(file=_upload(csv_text)))
+
+
+def _parse(csv_text: str) -> dict:
+    # Unrelated parser fixtures use an explicit EP declaration by default.
+    lines = csv_text.splitlines()
+    if not set(lines[0].split(',')) & {"tech", "technology", "tecnologia", "rat"}:
+        lines = [lines[0] + ',tecnologia'] + [line + ',4G' for line in lines[1:] if line]
+    return _parse_raw('\n'.join(lines))
 
 
 _BASE_COLUMNS = "nename,cellname,cellid,latitude,longitude,azimuth,enodebid"
@@ -55,7 +63,7 @@ def test_coluna_cluster_ausente_nao_quebra_importacao():
         "id": "SITE1-A", "azimuth": 0.0, "beamwidth": 120.0,
     }
     assert cell["ep"] == {
-        "source_row": 2, "cellid": "SITE1-A", "cellname": "SITE1-A", "azimuth": 0.0,
+        "source_row": 2, "cellid": "SITE1-A", "cellname": "SITE1-A", "azimuth": 0.0, "technology": "4G",
     }
 
 
@@ -102,9 +110,9 @@ def test_valores_de_cluster_repetidos_nao_duplicam_o_site():
 
 def test_band_da_ep_vivo_vira_frequencia_e_tecnologia_sem_ler_coluna_auxiliar():
     csv_text = (
-        f"{_BASE_COLUMNS},band,\n"
-        "VIVO,VIVO-4G,VIVO-4G,-23.5,-46.6,0,111,1800,(L1)\n"
-        "VIVO,VIVO-5G,VIVO-5G,-23.5,-46.6,120,111,3500,(NR1)\n"
+        f"{_BASE_COLUMNS},band,tecnologia\n"
+        "VIVO,VIVO-4G,VIVO-4G,-23.5,-46.6,0,111,1800,4G\n"
+        "VIVO,VIVO-5G,VIVO-5G,-23.5,-46.6,120,111,3500,5G\n"
     )
 
     cells = _parse(csv_text)["sites"][0]["cells"]
@@ -135,9 +143,8 @@ def test_aliases_de_frequencia_sao_aceitos(header):
 
 @pytest.mark.parametrize("raw,expected", [
     ("LTE", "4G"), ("4G", "4G"), ("NR", "5G"), ("5G_NRDUCELL", "5G"),
-    ("WCDMA", "3G"), ("GSM", "2G"),
 ])
-def test_coluna_de_tecnologia_opcional_tem_precedencia_sobre_a_banda(raw, expected):
+def test_coluna_de_tecnologia_tem_precedencia_sobre_a_banda(raw, expected):
     csv_text = (
         f"{_BASE_COLUMNS},band,tecnologia\n"
         f"SITE1,SITE1-A,SITE1-A,-23.5,-46.6,0,111,2100,{raw}\n"
@@ -149,16 +156,16 @@ def test_coluna_de_tecnologia_opcional_tem_precedencia_sobre_a_banda(raw, expect
     assert cell["tech"] == expected
 
 
-def test_valores_opcionais_invalidos_sao_ignorados():
+def test_tecnologia_invalida_rejeita_importacao():
     csv_text = (
         f"{_BASE_COLUMNS},band,tech\n"
         "SITE1,SITE1-A,SITE1-A,-23.5,-46.6,0,111,desconhecida,sem-tecnologia\n"
     )
 
-    cell = _parse(csv_text)["sites"][0]["cells"][0]
-
-    assert "frequency" not in cell
-    assert "tech" not in cell
+    with pytest.raises(server.HTTPException) as exc:
+        _parse(csv_text)
+    assert "linha 2" in exc.value.detail
+    assert "sem-tecnologia" in exc.value.detail
 
 
 def test_dlearfcn_da_ep_e_gravado_na_celula():
@@ -304,3 +311,54 @@ def test_coluna_dentro_convive_com_a_coluna_de_cluster():
     assert sites["111"]["is_event_site"] is True
     assert sites["222"]["is_event_site"] is False
     assert result["clusters"][0]["site_ids"] == ["111", "222"]
+
+
+@pytest.mark.parametrize("suffix,value", [("", ""), (",tecnologia", ","), (",tecnologia", ",GSM")])
+def test_nova_ep_rejeita_tecnologia_ausente_ou_invalida(suffix, value):
+    with pytest.raises(server.HTTPException) as exc:
+        _parse_raw(f"{_BASE_COLUMNS}{suffix}\nS,5G-X,001,-23,-46,0,001{value}\n")
+    assert exc.value.status_code == 400
+    assert "4G, LTE, 5G, NR" in exc.value.detail
+
+
+def test_ep_rejeita_duplicidade_contraditoria_com_amostra_limitada():
+    rows = ["S,C,001,-23,-46,0,001,4G"] + ["S,C,001,-23,-46,0,001,5G"] * 25
+    with pytest.raises(server.HTTPException) as exc:
+        _parse_raw(f"{_BASE_COLUMNS},tecnologia\n" + "\n".join(rows))
+    assert "25 erro(s)" in exc.value.detail
+    assert "linha 3" in exc.value.detail and "linha 27" not in exc.value.detail
+
+
+@pytest.mark.parametrize("header", ["tech", "technology", "tecnologia", "tecnologia móvel", "rat"])
+def test_ep_declarada_vence_nome_e_banda(header):
+    cell = _parse_raw(f"{_BASE_COLUMNS},band,{header}\nS,5G-X,001,-23,-46,0,001,3500,LTE\n")["sites"][0]["cells"][0]
+    assert cell["tech"] == cell["ep"]["technology"] == "4G"
+
+
+@pytest.mark.parametrize("junk", [
+    "S,SEM-COORD,002,,,0,002,",     # sem latitude/longitude
+    ",,,,,,,",                      # linha em branco no meio da planilha
+])
+def test_linha_descartada_pelo_parser_nao_exige_tecnologia(junk):
+    """Só as linhas que viram célula precisam declarar tecnologia.
+
+    Exigir da linha que o parser já descarta faria uma EP válida com sobras no
+    fim da planilha parar de importar, sem nenhum ganho de contrato.
+    """
+    result = _parse_raw(
+        f"{_BASE_COLUMNS},tecnologia\n"
+        "S,CELULA-A,001,-23,-46,0,001,4G\n"
+        f"{junk}\n"
+    )
+
+    assert result["ok"] is True
+    assert [cell["id"] for cell in result["sites"][0]["cells"]] == ["CELULA-A"]
+
+
+def test_template_xlsx_importa_com_tecnologia_canonica():
+    from pathlib import Path
+    upload = UploadFile(file=io.BytesIO((Path(__file__).parents[1] / 'ep_default.xlsx').read_bytes()), filename='ep_default.xlsx')
+    result = asyncio.run(server.parse_sites(file=upload))
+    assert result['ok'] and len(result['sites']) == 1
+    assert result['sites'][0]['cells'][0]['tech'] == '4G'
+    assert result['sites'][0]['cells'][0]['ep']['technology'] == '4G'

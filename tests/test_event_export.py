@@ -139,6 +139,9 @@ def test_complete_export_has_manifest_all_datasets_and_no_secrets(tmp_db, sample
         assert len(kpis) == 3
         assert kpis[0]["site_name_ep"] == "SITE EP"
         assert kpis[0]["frequency_mhz"] == "1800"
+        contradictory = next(row for row in kpis if row["technology"] == "5G_NRCELL")
+        assert contradictory["technology_family"] == "4G"
+        assert contradictory["technology_ep"] == "4G"
         alarms = archive.read("dados/alarmes.csv").decode("utf-8-sig")
         assert "'=FORMULA" in alarms
     assert job["result"]["records"] == 6

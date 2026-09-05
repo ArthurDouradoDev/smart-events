@@ -1,7 +1,7 @@
 # Plano — Tecnologia da EP como fonte da verdade e disponibilidade por site
 
 **Data:** 2026-09-04  
-**Status:** planejado  
+**Status:** implementação 2 concluída em 2026-09-04
 **Tipo:** evolução funcional e consolidação de contrato  
 **Escopo:** importação da EP, domínio de tecnologia, coleta Monitoring, APIs de sites/KPIs,
 dashboard, Servidor Central, exportação, compatibilidade e testes
@@ -434,3 +434,37 @@ presença de dados da métrica sem confundir inventário, ausência de tráfego 
 No caso da imagem de referência, `RJ9991` deverá permanecer identificado como site 4G/5G, o `4G`
 ficará normal, o `5G` ficará esmaecido e riscado, e o usuário poderá descobrir pelo texto acessível
 que o motivo é `5G sem dado nesta métrica`.
+
+
+## Entrega da implementação 2 — 2026-09-04, auditada e fechada em 2026-09-05
+
+- Resolvedor compartilhado em `core/technology.py`: EP antes da medição e das heurísticas legadas.
+- Novas importações exigem tecnologia válida e rejeitam duplicidades contraditórias antes de montar os sites.
+- Coletor limita a associação por família e registra origem/falhas de compatibilidade, mantendo a tecnologia da task nas medições.
+- Layout, status, filtros, portadoras, clusters, séries e Visão Geral usam a família da EP; séries incluem `cell_families`.
+- Mapa, gráfico detalhado e editor de clusters do Servidor Central respeitam declarações explícitas.
+- Template, README, instruções do operador e contrato de exportação atualizados.
+- Sem migração ou regravação de KPIs históricos. A implementação 1 não foi ampliada nesta entrega.
+
+### Correções da auditoria contra este plano (2026-09-05)
+
+- **Três testes de Playwright quebrados** pelo bump de versão dos módulos: importavam `map.js` com
+  a query de cache antiga e carregavam uma segunda instância, com o mapa nulo. Agora derivam o
+  especificador de `app.js`.
+- **Orçamento de leitura violado por CPU, não por consulta** (§"Riscos": *poll fica mais lento*).
+  O índice do inventário era remontado a cada membro. `build_family_index(config)` foi separado de
+  `annotate_rows(rows, index)` e o índice desce por parâmetro: série de cluster com 140 membros em
+  evento de 1.500 sites, 4,1 s → 0,05 s. `_single_configured_family` foi içada de todos os laços
+  (`_site_carriers` passou a receber a família resolvida): `get_sites` em evento legado de 1.500
+  sites, 51,7 s → 0,49 s. Os dois casos ganharam teste de orçamento, validado por mutação.
+- **Validação de importação severa demais** (§"Riscos": *EPs antigas deixam de importar*): a
+  checagem cobrava tecnologia até das linhas que o parser descarta. Passou para o mesmo laço que
+  monta os sites, cobrando só das linhas que viram célula, mantendo a rejeição do arquivo inteiro
+  antes de devolver qualquer site.
+- Órfãos criados pela mudança removidos (`server._normalize_technology`,
+  `BaseCollector._normalize_cell_technology`) e imports de `core.technology` reposicionados.
+
+Validação: suíte completa executada até o fim (**1.004 passed, 10 skipped**) — domínio,
+importação, API (incluindo os orçamentos com 1.500 sites), coleta, exportação, banco, fórmulas,
+contrato de empacotamento e Playwright. Não inclui conexão ao OSS real nem geração de um novo
+executável de distribuição.

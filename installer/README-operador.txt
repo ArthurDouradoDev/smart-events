@@ -15,3 +15,13 @@ secao 6-7). Para conferir se este instalador foi assinado digitalmente: clique c
 no Setup.exe, Propriedades, aba "Assinaturas Digitais". Sem assinatura, o SmartScreen do Windows
 pode exibir um aviso de editor desconhecido; isso nao indica adulteracao, apenas ausencia de
 certificado nesta build.
+
+
+TECNOLOGIA NA EP
+Ao importar uma EP nova, preencha a coluna tecnologia em todas as linhas:
+4G ou LTE para 4G; 5G ou NR para 5G. O modelo ep_default.xlsx inclui o exemplo 4G.
+Exemplos: célula 5G-X com tecnologia 4G continua 4G; célula CELULA-A com NR é 5G.
+Banda e DLEARFCN não substituem a tecnologia declarada. Dados ausentes, inválidos
+ou duplicidades com tecnologias divergentes rejeitam a importação completa;
+consulte as linhas indicadas na mensagem de erro e corrija a EP.
+Eventos antigos já salvos continuam disponíveis por fallback legado.

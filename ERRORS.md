@@ -1376,3 +1376,69 @@ posição do marcador (DOM puro), não "o `renderSites` parou de repintar", que 
 `test_zoom_programatico_tambem_permanece` registrado acima. E: **antes de atribuir uma falha da
 suíte completa a uma mudança em curso, reproduzi-la com `git stash`** — aqui a falha era idêntica
 sem nenhuma linha da Fase 3.
+
+## 2026-09-05 — Três armadilhas na implementação 2 da tecnologia da EP
+
+Achados ao auditar a entrega contra o plano. Os três passavam pela suíte que a sessão anterior
+declarou verde — dois porque nenhum teste media o caminho caro, um porque a suíte inteira nunca
+tinha sido rodada até o fim.
+
+### 1. Bump de versão do módulo quebrou três testes de Playwright (CORRIGIDO)
+
+**O que acontece:** `test_frontend_collection_ui.py` (2 testes) e `test_frontend_site_render.py`
+(1 teste) falhavam com `fitBounds` nulo e `Cannot read properties of null (reading 'addLayer')`.
+
+**Causa raiz:** os testes faziam `await import('/js/map.js?v=20260903-site-poll-r1')` com a query
+antiga fixa no código. `app.js` passou a importar `?v=20260904-ep-authority-r1`. Em ESM a query
+faz parte da chave do módulo: os testes carregavam uma **segunda instância** de `map.js`, com
+`_map` ainda nulo, em vez do módulo que a página inicializou.
+
+**Correção aplicada:** cada arquivo lê o especificador do próprio `app.js`
+(`MAP_MODULE = "/js/" + re.search(r'from "\./(map\.js[^"]*)"', app_js)...`) e o passa como
+argumento de `page.evaluate`. O bump seguinte não quebra mais nada.
+
+**Regra:** teste que importa um módulo do frontend por URL não pode repetir a query de cache à
+mão — tem de derivá-la de quem realmente importa o módulo em produção. Duplicar a versão cria um
+segundo módulo silencioso, e o sintoma (estado nulo) não aponta para a causa.
+
+### 2. `annotate_rows(rows, config)` remontava o inventário a cada membro (CORRIGIDO)
+
+**O que acontece:** a série de um cluster chamava `annotate_rows` uma vez por seleção, e cada
+chamada varria todos os sites e células do evento resolvendo família com regex.
+
+**Como foi medido:** evento de 1.500 sites × 3 células. Uma chamada custa ~24 ms; um cluster de
+140 membros fazia 140 chamadas → **4,1 s** só para rotular linhas, sem nenhuma consulta a mais ao
+banco. O plano pedia "índices em memória", e a leitura em lote estava correta — o custo era todo
+de CPU repetida.
+
+**Correção aplicada:** `build_family_index(config)` separado de `annotate_rows(rows, index)`. O
+índice é montado uma vez em `get_kpi_series`/`_build_site_status` e desce por parâmetro `index=`.
+`_site_series_by_family` e `_cluster_series_by_family` passaram a **juntar as linhas de todos os
+membros antes** de anotar, em vez de anotar dentro do laço. 4,1 s → **0,05 s**.
+
+### 3. `_single_configured_family` virou O(inventário) e continuou dentro de laços (CORRIGIDO)
+
+**O que acontece:** `get_sites` num evento **legado** (células sem `tech`, nome neutro, sem
+frequência) levava **51,7 s** com 1.500 sites.
+
+**Causa raiz:** a função ganhou uma varredura de todas as células do evento para descobrir a
+família declarada. Ela é usada como fallback no padrão `cell.get("family") or
+_single_configured_family(config)` — que **curto-circuita** quando a célula tem família. Com EP
+declarada nunca chega lá; com evento legado, `family` é `None` em toda célula e o fallback dispara
+por célula, dentro de `_site_carriers`, que por sua vez roda por site: O(células²).
+
+**Por que a suíte não pegou:** o teste de orçamento existente nomeia as células `4G-SITE0001-A`.
+O `4G` no nome resolve a família por `legacy_id`, o `or` curto-circuita, e o caminho caro nunca
+era executado. O teste passava em 0,2 s enquanto o cenário vizinho levava 51 s.
+
+**Correção aplicada:** toda chamada içada para fora dos laços; `_site_carriers(cells, config)`
+virou `_site_carriers(cells, configured_family)`, recebendo o valor que `_build_site_layout` já
+tinha calculado. 51,7 s → **0,49 s**. O teste de orçamento foi parametrizado com um nome de célula
+neutro (`ABC{:04d}A`), e a mutação confirma: com o código antigo essa variante falha em 16,2 s e a
+variante `4G-` continua passando.
+
+**Regra (vale para os itens 2 e 3):** ao trocar um predicado barato por um que varre o inventário,
+procurar **todos os laços que já o chamavam** — o custo novo se multiplica onde o antigo não doía.
+E um teste de orçamento só protege o caminho que os seus **dados** exercitam: se o fixture resolve
+a família pelo nome, ele nunca mede o fallback. Parametrizar o fixture pelo que decide o caminho,
+não só pelo tamanho.

@@ -1089,12 +1089,14 @@ async function _refreshChart(arg) {
   } else if (cellId === "__all__" && cellsData && Object.keys(cellsData).length > 0) {
     const cellIds = Object.keys(cellsData).sort();
 
-    const mixedFamilies = new Set(cellIds.map(_cellFamilyFromId).filter(Boolean)).size > 1;
+    // Compatibility inference applies only to payloads without the backend map.
+    const familyForCell = cid => data.cell_families ? data.cell_families[cid] : _cellFamilyFromId(cid);
+    const mixedFamilies = new Set(cellIds.map(familyForCell).filter(Boolean)).size > 1;
     cellIds.forEach((cid, index) => {
       const color = CELL_COLORS[index % CELL_COLORS.length];
       const cellValues = cellsData[cid];
       const adjustedCellValues = _applyGaps(cellValues, gaps);
-      const family = _cellFamilyFromId(cid);
+      const family = familyForCell(cid);
 
       datasets.push({
         label: mixedFamilies && family ? `${family} · ${cid}` : cid,

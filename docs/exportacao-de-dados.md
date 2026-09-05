@@ -164,3 +164,14 @@ marcados como reconstruídos em vez de receber valores inventados.
 
 Falha ou cancelamento remove o staging e não publica ZIP parcial. O status da última exportação
 concluída só é apresentado enquanto o arquivo final ainda existir no computador.
+
+
+## Família autoritativa da EP
+
+Em `kpis.csv`, `technology` mantém o tipo da task (`4G`, `5G_NRCELL` ou
+`5G_NRDUCELL`), inclusive para escolher a conversão de unidade. `technology_ep`
+contém a declaração do inventário e `technology_family` prefere essa declaração,
+localizando a célula por site e identificador. Sem declaração, usa a tecnologia
+persistida e depois o fallback legado. Assim, uma medição histórica de task 5G
+associada a uma célula declarada 4G mantém `technology=5G_NRCELL` e apresenta
+`technology_family=4G`. A exportação não modifica o banco nem as fórmulas.

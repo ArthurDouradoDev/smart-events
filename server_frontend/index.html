@@ -896,6 +896,7 @@
                 <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M17 8l-5-5-5 5M12 3v12"/>
               </svg>
               <p>Arraste planilha Excel (.xlsx, .xls) ou CSV aqui</p>
+              <p>Coluna tecnologia obrigatória: 4G/LTE ou 5G/NR em cada célula.</p>
               <span>ou clique para selecionar do computador</span>
               <input type="file" id="file-input" class="file-input" accept=".xlsx,.xls,.csv,.tsv,.txt">
             </div>
@@ -1907,7 +1908,7 @@
 
     function resolveTechFreqFromId(cellOrId) {
       const cell = (cellOrId && typeof cellOrId === "object") ? cellOrId : { id: cellOrId };
-      let tech = String(cell.tech || "").toUpperCase() || null;
+      let tech = String(cell.family || cell.tech || cell.ep?.technology || "").toUpperCase() || null;
       let freq = cell.frequency ?? cell.freq ?? null;
       freq = freq == null ? null : String(freq).match(/\d{3,4}/)?.[0] || null;
       const idUpper = String(cell.id || "").toUpperCase();
@@ -2263,7 +2264,7 @@
         ${groups.map((group, groupIndex) => {
           const groupCells = group.sites.flatMap(site => siteCellIds(site));
           const groupSelected = group.sites.reduce((sum, site) => sum + selectedCellIds(cluster, site).length, 0);
-          const families = [...new Set(groupCells.map(cell => resolveTechFreqFromId(cell).tech).filter(Boolean))];
+          const families = [...new Set(group.sites.flatMap(site => site.cells || []).map(cell => resolveTechFreqFromId(cell).tech).filter(Boolean))];
           const groupKey = group.sites.map(site => String(site.id)).sort().join('|');
           return `<details class="cluster-tree-site" data-group="${groupIndex}" data-group-key="${escapeHTML(groupKey)}" ${q || expandedGroupKeys.has(groupKey) ? 'open' : ''}>
             <summary>
@@ -2277,7 +2278,7 @@
                 <label class="cluster-tree-cell">
                   <input type="checkbox" data-role="cell" data-site-id="${escapeHTML(String(site.id))}" data-cell-id="${escapeHTML(cellId)}" ${selectedCellIds(cluster, site).includes(cellId) ? 'checked' : ''}>
                   <span>${escapeHTML(cellId)}</span>
-                  <span class="cluster-tech-pill">${escapeHTML(resolveTechFreqFromId(cellId).tech || '—')}</span>
+                  <span class="cluster-tech-pill">${escapeHTML(resolveTechFreqFromId((site.cells || []).find(cell => (typeof cell === 'string' ? cell : cell.id) === cellId) || cellId).tech || '—')}</span>
                 </label>`)).join('')}
             </div>
           </details>`;
