@@ -101,3 +101,6 @@ docs/references/npsmart/NPSmart Tim_files/
 # --- Arquivos a ser ignorados
 untracked/
 csvs_reference/
+
+# --- Pacotes gerados que excedem o limite de 100MB do GitHub ---
+outputs/roadshow_app_20260815/SmartEvents_RoadShow.zip
